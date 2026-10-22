@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - "DEV_MODE=false"
+      - "DMS_DB_PATH=/app/data/dms.db"
+    volumes:
+      - "dms_data:/app/data"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    environment:
+      - "KEYCLOAK_ADMIN=admin"
+      - "KEYCLOAK_ADMIN_PASSWORD=changeme"
+    ports:
+      - "8080:8080"
+    command: start-dev
+    volumes:
+      - "keycloak_data:/opt/keycloak/data"
+    restart: unless-stopped
+
+volumes:
+  dms_data: {}
+  keycloak_data: {}
