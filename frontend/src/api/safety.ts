@@ -29,4 +29,6 @@ export const safetyApi = {
 
   getTrends: () =>
     api.get("/p1/safety/trends").then((r: any) => r.data),
+  getDeadlines: (daysAhead?: number) =>
+    api.get("/p1/deadlines", { params: { days_ahead: daysAhead ?? 30 } }).then((r: any) => r.data),
 };
