@@ -1,7 +1,7 @@
 """P1 API routes - Safety, ROC, Aircraft."""
 from fastapi import APIRouter, HTTPException, Request
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import json
 from collections import Counter
@@ -1635,5 +1635,111 @@ async def update_dg_matrix(mid: str, update: DGResponsibilityMatrixUpdate, reque
         cursor = await db.execute("SELECT * FROM dg_responsibility_matrix WHERE matrix_id = ?", (mid,))
         row = await cursor.fetchone()
         return DGResponsibilityMatrixResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+# ==================== DEADLINE / ESCALATION ENGINE ====================
+
+@router.get("/deadlines", response_model=dict)
+async def get_deadlines(request: Request, days_ahead: int = 30):
+    """Aggregate upcoming and overdue deadlines across all entities."""
+    _check(request, "compliance:read")
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        cutoff = (datetime.now() + timedelta(days=days_ahead)).isoformat()
+        deadlines = []
+
+        # 1. Document review due dates
+        cursor = await db.execute(
+            "SELECT document_id, title, review_due_date, kcaa_approval_required FROM documents WHERE review_due_date IS NOT NULL AND review_due_date <= ?", (cutoff,)
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["review_due_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "document", "entity_id": r["document_id"],
+                "title": f"Document review due: {r['title']}",
+                "due_date": r["review_due_date"], "overdue": overdue,
+                "priority": "high" if r["kcaa_approval_required"] else "medium",
+            })
+
+        # 2. Occurrence MOR deadlines
+        cursor = await db.execute(
+            "SELECT occurrence_id, serial_number, title, mor_deadline, mor_required, status FROM occurrences WHERE mor_required = 1 AND mor_deadline IS NOT NULL AND status != 'closed'"
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["mor_deadline"] < now
+            deadlines.append({
+                "entity_type": "occurrence", "entity_id": r["occurrence_id"],
+                "title": f"MOR submission: {r['title']} ({r['serial_number']})",
+                "due_date": r["mor_deadline"], "overdue": overdue, "priority": "critical",
+            })
+
+        # 3. Corrective action due dates
+        cursor = await db.execute(
+            "SELECT car_id, title, due_date, status FROM corrective_actions WHERE due_date IS NOT NULL AND status NOT IN ('closed', 'verified')"
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["due_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "corrective_action", "entity_id": r["car_id"],
+                "title": f"CAR due: {r['title']}", "due_date": r["due_date"],
+                "overdue": overdue, "priority": "high",
+            })
+
+        # 4. Training expiry
+        cursor = await db.execute(
+            "SELECT record_id, person_id, training_type, expiry_date FROM dg_training_records WHERE expiry_date IS NOT NULL AND expiry_date <= ?", (cutoff,)
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["expiry_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "dg_training", "entity_id": r["record_id"],
+                "title": f"DG training expiry: {r['training_type']} - {r['person_id']}",
+                "due_date": r["expiry_date"], "overdue": overdue, "priority": "medium",
+            })
+
+        # 5. ROC expiry (90-day notice)
+        cursor = await db.execute("SELECT roc_id, roc_number, expiry_date FROM roc_register WHERE expiry_date IS NOT NULL")
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["expiry_date"] < now[:10]
+            notice_date = r["expiry_date"]
+            deadlines.append({
+                "entity_type": "roc", "entity_id": r["roc_id"],
+                "title": f"ROC expiry: {r['roc_number']}", "due_date": r["expiry_date"],
+                "overdue": overdue, "priority": "critical",
+            })
+
+        # 6. Distribution acknowledgements overdue
+        cursor = await db.execute(
+            "SELECT d.distribution_id, dv.document_id, d.recipient_id, d.acknowledged_at, d.sent_at FROM distributions d JOIN document_versions dv ON d.version_id = dv.version_id WHERE d.acknowledged_at IS NULL AND d.sent_at IS NOT NULL"
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            dist_date = r["sent_at"][:10]
+            overdue = (datetime.now() - datetime.fromisoformat(dist_date)).days > 7
+            deadlines.append({
+                "entity_type": "distribution", "entity_id": r["distribution_id"],
+                "title": f"Acknowledgement overdue: {r['document_id']} → {r['recipient_id']}",
+                "due_date": dist_date, "overdue": overdue, "priority": "medium",
+            })
+
+        overdue_count = sum(1 for d in deadlines if d["overdue"])
+        upcoming = [d for d in deadlines if not d["overdue"]]
+        overdue = [d for d in deadlines if d["overdue"]]
+
+        return {
+            "total": len(deadlines),
+            "overdue_count": overdue_count,
+            "upcoming_count": len(upcoming),
+            "overdue": sorted(overdue, key=lambda x: x["due_date"]),
+            "upcoming": sorted(upcoming, key=lambda x: x["due_date"]),
+        }
     finally:
         await db.close()
