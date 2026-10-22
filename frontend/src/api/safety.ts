@@ -39,4 +39,8 @@ export const safetyApi = {
     api.get("/p1/notifications/unread-count").then((r: any) => r.data),
   triggerNotificationCheck: () =>
     api.post("/p1/notifications/check").then((r: any) => r.data),
+  getNotificationPreferences: () =>
+    api.get("/p1/notification-preferences").then((r: any) => r.data),
+  updateNotificationPreferences: (data: any) =>
+    api.put("/p1/notification-preferences", null, { params: data }).then((r: any) => r.data),
 };

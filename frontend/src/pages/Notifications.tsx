@@ -1,15 +1,21 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
-import { Check, AlertCircle, Info } from "lucide-react";
+import { Check, AlertCircle, Info, Settings } from "lucide-react";
 
 export function Notifications() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState("");
+  const [showPrefs, setShowPrefs] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["notifications", statusFilter],
     queryFn: () => safetyApi.listNotifications(statusFilter ? { status: statusFilter } : {}),
+  });
+
+  const { data: prefs } = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () => safetyApi.getNotificationPreferences(),
   });
 
   const notifications = data?.notifications ?? [];
@@ -28,18 +34,58 @@ export function Notifications() {
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Notifications</h1>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border rounded px-3 py-2 text-sm"
-        >
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="sent">Sent</option>
-          <option value="logged">Logged</option>
-          <option value="read">Read</option>
-        </select>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowPrefs(!showPrefs)}
+            className="flex items-center gap-1 px-3 py-2 text-sm border rounded hover:bg-gray-100"
+          >
+            <Settings size={16} /> Preferences
+          </button>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border rounded px-3 py-2 text-sm"
+          >
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="sent">Sent</option>
+            <option value="logged">Logged</option>
+            <option value="read">Read</option>
+          </select>
+        </div>
       </div>
+
+      {showPrefs && prefs && (
+        <div className="bg-white p-4 rounded shadow mb-4">
+          <h2 className="font-semibold mb-3">Notification Preferences</h2>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" defaultChecked={prefs.email_enabled} className="rounded" />
+              Email notifications enabled
+            </label>
+            <div>
+              <label className="block text-gray-600 mb-1">Document review alert (hours before)</label>
+              <input type="number" defaultValue={prefs.document_review_hours} className="border rounded px-2 py-1 w-20" />
+            </div>
+            <div>
+              <label className="block text-gray-600 mb-1">MOR deadline alert (hours before)</label>
+              <input type="number" defaultValue={prefs.mor_deadline_hours} className="border rounded px-2 py-1 w-20" />
+            </div>
+            <div>
+              <label className="block text-gray-600 mb-1">CAR due alert (days before)</label>
+              <input type="number" defaultValue={prefs.car_due_days} className="border rounded px-2 py-1 w-20" />
+            </div>
+            <div>
+              <label className="block text-gray-600 mb-1">ROC expiry alert (days before)</label>
+              <input type="number" defaultValue={prefs.roc_expiry_days} className="border rounded px-2 py-1 w-20" />
+            </div>
+            <div>
+              <label className="block text-gray-600 mb-1">Distribution ack alert (days before)</label>
+              <input type="number" defaultValue={prefs.distribution_ack_days} className="border rounded px-2 py-1 w-20" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <p>Loading...</p>

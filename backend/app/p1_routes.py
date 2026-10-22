@@ -1849,3 +1849,59 @@ async def send_notification(request: Request, to: str, subject: str, body: str):
     _check(request, "compliance:manage")
     success = send_email(to, subject, body)
     return {"success": success, "to": to, "subject": subject}
+
+
+# ==================== NOTIFICATION PREFERENCES ====================
+
+@router.get("/notification-preferences")
+async def get_notification_preferences(request: Request):
+    """Get notification preferences for the current user."""
+    _check(request, "compliance:read")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM notification_preferences WHERE user_id = ?", (actor,))
+        row = await cursor.fetchone()
+        if not row:
+            # Return defaults
+            return {
+                "user_id": actor,
+                "email_enabled": True,
+                "document_review_hours": 48,
+                "mor_deadline_hours": 24,
+                "car_due_days": 3,
+                "roc_expiry_days": 90,
+                "distribution_ack_days": 7,
+            }
+        return dict(row)
+    finally:
+        await db.close()
+
+
+@router.put("/notification-preferences")
+async def update_notification_preferences(request: Request, email_enabled: bool = True, document_review_hours: int = 48, mor_deadline_hours: int = 24, car_due_days: int = 3, roc_expiry_days: int = 90, distribution_ack_days: int = 7):
+    """Update notification preferences for the current user."""
+    _check(request, "compliance:read")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        now = now_iso()
+        import uuid
+        pref_id = f"NP-{uuid.uuid4().hex[:8].upper()}"
+        cursor = await db.execute("SELECT preference_id FROM notification_preferences WHERE user_id = ?", (actor,))
+        existing = await cursor.fetchone()
+        if existing:
+            await db.execute(
+                """UPDATE notification_preferences SET email_enabled = ?, document_review_hours = ?, mor_deadline_hours = ?, car_due_days = ?, roc_expiry_days = ?, distribution_ack_days = ?, updated_at = ? WHERE user_id = ?""",
+                (1 if email_enabled else 0, document_review_hours, mor_deadline_hours, car_due_days, roc_expiry_days, distribution_ack_days, now, actor),
+            )
+        else:
+            await db.execute(
+                """INSERT INTO notification_preferences (preference_id, user_id, email_enabled, document_review_hours, mor_deadline_hours, car_due_days, roc_expiry_days, distribution_ack_days, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (pref_id, actor, 1 if email_enabled else 0, document_review_hours, mor_deadline_hours, car_due_days, roc_expiry_days, distribution_ack_days, now, now),
+            )
+        await db.commit()
+        return {"status": "updated", "user_id": actor}
+    finally:
+        await db.close()

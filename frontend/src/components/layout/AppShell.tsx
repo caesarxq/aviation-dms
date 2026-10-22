@@ -5,6 +5,7 @@ import { safetyApi } from "../../api/safety";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/notifications", icon: Bell, label: "Notifications" },
   { to: "/documents", icon: FileText, label: "Documents" },
   { to: "/occurrences", icon: AlertTriangle, label: "Safety Occurrences" },
   { to: "/roc", icon: Plane, label: "ROC & Fleet" },

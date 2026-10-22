@@ -696,6 +696,20 @@ CREATE INDEX IF NOT EXISTS idx_safety_kpi_status ON safety_kpis(status);
 CREATE INDEX IF NOT EXISTS idx_security_review_date ON security_reviews(meeting_date);
 CREATE INDEX IF NOT EXISTS idx_dg_matrix_project ON dg_responsibility_matrix(project_or_route);
 
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    preference_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    email_enabled INTEGER NOT NULL DEFAULT 1,
+    document_review_hours INTEGER NOT NULL DEFAULT 48,
+    mor_deadline_hours INTEGER NOT NULL DEFAULT 24,
+    car_due_days INTEGER NOT NULL DEFAULT 3,
+    roc_expiry_days INTEGER NOT NULL DEFAULT 90,
+    distribution_ack_days INTEGER NOT NULL DEFAULT 7,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id)
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
     notification_id TEXT PRIMARY KEY,
     recipient TEXT NOT NULL,
