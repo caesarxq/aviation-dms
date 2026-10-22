@@ -725,6 +725,52 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
         await db.close()
 
 
+@router.patch("/missions/{mission_id}/state", response_model=MissionResponse)
+async def transition_mission_state(mission_id: str, state: str, request: Request):
+    """Transition mission state with validation."""
+    _check(request, "safety:update")
+    actor = _actor(request)
+    role = _role(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Mission not found")
+        row = dict(row)
+        current = row["status"]
+
+        # Valid transitions
+        VALID_TRANSITIONS = {
+            "planned": ["in_progress", "cancelled"],
+            "in_progress": ["completed", "aborted"],
+            "released": ["in_progress", "aborted"],
+        }
+        if state not in VALID_TRANSITIONS.get(current, []):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid transition: {current} → {state}. Allowed: {VALID_TRANSITIONS.get(current, [])}",
+            )
+
+        # Permission checks
+        if state in ("completed", "aborted"):
+            if not has_permission(role, "safety:close"):
+                raise HTTPException(status_code=403, detail="safety:close permission required")
+
+        now = now_iso()
+        await db.execute(
+            "UPDATE missions SET status = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?",
+            (state, now, actor, mission_id),
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
+        row = await cursor.fetchone()
+        await log_audit_event("mission", mission_id, f"state:{state}", actor, {"from": current, "to": state})
+        return MissionResponse(**dict(row))
+    finally:
+        await db.close()
+
+
 # ==================== FLIGHT PLANS ====================
 
 @router.post("/flight-plans", response_model=FlightPlanResponse, status_code=201)
