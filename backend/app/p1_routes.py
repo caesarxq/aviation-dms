@@ -7,6 +7,7 @@ import json
 from collections import Counter
 
 from .database import get_db
+from .notifications import send_email, get_notification_log, check_and_notify, NOTIFICATION_ENABLED, SMTP_HOST
 from .audit import log_audit_event
 from .rbac import has_permission
 from .p1_models import *
@@ -1789,3 +1790,43 @@ async def get_deadlines(request: Request, days_ahead: int = 30):
         }
     finally:
         await db.close()
+
+
+# ==================== NOTIFICATION ENDPOINTS ====================
+
+@router.get("/notifications/status")
+async def notification_status(request: Request):
+    """Get notification system status."""
+    _check(request, "compliance:read")
+    return {
+        "enabled": NOTIFICATION_ENABLED,
+        "smtp_configured": bool(SMTP_HOST),
+        "smtp_host": SMTP_HOST or "not configured",
+    }
+
+
+@router.get("/notifications/log")
+async def notification_log(request: Request, limit: int = 50):
+    """Get recent notification log."""
+    _check(request, "compliance:read")
+    return {"notifications": get_notification_log(limit)}
+
+
+@router.post("/notifications/check")
+async def trigger_notification_check(request: Request):
+    """Manually trigger a deadline notification check."""
+    _check(request, "compliance:manage")
+    db = await get_db()
+    try:
+        count = await check_and_notify(db)
+        return {"notifications_sent": count, "status": "completed"}
+    finally:
+        await db.close()
+
+
+@router.post("/notifications/send")
+async def send_notification(request: Request, to: str, subject: str, body: str):
+    """Send a manual notification."""
+    _check(request, "compliance:manage")
+    success = send_email(to, subject, body)
+    return {"success": success, "to": to, "subject": subject}

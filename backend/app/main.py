@@ -6,7 +6,23 @@ from .p0_auth import P0AuthMiddleware
 from .p0_routes import router as p0_router
 from .p1_routes import router as p1_router
 
-app = FastAPI(title="KFL Aviation DMS", version="1.0.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    await init_db()
+    try:
+        from .notifications import NotificationScheduler
+        scheduler = NotificationScheduler(interval_seconds=3600)
+        await scheduler.start()
+        app.state.scheduler = scheduler
+    except Exception as e:
+        print(f"Scheduler start failed: {e}")
+    yield
+    if hasattr(app.state, "scheduler"):
+        await app.state.scheduler.stop()
+
+app = FastAPI(title="KFL Aviation DMS", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"], allow_credentials=False, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "X-Role", "X-Actor", "Authorization"])
 
@@ -29,10 +45,6 @@ app.add_middleware(P0AuthMiddleware)
 app.include_router(p0_router, prefix="/api/p0")
 app.include_router(p1_router, prefix="/api/p1")
 
-
-@app.on_event("startup")
-async def startup():
-    await init_db()
 
 
 @app.get("/health")
