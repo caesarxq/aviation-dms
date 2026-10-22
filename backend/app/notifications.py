@@ -63,18 +63,20 @@ ESCALATION_THRESHOLDS = {
 _notification_log: List[Dict] = []
 
 
-def send_email(to: str, subject: str, body: str, entity_type: str = None, entity_id: str = None, priority: str = "medium") -> bool:
+def send_email(to: str, subject: str, body: str, entity_type: str = None, entity_id: str = None, priority: str = "medium", html: str = None) -> bool:
     """Send an email notification. Returns True on success. Persists to DB."""
     if not NOTIFICATION_ENABLED or not SMTP_HOST:
         persist_notification(to, subject, body, entity_type, entity_id, priority, "logged")
         return True
 
     try:
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("alternative")
         msg["From"] = SMTP_FROM
         msg["To"] = to
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
+        if html:
+            msg.attach(MIMEText(html, "html"))
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
@@ -87,6 +89,36 @@ def send_email(to: str, subject: str, body: str, entity_type: str = None, entity
     except Exception as e:
         persist_notification(to, subject, body, entity_type, entity_id, priority, "failed")
         return False
+
+
+def html_email_template(title: str, body: str, priority: str = "medium", entity_type: str = None, entity_id: str = None) -> str:
+    """Generate an HTML email template."""
+    priority_colors = {
+        "critical": "#dc2626",
+        "high": "#ea580c",
+        "medium": "#ca8a04",
+        "low": "#2563eb",
+    }
+    color = priority_colors.get(priority, "#2563eb")
+    return f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
+      <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <div style="background: {color}; color: white; padding: 16px 24px;">
+          <h2 style="margin: 0; font-size: 18px;">KFL Aviation DMS</h2>
+          <p style="margin: 4px 0 0; font-size: 14px; opacity: 0.9;">{title}</p>
+        </div>
+        <div style="padding: 24px;">
+          <p style="color: #374151; line-height: 1.6;">{body}</p>
+          {f'<p style="margin-top: 16px; padding: 8px 12px; background: #f9fafb; border-radius: 4px; font-size: 13px; color: #6b7280;">Entity: {entity_type} / {entity_id}</p>' if entity_type else ''}
+        </div>
+        <div style="padding: 16px 24px; background: #f9fafb; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af;">
+          This is an automated notification from the KFL Aviation DMS. Do not reply to this email.
+        </div>
+      </div>
+    </body>
+    </html>
+    """
 
 
 async def get_notifications(recipient: str = None, status: str = None, limit: int = 50) -> List[Dict]:

@@ -12,6 +12,7 @@ import { SecurityManagement } from "./pages/SecurityManagement";
 import { OutsourcedFunctions, SafetyKPIs, SecurityReviews, DGResponsibilityMatrix } from "./pages/P2Pages";
 import { DocumentEditor } from "./pages/DocumentEditor";
 import { DocumentViewer } from "./pages/DocumentViewer";
+import { Notifications } from "./pages/Notifications";
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/dg-responsibility-matrix" element={<DGResponsibilityMatrix />} />
         <Route path="/documents/:docId/edit" element={<DocumentEditor />} />
         <Route path="/documents/:docId/view" element={<DocumentViewer />} />
+        <Route path="/notifications" element={<Notifications />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
