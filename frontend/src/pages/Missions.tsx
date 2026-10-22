@@ -20,6 +20,14 @@ export function Missions() {
     },
   });
 
+  const transitionMutation = useMutation({
+    mutationFn: ({ id, state }: { id: string; state: string }) =>
+      api.patch(`/p1/missions/${id}/state?state=${state}`).then((r: any) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["missions"] });
+    },
+  });
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -45,6 +53,7 @@ export function Missions() {
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
+              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -55,6 +64,32 @@ export function Missions() {
                 <td className="px-4 py-2 text-sm">{m.mission_type}</td>
                 <td className="px-4 py-2 text-sm">{m.status}</td>
                 <td className="px-4 py-2 text-sm">{m.priority}</td>
+                <td className="px-4 py-2 text-right text-sm">
+                  {m.status === "planned" && (
+                    <button
+                      onClick={() => transitionMutation.mutate({ id: m.mission_id, state: "in_progress" })}
+                      className="text-xs text-kfl-teal hover:underline mr-2"
+                    >
+                      Start
+                    </button>
+                  )}
+                  {m.status === "in_progress" && (
+                    <button
+                      onClick={() => transitionMutation.mutate({ id: m.mission_id, state: "completed" })}
+                      className="text-xs text-green-600 hover:underline mr-2"
+                    >
+                      Complete
+                    </button>
+                  )}
+                  {(m.status === "planned" || m.status === "in_progress") && (
+                    <button
+                      onClick={() => transitionMutation.mutate({ id: m.mission_id, state: m.status === "planned" ? "cancelled" : "aborted" })}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      {m.status === "planned" ? "Cancel" : "Abort"}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
