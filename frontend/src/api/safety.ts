@@ -31,4 +31,12 @@ export const safetyApi = {
     api.get("/p1/safety/trends").then((r: any) => r.data),
   getDeadlines: (daysAhead?: number) =>
     api.get("/p1/deadlines", { params: { days_ahead: daysAhead ?? 30 } }).then((r: any) => r.data),
+  getNotificationStatus: () =>
+    api.get("/p1/notifications/status").then((r: any) => r.data),
+  listNotifications: (params?: Record<string, any>) =>
+    api.get("/p1/notifications", { params }).then((r: any) => r.data),
+  getUnreadCount: () =>
+    api.get("/p1/notifications/unread-count").then((r: any) => r.data),
+  triggerNotificationCheck: () =>
+    api.post("/p1/notifications/check").then((r: any) => r.data),
 };

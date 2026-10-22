@@ -23,6 +23,7 @@ export function OccurrenceDetail() {
         <p><strong>Location:</strong> {occ.location || "—"}</p>
         <p><strong>Occurred:</strong> {occ.occurred_at || "—"}</p>
         <p><strong>Reported:</strong> {occ.reported_at}</p>
+        <p><strong>Reporter:</strong> {occ.reporter_id === "CONFIDENTIAL" ? "🔒 Confidential Reporter" : occ.reporter_id || "—"}</p>
         <p><strong>MOR Required:</strong> {occ.mor_required ? "Yes" : "No"}</p>
       </div>
       <div className="bg-white p-4 rounded shadow">

@@ -1,5 +1,6 @@
 """Notification and escalation service for aviation DMS."""
 import os
+import uuid
 import smtplib
 import json
 from email.mime.text import MIMEText
@@ -8,7 +9,41 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 import asyncio
 
-# Notification configuration from environment
+from .database import get_db
+
+
+def _gen_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
+
+
+def persist_notification(recipient, subject, body, entity_type=None, entity_id=None, priority="medium", status="pending"):
+    """Persist a notification to the database."""
+    async def _persist():
+        db = await get_db()
+        try:
+            now = datetime.now().isoformat()
+            nid = _gen_id("NTF")
+            await db.execute(
+                """INSERT INTO notifications (notification_id, recipient, subject, body, entity_type, entity_id, priority, status, sent_at, created_at, created_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (nid, recipient, subject, body, entity_type, entity_id, priority, status,
+                 now if status == "sent" else None, now, "system"),
+            )
+            await db.commit()
+            return nid
+        finally:
+            await db.close()
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Can't run sync in async context; schedule it
+            asyncio.ensure_future(_persist())
+            return None
+        else:
+            return loop.run_until_complete(_persist())
+    except Exception:
+        return None
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -28,14 +63,10 @@ ESCALATION_THRESHOLDS = {
 _notification_log: List[Dict] = []
 
 
-def send_email(to: str, subject: str, body: str) -> bool:
-    """Send an email notification. Returns True on success."""
+def send_email(to: str, subject: str, body: str, entity_type: str = None, entity_id: str = None, priority: str = "medium") -> bool:
+    """Send an email notification. Returns True on success. Persists to DB."""
     if not NOTIFICATION_ENABLED or not SMTP_HOST:
-        # Log only in dev mode
-        _notification_log.append({
-            "to": to, "subject": subject, "body": body[:200],
-            "sent_at": datetime.now().isoformat(), "status": "logged (no SMTP)",
-        })
+        persist_notification(to, subject, body, entity_type, entity_id, priority, "logged")
         return True
 
     try:
@@ -51,27 +82,44 @@ def send_email(to: str, subject: str, body: str) -> bool:
                 server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
 
-        _notification_log.append({
-            "to": to, "subject": subject, "body": body[:200],
-            "sent_at": datetime.now().isoformat(), "status": "sent",
-        })
+        persist_notification(to, subject, body, entity_type, entity_id, priority, "sent")
         return True
     except Exception as e:
-        _notification_log.append({
-            "to": to, "subject": subject, "body": body[:200],
-            "sent_at": datetime.now().isoformat(), "status": f"failed: {e}",
-        })
+        persist_notification(to, subject, body, entity_type, entity_id, priority, "failed")
         return False
 
 
-def get_notification_log(limit: int = 50) -> List[Dict]:
-    """Return recent notification log entries."""
-    return _notification_log[-limit:]
+async def get_notifications(recipient: str = None, status: str = None, limit: int = 50) -> List[Dict]:
+    """Query notifications from DB."""
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if recipient:
+            conditions.append("recipient = ?")
+            params.append(recipient)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(
+            f"SELECT * FROM notifications WHERE {where} ORDER BY created_at DESC LIMIT ?", params + [limit]
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
 
 
-def clear_notification_log():
-    """Clear the notification log."""
-    _notification_log.clear()
+async def mark_notification_read(notification_id: str):
+    """Mark a notification as read."""
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        await db.execute("UPDATE notifications SET read_at = ?, status = 'read' WHERE notification_id = ?", (now, notification_id))
+        await db.commit()
+    finally:
+        await db.close()
 
 
 async def check_and_notify(db, recipient_email: str = "safety@kfl-aviation.local"):

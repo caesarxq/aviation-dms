@@ -7,7 +7,7 @@ import json
 from collections import Counter
 
 from .database import get_db
-from .notifications import send_email, get_notification_log, check_and_notify, NOTIFICATION_ENABLED, SMTP_HOST
+from .notifications import send_email, get_notifications, mark_notification_read, check_and_notify, NOTIFICATION_ENABLED, SMTP_HOST
 from .audit import log_audit_event
 from .rbac import has_permission
 from .p1_models import *
@@ -1805,11 +1805,30 @@ async def notification_status(request: Request):
     }
 
 
-@router.get("/notifications/log")
-async def notification_log(request: Request, limit: int = 50):
-    """Get recent notification log."""
+@router.get("/notifications")
+async def list_notifications(request: Request, recipient: str = None, status: str = None, limit: int = 50):
+    """List notifications from DB."""
     _check(request, "compliance:read")
-    return {"notifications": get_notification_log(limit)}
+    notifs = await get_notifications(recipient, status, limit)
+    return {"notifications": notifs, "total": len(notifs)}
+
+
+@router.get("/notifications/unread-count")
+async def unread_notification_count(request: Request):
+    """Get count of unread notifications."""
+    _check(request, "compliance:read")
+    notifs = await get_notifications(status="pending", limit=1000)
+    # Also count 'logged' and 'sent' as unread (not yet read)
+    unread = [n for n in notifs if n.get("read_at") is None]
+    return {"unread_count": len(unread)}
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def mark_read(notification_id: str, request: Request):
+    """Mark a notification as read."""
+    _check(request, "compliance:read")
+    await mark_notification_read(notification_id)
+    return {"status": "read", "notification_id": notification_id}
 
 
 @router.post("/notifications/check")

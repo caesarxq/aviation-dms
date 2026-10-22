@@ -695,6 +695,25 @@ CREATE INDEX IF NOT EXISTS idx_outsourced_status ON outsourced_functions(status)
 CREATE INDEX IF NOT EXISTS idx_safety_kpi_status ON safety_kpis(status);
 CREATE INDEX IF NOT EXISTS idx_security_review_date ON security_reviews(meeting_date);
 CREATE INDEX IF NOT EXISTS idx_dg_matrix_project ON dg_responsibility_matrix(project_or_route);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    notification_id TEXT PRIMARY KEY,
+    recipient TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    priority TEXT DEFAULT 'medium',
+    status TEXT NOT NULL DEFAULT 'pending',
+    sent_at TEXT,
+    read_at TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient);
+CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
 """
 
 async def get_db():
