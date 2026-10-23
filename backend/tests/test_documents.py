@@ -2,6 +2,27 @@ import pytest
 
 
 class TestDocumentVersioning:
+    def test_catalogue_labels_and_kcaa_requirements(self, client, librarian_headers):
+        response = client.get("/api/p0/documents", headers=librarian_headers)
+        assert response.status_code == 200
+        by_id = {item["document_id"]: item for item in response.json()}
+        assert by_id["DOC-006"]["title"] == "Security Management System Manual"
+        assert by_id["DOC-007"]["title"] == "Dangerous Goods Manual"
+        assert by_id["DOC-012"]["title"] == "Quality Management System Manual"
+        assert by_id["DOC-012"]["doc_class"] == "quality_manual"
+        for document_id in ("DOC-006", "DOC-007", "DOC-012"):
+            assert by_id[document_id]["kcaa_approval_required"] is True
+
+    def test_qms_and_security_content_matches_catalogue(self, client, librarian_headers):
+        expected = {
+            "DOC-006": "Security Management System Manual",
+            "DOC-012": "Quality Management System Manual",
+        }
+        for document_id, title in expected.items():
+            response = client.get(f"/api/p0/documents/{document_id}/content", headers=librarian_headers)
+            assert response.status_code == 200
+            assert title in response.json()["content"]
+
     def test_create_version_starts_draft(self, client, librarian_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-001", "version_number": "02.00.00", "content": "v2 content"

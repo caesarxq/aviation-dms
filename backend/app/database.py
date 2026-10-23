@@ -1015,6 +1015,73 @@ async def init_db():
 
     # Seed data
     await seed_db()
+    await apply_catalogue_corrections()
+    await repair_manual_content_assignment()
+
+async def apply_catalogue_corrections():
+    """Keep controlled-document catalogue metadata aligned with the approved manual names."""
+    db = await get_db()
+    try:
+        now = datetime.now().isoformat()
+        corrections = [
+            ("DOC-006", "Security Management System Manual", "security_manual", "KFL Security Management System Manual v01.00"),
+            ("DOC-007", "Dangerous Goods Manual", "dg_manual", "KFL Dangerous Goods Manual v01.00"),
+            ("DOC-012", "Quality Management System Manual", "quality_manual", "KFL Quality Management System Manual v01.00"),
+        ]
+        for document_id, title, doc_class, description in corrections:
+            await db.execute(
+                """UPDATE documents
+                   SET title = ?, doc_class = ?, description = ?,
+                       kcaa_approval_required = 1, updated_at = ?, updated_by = ?
+                   WHERE document_id = ?""",
+                (title, doc_class, description, now, "system", document_id),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+async def repair_manual_content_assignment():
+    """Repair the known QMS/security content reversal without changing HTML formatting."""
+    db = await get_db()
+    try:
+        rows = {}
+        for document_id in ("DOC-006", "DOC-012"):
+            async with db.execute(
+                "SELECT d.document_id, d.current_version_id, v.content FROM documents d JOIN document_versions v ON v.version_id = d.current_version_id WHERE d.document_id = ?",
+                (document_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                rows[document_id] = row
+
+        security_row = rows.get("DOC-006")
+        qms_row = rows.get("DOC-012")
+        security_content = security_row["content"] if security_row else None
+        qms_content = qms_row["content"] if qms_row else None
+        if not security_content or not qms_content:
+            return
+
+        security_marker = security_content.upper()
+        qms_marker = qms_content.upper()
+        reversed_assignment = (
+            "QUALITY MANAGEMENT SYSTEM" in security_marker
+            and "SECURITY MANUAL" in qms_marker
+        )
+        if not reversed_assignment:
+            return
+
+        now = datetime.now().isoformat()
+        await db.execute(
+            "UPDATE document_versions SET content = ?, updated_at = ?, updated_by = ? WHERE version_id = ?",
+            (qms_content, now, "system", rows["DOC-006"]["current_version_id"]),
+        )
+        await db.execute(
+            "UPDATE document_versions SET content = ?, updated_at = ?, updated_by = ? WHERE version_id = ?",
+            (security_content, now, "system", rows["DOC-012"]["current_version_id"]),
+        )
+        await db.commit()
+    finally:
+        await db.close()
 
 async def seed_db():
     db = await get_db()
@@ -1156,13 +1223,13 @@ async def seed_db():
             ("DOC-003", "Maintenance Manual", "maintenance_manual", "S2", "published", "u-lib", "KFL Maintenance Manual v01.01", now, now, "u-lib", "u-lib", 1, two_years),
             ("DOC-004", "Training Manual", "training_manual", "S2", "published", "u-lib", "KFL Training Manual v01.01", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-005", "Emergency Response Plan", "emergency_plan", "S2", "published", "u-lib", "KFL Emergency Response Plan v01.01", now, now, "u-lib", "u-lib", 1, two_years),
-            ("DOC-006", "Security Programme Manual", "security_manual", "S3", "published", "u-security", "KFL Security Programme v01.00", now, now, "u-lib", "u-lib", 0, six_months),
-            ("DOC-007", "Dangerous Goods Operations Manual", "dg_manual", "S3", "published", "u-dg", "KFL DG Operations Manual v01.00", now, now, "u-lib", "u-lib", 0, six_months),
+            ("DOC-006", "Security Management System Manual", "security_manual", "S3", "published", "u-security", "KFL Security Management System Manual v01.00", now, now, "u-lib", "u-lib", 1, two_years),
+            ("DOC-007", "Dangerous Goods Manual", "dg_manual", "S3", "published", "u-dg", "KFL Dangerous Goods Manual v01.00", now, now, "u-lib", "u-lib", 1, two_years),
             ("DOC-008", "Pre-Flight Checklist - DJI M350 RTK", "checklist", "S1", "published", "u-ops", "Pre-flight inspection checklist for DJI M350 RTK", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-009", "Pre-Flight Checklist - DJI Phantom 4 Pro", "checklist", "S1", "published", "u-ops", "Pre-flight inspection checklist for DJI Phantom 4 Pro", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-010", "Flight Release Form", "form", "S2", "published", "u-ops", "KFL Flight Release Authorization Form", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-011", "Occurrence Report Form", "form", "S2", "published", "u-safety", "Mandatory Occurrence Report Form", now, now, "u-lib", "u-lib", 0, six_months),
-            ("DOC-012", "Quality Audit Procedure", "procedure", "S2", "draft", "u-quality", "Internal Quality Audit Procedure v0.9", now, now, "u-lib", "u-lib", 0, None),
+            ("DOC-012", "Quality Management System Manual", "quality_manual", "S2", "draft", "u-quality", "KFL Quality Management System Manual v01.00", now, now, "u-lib", "u-lib", 1, two_years),
             ("DOC-013", "Personnel Training Policy", "policy", "S1", "published", "u-training", "KFL Training and Competency Policy", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-014", "ROC Application Form ROC-001", "form", "S3", "published", "u-ops", "KCAA Form ROC-001 - ROC Application", now, now, "u-lib", "u-lib", 0, six_months),
             ("DOC-015", "DG Acceptance Checklist", "checklist", "S3", "published", "u-dg", "Dangerous Goods Acceptance Inspection Checklist", now, now, "u-lib", "u-lib", 0, six_months),
@@ -1180,13 +1247,13 @@ async def seed_db():
                 "DOC-003": "# KFL Maintenance Manual v01.01\n\n## 1. Maintenance Philosophy\nAll KFL aircraft are maintained in accordance with manufacturer instructions and regulatory requirements.\n\n## 2. Maintenance Personnel\nThe Head of Maintenance oversees all maintenance activities. Only authorized personnel may perform maintenance.\n\n## 3. Maintenance Schedule\nRoutine inspections are conducted per the OEM maintenance manual for each aircraft model.\n\n## 4. Defect Management\nDefects are recorded, assessed, and rectified before the aircraft returns to service.\n\n---\nVersion 01.01.00",
                 "DOC-004": "# KFL Training Manual v01.01\n\n## 1. Training Program\nAll remote pilots must complete initial and recurrent training before operating KFL aircraft.\n\n## 2. Initial Training\nIncludes ground school, flight training, and practical assessment.\n\n## 3. Recurrent Training\nConducted every 12 months for all active remote pilots.\n\n---\nVersion 01.01.00",
                 "DOC-005": "# KFL Emergency Response Plan v01.01\n\n## 1. Emergency Categories\nAccident, serious incident, incident, and emergency deviation.\n\n## 2. Immediate Actions\nSecure the area, notify the Accountable Executive, and contact emergency services if required.\n\n## 3. Reporting\nAccidents are reported to KCAA within 24 hours. Serious incidents within 48 hours.\n\n---\nVersion 01.01.00",
-                "DOC-006": "# KFL Security Programme Manual v01.00\n\n## 1. Security Policy\nKFL protects its aircraft, personnel, and data from unauthorized access.\n\n## 2. Access Control\nOnly authorized personnel may access the operations center and aircraft storage.\n\n## 3. Cyber Security\nAll systems are protected by firewalls and encryption.\n\n---\nVersion 01.00.00",
-                "DOC-007": "# KFL Dangerous Goods Operations Manual v01.00\n\n## 1. DG Policy\nDangerous goods are transported only in accordance with ICAO Technical Instructions and KCAA requirements.\n\n## 2. DG Categories\nCategory A and B dangerous goods are approved for transport under KFL ROC.\n\n## 3. Acceptance Checks\nAll DG shipments must pass acceptance checks before loading.\n\n---\nVersion 01.00.00",
+                "DOC-006": "# KFL Security Management System Manual v01.00\n\n## 1. Security Policy\nKFL protects its aircraft, personnel, and data from unauthorized access.\n\n## 2. Access Control\nOnly authorized personnel may access the operations center and aircraft storage.\n\n## 3. Cyber Security\nAll systems are protected by firewalls and encryption.\n\n---\nVersion 01.00.00",
+                "DOC-007": "# KFL Dangerous Goods Manual v01.00\n\n## 1. DG Policy\nDangerous goods are transported only in accordance with ICAO Technical Instructions and KCAA requirements.\n\n## 2. DG Categories\nCategory A and B dangerous goods are approved for transport under KFL ROC.\n\n## 3. Acceptance Checks\nAll DG shipments must pass acceptance checks before loading.\n\n---\nVersion 01.00.00",
                 "DOC-008": "# Pre-Flight Checklist - DJI M350 RTK\n\n## 1. Pre-Flight\n- Inspect airframe for damage\n- Verify battery charge level\n- Check propeller condition\n- Confirm GPS signal\n- Verify return-to-home altitude\n\n## 2. Flight\n- Maintain visual line of sight\n- Monitor battery level\n- Observe altitude limits (400 ft AGL)\n\n---\nVersion 01.01.00",
                 "DOC-009": "# Pre-Flight Checklist - DJI Phantom 4 Pro\n\n## 1. Pre-Flight\n- Inspect airframe for damage\n- Verify battery charge level\n- Check propeller condition\n- Confirm GPS signal\n- Verify return-to-home altitude\n\n## 2. Flight\n- Maintain visual line of sight\n- Monitor battery level\n- Observe altitude limits (400 ft AGL)\n\n---\nVersion 01.01.00",
                 "DOC-010": "# KFL Flight Release Authorization Form\n\n## 1. Flight Details\nMission ID, date, location, aircraft, remote pilot.\n\n## 2. Pre-Flight Confirmations\n- Weather confirmed\n- Crew confirmed\n- Aircraft confirmed\n- Pre-flight checklist completed\n\n## 3. Release Authorization\nReleased by: __________  Date: __________\n\n---\nVersion 01.01.00",
                 "DOC-011": "# KFL Mandatory Occurrence Report Form\n\n## 1. Occurrence Details\nSerial number, date, time, location, type, severity.\n\n## 2. Description\nDetailed description of the occurrence.\n\n## 3. Reporting\nMOR submitted to KCAA within required timelines.\n\n---\nVersion 01.01.00",
-                "DOC-012": "# KFL Internal Quality Audit Procedure v0.9\n\n## 1. Purpose\nThis procedure defines how KFL conducts internal quality audits of its SMS and operations.\n\n## 2. Audit Schedule\nAudits are conducted at least annually per the audit schedule.\n\n## 3. Findings\nFindings are documented and corrective actions are tracked to closure.\n\n---\nVersion 0.9.0",
+                "DOC-012": "# KFL Quality Management System Manual v01.00\n\n## 1. Purpose\nThis manual defines the KFL quality management system for SMS and operations.\n\n## 2. Audit Schedule\nAudits are conducted at least annually per the approved audit schedule.\n\n## 3. Findings\nFindings are documented and corrective actions are tracked to closure.\n\n---\nVersion 01.00.00",
                 "DOC-013": "# KFL Training and Competency Policy\n\n## 1. Policy\nAll personnel must hold valid training and competency records for their assigned duties.\n\n## 2. Training Records\nRecords are maintained in the training management system.\n\n## 3. Competency Assessment\nCompetency is assessed before personnel are authorized to perform duties.\n\n---\nVersion 01.01.00",
                 "DOC-014": "# KCAA Form ROC-001 - ROC Application\n\n## 1. Applicant Details\nOrganization name, address, contact person.\n\n## 2. Operation Details\nOperation type, area, altitude, aircraft models.\n\n## 3. Supporting Documents\nOperations Manual, Safety Management Manual, Maintenance Manual.\n\n---\nVersion 01.01.00",
                 "DOC-015": "# KFL Dangerous Goods Acceptance Inspection Checklist\n\n## 1. Shipment Details\nShipment ID, DG class, UN number, shipper, consignee.\n\n## 2. Acceptance Checks\n- Packaging inspected\n- Marking and labeling verified\n- Documentation complete\n- State of charge verified (for batteries)\n\n## 3. Result\nAccepted / Rejected - Inspector signature: __________\n\n---\nVersion 01.01.00",

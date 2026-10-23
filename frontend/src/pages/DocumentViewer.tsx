@@ -1,18 +1,24 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { ArrowLeft, Copy, Check, X } from "lucide-react";
+import { ArrowLeft, Copy, Check, X, ListTree, Maximize2, Minimize2 } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
+import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/DocumentOutline";
 
 export function DocumentViewer() {
   const { docId } = useParams();
+  const [searchParams] = useSearchParams();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const viewerShellRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
   const [annotationToolbar, setAnnotationToolbar] = useState<{ show: boolean; x: number; y: number; selectedText: string }>({ show: false, x: 0, y: 0, selectedText: "" });
   const [newAnnotationType, setNewAnnotationType] = useState<"comment" | "highlight">("comment");
   const [annotationContent, setAnnotationContent] = useState("");
   const [annotationTargetRef, setAnnotationTargetRef] = useState("");
   const [iframeReady, setIframeReady] = useState(false);
+  const [showOutline, setShowOutline] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeOutlineAnchor, setActiveOutlineAnchor] = useState(searchParams.get("section") || "");
 
   const { data: content, isLoading } = useQuery({
     queryKey: ["doc-content", docId],
@@ -25,6 +31,54 @@ export function DocumentViewer() {
     queryFn: () => api.get(`/p2/documents/${docId}/annotations`).then((r: any) => r.data),
     enabled: !!docId,
   });
+
+  const outlineItems = buildOutlineFromHtml(content?.content || "");
+
+  useEffect(() => {
+    const handleFullscreen = () => setIsFullscreen(document.fullscreenElement === viewerShellRef.current);
+    document.addEventListener("fullscreenchange", handleFullscreen);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreen);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const shell = viewerShellRef.current;
+    if (!shell) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen?.();
+      } else if (shell.requestFullscreen) {
+        await shell.requestFullscreen();
+      } else {
+        setIsFullscreen((value) => !value);
+      }
+    } catch {
+      setIsFullscreen((value) => !value);
+    }
+  };
+
+  const selectOutlineItem = (item: { anchorId: string; blockIndex: number }) => {
+    setActiveOutlineAnchor(item.anchorId);
+    const iframeDocument = iframeRef.current?.contentDocument;
+    if (!iframeDocument) return;
+    const selector = item.anchorId.startsWith("page-")
+      ? ".pf"
+      : item.anchorId.startsWith("heading-")
+        ? ".t"
+        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+    const blocks = iframeDocument.querySelectorAll(selector);
+    const target = blocks[item.blockIndex] as HTMLElement | undefined;
+    if (!target) return;
+    const pageFrame = target.closest(".pf") as HTMLElement | null;
+    const container = iframeDocument.querySelector("#page-container") as HTMLElement | null;
+    if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && container && pageFrame) {
+      container.scrollTop = pageFrame.offsetTop;
+      container.dispatchEvent(new Event("scroll"));
+    } else {
+      target.scrollIntoView?.({ behavior: "auto", block: "center" });
+    }
+    target.classList.add("kfl-outline-target-highlight");
+    window.setTimeout(() => target.classList.remove("kfl-outline-target-highlight"), 2500);
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post(`/p2/documents/${docId}/annotations`, data).then((r: any) => r.data),
@@ -143,6 +197,12 @@ export function DocumentViewer() {
     );
   }, [annotations, iframeReady]);
 
+  useEffect(() => {
+    const match = searchParams.get("section")?.match(/^block-(\d+)$/);
+    if (!match || !iframeReady) return;
+    selectOutlineItem({ anchorId: `block-${Number(match[1])}`, blockIndex: Number(match[1]) });
+  }, [iframeReady, searchParams]);
+
   const handleSubmitAnnotation = () => {
     createMutation.mutate({
       annotation_type: newAnnotationType,
@@ -172,7 +232,7 @@ export function DocumentViewer() {
   if (!content) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Document not found</div></div>;
 
   return (
-    <div className="app-page relative">
+    <div ref={viewerShellRef} className={isFullscreen ? "fixed inset-0 z-50 overflow-auto bg-kfl-canvas p-4" : "app-page relative"}>
       <header className="app-page-header">
         <div>
           <div className="app-eyebrow">Document Control</div>
@@ -183,6 +243,21 @@ export function DocumentViewer() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowOutline((value) => !value)}
+            className={`app-btn-secondary px-3 py-2 flex items-center gap-1 ${showOutline ? "bg-kfl-blue/10" : ""}`}
+            title={showOutline ? "Hide document outline" : "Show document outline"}
+          >
+            <ListTree size={16} /> {showOutline ? "Hide outline" : "Outline"}
+          </button>
+          <button
+            onClick={toggleFullscreen}
+            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          </button>
           <button
             onClick={() => navigator.clipboard.writeText(content.content || "")}
             className="app-btn-secondary px-3 py-2 flex items-center gap-1"
@@ -228,13 +303,24 @@ export function DocumentViewer() {
       )}
 
       <section className="app-surface p-5">
-        <div className="relative w-full h-[calc(100vh-220px)] overflow-hidden bg-white rounded border border-kfl-border">
-          <iframe
-            ref={iframeRef}
-            title={docId || "Document"}
-            className="w-full h-full border-0"
-            sandbox="allow-same-origin allow-scripts allow-popups"
-          />
+        <div className={`flex gap-4 ${isFullscreen ? "h-[calc(100vh-170px)]" : "h-[calc(100vh-220px)]"}`}>
+          {showOutline && (
+            <aside className="relative z-20 w-72 shrink-0 overflow-y-auto rounded border border-kfl-border bg-kfl-surface-subtle pointer-events-auto">
+              <DocumentOutline
+                items={outlineItems}
+                activeAnchor={activeOutlineAnchor}
+                onSelect={selectOutlineItem}
+              />
+            </aside>
+          )}
+          <div className="relative min-w-0 flex-1 overflow-hidden rounded border border-kfl-border bg-white">
+            <iframe
+              ref={iframeRef}
+              title={docId || "Document"}
+              className="h-full w-full border-0"
+              sandbox="allow-same-origin allow-scripts allow-popups"
+            />
+          </div>
         </div>
       </section>
 
@@ -277,6 +363,7 @@ export function DocumentViewer() {
       <style>{`
         .kfl-annotation { position: relative; }
         .kfl-annotation:hover { z-index: 10; }
+        .kfl-outline-target-highlight { outline: 3px solid #1B7ABF; outline-offset: 4px; transition: outline-color 200ms ease; }
       `}</style>
     </div>
   );

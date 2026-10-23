@@ -48,6 +48,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const dragRef = useRef({ offsetX: 0, offsetY: 0 });
   const [showOutline, setShowOutline] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activeOutlineAnchor, setActiveOutlineAnchor] = useState(targetSection || "");
   const [toolbarPosition, setToolbarPosition] = useState<{ left: number; top: number } | null>(() => {
     try {
       const stored = window.localStorage.getItem("kfl-document-editor-toolbar-position");
@@ -114,12 +115,25 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     }
   }, []);
 
-  const selectOutlineItem = useCallback((item: { blockIndex: number }) => {
+  const selectOutlineItem = useCallback((item: { anchorId: string; blockIndex: number }) => {
+    setActiveOutlineAnchor(item.anchorId);
     const editor = editorRef.current;
     if (!editor) return;
-    const blocks = editor.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div");
+    const selector = item.anchorId.startsWith("page-")
+      ? ".pf"
+      : item.anchorId.startsWith("heading-")
+        ? ".t"
+        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+    const blocks = editor.querySelectorAll(selector);
     const target = blocks[item.blockIndex] as HTMLElement | undefined;
-    target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    if (!target) return;
+    const pageFrame = target.closest(".pf") as HTMLElement | null;
+    if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && pageFrame?.parentElement) {
+      pageFrame.parentElement.scrollTop = pageFrame.offsetTop;
+    } else {
+      const navigationTarget = target;
+      navigationTarget.scrollIntoView?.({ behavior: "auto", block: "center" });
+    }
     if (target) {
       target.classList.add("proposal-target-highlight");
       window.setTimeout(() => target.classList.remove("proposal-target-highlight"), 2500);
@@ -133,14 +147,17 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   }, [originalContent]);
 
   useEffect(() => {
-    const match = targetSection?.match(/^block-(\d+)$/);
+    const match = targetSection?.match(/^(block|page)-(\d+)$/);
     const editor = editorRef.current;
     if (!match || !editor) return;
     const timer = window.setTimeout(() => {
-      const blocks = editor.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div");
-      const target = blocks[Number(match[1])] as HTMLElement | undefined;
+      const selector = match[1] === "page"
+        ? ".pf"
+        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+      const blocks = editor.querySelectorAll(selector);
+      const target = blocks[Number(match[2])] as HTMLElement | undefined;
       if (!target) return;
-      target.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      target.scrollIntoView?.({ behavior: "auto", block: "center" });
       target.classList.add("proposal-target-highlight");
       window.setTimeout(() => target.classList.remove("proposal-target-highlight"), 2500);
     }, 50);
@@ -232,8 +249,15 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       setSubmitting(false);
       setShowSubmit(false);
       setSelectedChangeSequences([]);
+      setSubmitRationale("");
+      setSubmitSeverity("minor");
+      setLiveSuggestionContent("");
       setDirty(false);
       setEditError("");
+      // Reset the editor to the original content so the submitted changes
+      // no longer appear as pending edits in the editor or diff preview.
+      setCurrentContent(originalContent);
+      if (editorRef.current) editorRef.current.innerHTML = originalContent;
       qc.invalidateQueries({ queryKey: ["doc-content", docId] });
       toast({ title: "Proposal submitted", message: "Your change proposal has been submitted for manual review.", type: "success" });
     },
@@ -406,10 +430,10 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       )}
       <div className={`flex-1 min-h-[600px] overflow-y-auto relative ${showOutline ? "flex" : ""}`}>
         {showOutline && (
-          <aside className="w-80 border-r border-kfl-border bg-kfl-surface-subtle shrink-0">
+          <aside className="relative z-20 w-80 border-r border-kfl-border bg-kfl-surface-subtle shrink-0 pointer-events-auto">
             <DocumentOutline
               items={outlineItems}
-              activeAnchor={targetSection}
+              activeAnchor={activeOutlineAnchor}
               onSelect={selectOutlineItem}
             />
           </aside>

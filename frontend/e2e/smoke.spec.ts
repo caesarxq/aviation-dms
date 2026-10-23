@@ -95,6 +95,44 @@ test.describe("Navigation", () => {
     await expect(page.getByText("Detected changes")).toBeVisible();
     await expect(page.locator('input[readonly]').first()).toHaveValue(/section|block|paragraph/i);
   });
+  test("viewer provides heading outline navigation and fullscreen fallback", async ({ page }) => {
+    await page.goto("/documents/DOC-001/view");
+    await expect(page.getByRole("heading", { name: "DOC-001" })).toBeVisible();
+    await page.getByTitle("Show document outline").click();
+    await expect(page.getByRole("navigation", { name: "Document outline" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "1.1 THE COMPANY", exact: true }).click();
+    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toHaveClass(/font-semibold/);
+    const viewerScroll = await page.frames().find((frame) => frame !== page.mainFrame() && frame.url() === "about:blank")?.evaluate(() => document.querySelector<HTMLElement>("#page-container")?.scrollTop || 0);
+    expect(viewerScroll).toBeGreaterThan(0);
+    await page.getByTitle("Enter fullscreen").click();
+    await expect(page.getByTitle("Exit fullscreen")).toBeVisible();
+  });
+
+  test("editor outline navigation scrolls to the selected heading", async ({ page }) => {
+    await page.goto("/documents/DOC-001/edit");
+    await page.getByTitle("Show document outline").click();
+    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "1.1 THE COMPANY", exact: true }).click();
+    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toHaveClass(/font-semibold/);
+    await expect(page.locator('[contenteditable="true"] .proposal-target-highlight')).toHaveCount(1);
+    await expect(page.locator('[contenteditable="true"] .proposal-target-highlight')).toBeVisible();
+  });
+
+  test("submitting a proposal clears pending editor suggestions", async ({ page }) => {
+    const marker = `proposal-submit-${Date.now()}`;
+    await page.goto("/documents/DOC-012/edit");
+    const editor = page.locator('[contenteditable="true"]');
+    await editor.click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(` ${marker}`);
+    await page.getByTitle("Submit proposal for review").click();
+    await expect(page.getByText("Detected changes")).toBeVisible();
+    await page.getByRole("button", { name: "Submit Proposal", exact: true }).click();
+    await expect(page.getByText("Submit Change Proposal")).toHaveCount(0, { timeout: 10000 });
+    await expect(page.getByText("unsaved changes")).toHaveCount(0);
+    await expect(page.getByTestId("inline-suggestion-stream")).not.toContainText(marker);
+  });
 });
 
 test.describe("Missions", () => {

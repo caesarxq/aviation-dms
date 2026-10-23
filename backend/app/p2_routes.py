@@ -130,7 +130,7 @@ async def create_proposal_batch(doc_id: str, request: Request):
                     change["block_index"], change["anchor_id"], change["context_before"], change["context_after"],
                     change["original_text"], change["proposed_text"], change["original_excerpt_html"],
                     change["proposed_excerpt_html"], fingerprint, change["change_sequence"], change.get("changed_token_count"),
-                    change.get("change_density"), change.get("grouping_reason"), body.get("rationale"),
+                    change.get("change_density"), change.get("grouping_reason"), body.get("rationale") or "",
                     body.get("severity", "minor"), "draft", actor, now, now, actor, actor,
                 ),
             )
@@ -175,7 +175,7 @@ async def create_proposal(doc_id: str, request: Request):
                 proposal_id, doc_id, version_id, body.get("change_request_id"),
                 body.get("proposal_type", "section"), body["target_ref"],
                 body.get("original_text"), body.get("proposed_text"),
-                body.get("rationale"), body.get("severity", "minor"), "draft",
+                body.get("rationale") or "", body.get("severity", "minor"), "draft",
                 actor, now, now, actor, actor,
             ),
         )
