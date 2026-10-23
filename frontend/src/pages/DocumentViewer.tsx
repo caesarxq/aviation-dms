@@ -42,16 +42,19 @@ export function DocumentViewer() {
         </div>
       </header>
 
-      <section className="app-surface overflow-hidden p-5">
-        <div className="prose prose-lg max-w-none bg-white p-4 rounded border border-kfl-border">
-          {content.content ? (
-            <div
-              className="whitespace-pre-wrap font-sans text-sm"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(content.content) }}
-            />
-          ) : (
-            <p className="text-kfl-muted italic">No content available for this document.</p>
-          )}
+      <section className="app-surface p-5">
+        {/* PDF2HTML EX output uses absolute positioning for text elements.
+            Wrap in a fixed page-sized container and scale to fit viewport. */}
+        <div className="relative w-full h-[calc(100vh-220px)] overflow-auto bg-white">
+          <div className="transform origin-[0_0] scale-[0.5] w-[850px] h-[1100px]">
+            <div className="prose prose-lg max-w-none whitespace-pre-wrap bg-white p-4 rounded border border-kfl-border">
+              {content.content ? (
+                <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(content.content) }} />
+              ) : (
+                <p className="text-kfl-muted italic">No content available for this document.</p>
+              )}
+            </div>
+          </div>
         </div>
       </section>
 

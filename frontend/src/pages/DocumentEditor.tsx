@@ -108,10 +108,14 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       <div className="flex-1 overflow-hidden">
         {showPreview ? (
           <div className="h-full overflow-auto p-6 bg-white">
-            <div
-              className="whitespace-pre-wrap font-sans text-sm"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(editContent || "No content.") }}
-            />
+            <div className="relative w-full h-[calc(100vh-220px)] overflow-auto">
+              <div className="transform origin-[0_0] scale-[0.5] w-[850px] h-[1100px]">
+                <div
+                  className="whitespace-pre-wrap font-sans text-sm"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(editContent || "No content.") }}
+                />
+              </div>
+            </div>
           </div>
         ) : (
           <div className="h-full flex">
