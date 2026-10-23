@@ -1,77 +1,153 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ArrowUpRight, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck } from "lucide-react";
 import { safetyApi } from "../api/safety";
 
+function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
+  const tones: Record<string, string> = {
+    blue: "bg-sky-50 text-kfl-blue",
+    green: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-700",
+    red: "bg-red-50 text-red-700",
+  };
+  return (
+    <div className="app-surface p-5 transition hover:-translate-y-0.5 hover:shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="app-label">{label}</div>
+          <div className="mt-3 text-3xl font-bold tracking-tight text-kfl-text">{value}</div>
+          {context && <div className="mt-1 text-xs text-kfl-muted">{context}</div>}
+        </div>
+        <div className={`rounded-lg p-2.5 ${tones[tone] || tones.blue}`}>
+          <Icon size={19} strokeWidth={1.8} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function priorityClass(priority: string) {
+  if (priority === "critical") return "app-status app-status-critical";
+  if (priority === "high") return "app-status app-status-warning";
+  return "app-status app-status-info";
+}
+
 export function Dashboard() {
-  const { data: trends } = useQuery({
+  const { data: trends, isLoading: trendsLoading } = useQuery({
     queryKey: ["trends"],
     queryFn: () => safetyApi.getTrends(),
   });
-
-  const { data: deadlines } = useQuery({
+  const { data: deadlines, isLoading: deadlinesLoading } = useQuery({
     queryKey: ["deadlines"],
     queryFn: () => safetyApi.getDeadlines(30),
   });
 
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white p-4 rounded shadow">
-          <h3 className="text-gray-500 text-sm">Occurrences (30 days)</h3>
-          <p className="text-3xl font-bold">{trends?.occurrences_last_30_days ?? 0}</p>
-        </div>
-        <div className="bg-white p-4 rounded shadow">
-          <h3 className="text-gray-500 text-sm">Total Hazards</h3>
-          <p className="text-3xl font-bold">{Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + (b as number), 0)}</p>
-        </div>
-        <div className="bg-white p-4 rounded shadow">
-          <h3 className="text-gray-500 text-sm">Open Safety Actions</h3>
-          <p className="text-3xl font-bold">{trends?.safety_actions_by_status?.open ?? 0}</p>
-        </div>
-      </div>
+  const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
+  const isLoading = trendsLoading || deadlinesLoading;
 
-      <div className="bg-white rounded shadow p-4">
-        <div className="flex justify-between items-center mb-3">
-          <h2 className="text-lg font-semibold">Upcoming & Overdue Deadlines</h2>
-          <div className="flex gap-2 text-sm">
-            <span className="px-2 py-1 rounded bg-red-100 text-red-800">
-              Overdue: {deadlines?.overdue_count ?? 0}
-            </span>
-            <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800">
-              Upcoming: {deadlines?.upcoming_count ?? 0}
-            </span>
+  return (
+    <div className="app-page">
+      <header className="app-page-header">
+        <div>
+          <div className="app-eyebrow">Operations control centre</div>
+          <h1 className="app-title">Dashboard</h1>
+          <p className="app-subtitle">Good morning, Mohamed. A clear view of safety, compliance, and operational commitments.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="app-status app-status-healthy">System healthy</span>
+          <Link to="/notifications" className="app-btn-secondary">
+            View notifications <ArrowUpRight size={15} />
+          </Link>
+        </div>
+      </header>
+
+      <section className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Key metrics">
+        <MetricCard label="Occurrences (30 days)" value={isLoading ? "—" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
+        <MetricCard label="Total Hazards" value={isLoading ? "—" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
+        <MetricCard label="Open Safety Actions" value={isLoading ? "—" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="green" />
+        <MetricCard label="Deadlines requiring attention" value={isLoading ? "—" : deadlines?.overdue_count ?? 0} context="Overdue items" icon={CalendarClock} tone={deadlines?.overdue_count ? "red" : "green"} />
+      </section>
+
+      <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr_0.85fr]">
+        <div className="app-surface overflow-hidden">
+          <div className="flex items-start justify-between gap-4 border-b border-kfl-border px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <CalendarClock size={18} className="text-kfl-blue" />
+                <h2 className="text-base font-bold text-kfl-text">Upcoming & overdue deadlines</h2>
+              </div>
+              <p className="mt-1 text-xs text-kfl-muted">The next 30 days across the control system.</p>
+            </div>
+            <Link to="/notifications" className="text-xs font-bold text-kfl-blue hover:text-kfl-blue-ink">Open centre</Link>
+          </div>
+
+          <div className="p-5">
+            {deadlines?.overdue?.length > 0 && (
+              <div className="mb-5">
+                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700">
+                  <AlertTriangle size={14} /> Overdue
+                </div>
+                <ul className="space-y-2">
+                  {deadlines.overdue.slice(0, 5).map((d: any, i: number) => (
+                    <li key={`${d.entity_id}-${i}`} className="flex flex-col gap-2 rounded-lg border border-red-100 bg-red-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-sm font-semibold text-kfl-text">{d.title}</span>
+                      <span className={priorityClass(d.priority)}>{d.due_date} · {d.priority}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {deadlines?.upcoming?.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-kfl-muted">
+                  <FileCheck2 size={14} /> Upcoming
+                </div>
+                <ul className="divide-y divide-kfl-border rounded-lg border border-kfl-border">
+                  {deadlines.upcoming.slice(0, 7).map((d: any, i: number) => (
+                    <li key={`${d.entity_id}-${i}`} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-sm text-kfl-text">{d.title}</span>
+                      <span className={priorityClass(d.priority)}>{d.due_date}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {!deadlines?.overdue?.length && !deadlines?.upcoming?.length && (
+              <div className="rounded-lg border border-dashed border-kfl-border bg-kfl-surface-subtle p-8 text-center">
+                <CheckCircle2 className="mx-auto mb-2 text-emerald-600" size={24} />
+                <p className="text-sm font-semibold text-kfl-text">No deadlines require attention.</p>
+                <p className="mt-1 text-xs text-kfl-muted">The next 30 days are clear.</p>
+              </div>
+            )}
           </div>
         </div>
-        {deadlines?.overdue?.length > 0 && (
-          <div className="mb-4">
-            <h3 className="text-sm font-medium text-red-700 mb-2">Overdue</h3>
-            <ul className="space-y-1">
-              {deadlines.overdue.map((d: any, i: number) => (
-                <li key={i} className="flex justify-between items-center text-sm p-2 bg-red-50 rounded">
-                  <span className="font-medium">{d.title}</span>
-                  <span className="text-red-600 text-xs">{d.due_date} · {d.priority}</span>
-                </li>
-              ))}
-            </ul>
+
+        <div className="app-surface p-5">
+          <div className="mb-5 flex items-start justify-between">
+            <div>
+              <div className="app-label">Control posture</div>
+              <h2 className="mt-1 text-base font-bold text-kfl-text">Operational readiness</h2>
+            </div>
+            <ShieldCheck size={21} className="text-emerald-600" />
           </div>
-        )}
-        {deadlines?.upcoming?.length > 0 && (
-          <div>
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Upcoming (30 days)</h3>
-            <ul className="space-y-1">
-              {deadlines.upcoming.slice(0, 10).map((d: any, i: number) => (
-                <li key={i} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
-                  <span>{d.title}</span>
-                  <span className="text-gray-500 text-xs">{d.due_date} · {d.priority}</span>
-                </li>
-              ))}
-            </ul>
+          <div className="space-y-4">
+            {[
+              ["Document control", "Published baseline available", "healthy"],
+              ["Safety reporting", "Occurrence workflow active", "healthy"],
+              ["Deadline monitoring", deadlines?.overdue_count ? `${deadlines.overdue_count} overdue item(s)` : "No overdue items", deadlines?.overdue_count ? "critical" : "healthy"],
+              ["Notification service", "Scheduler connected", "healthy"],
+            ].map(([label, value, tone]) => (
+              <div key={label} className="flex items-center justify-between gap-3 border-b border-kfl-border pb-3 last:border-0 last:pb-0">
+                <div>
+                  <p className="text-sm font-semibold text-kfl-text">{label}</p>
+                  <p className="mt-0.5 text-xs text-kfl-muted">{value}</p>
+                </div>
+                <span className={`app-status ${tone === "critical" ? "app-status-critical" : "app-status-healthy"}`}>{tone === "critical" ? "Action" : "Ready"}</span>
+              </div>
+            ))}
           </div>
-        )}
-        {!deadlines?.overdue?.length && !deadlines?.upcoming?.length && (
-          <p className="text-gray-500 text-sm">No upcoming or overdue deadlines.</p>
-        )}
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

@@ -43,4 +43,6 @@ export const safetyApi = {
     api.get("/p1/notification-preferences").then((r: any) => r.data),
   updateNotificationPreferences: (data: any) =>
     api.put("/p1/notification-preferences", null, { params: data }).then((r: any) => r.data),
+  markNotificationRead: (id: string) =>
+    api.patch(`/p1/notifications/${id}/read`).then((r: any) => r.data),
 };
