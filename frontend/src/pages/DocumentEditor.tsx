@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Eye, Save, ArrowLeft } from "lucide-react";
+import { sanitizeHtml } from "../utils/sanitizeHtml";
 
 export function DocumentEditor() {
   const { docId: routeDocId } = useParams<{ docId: string }>();
@@ -107,7 +108,10 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       <div className="flex-1 overflow-hidden">
         {showPreview ? (
           <div className="h-full overflow-auto p-6 bg-white">
-            <pre className="whitespace-pre-wrap font-mono text-sm bg-white p-4 rounded border border-kfl-border">{editContent || "No content."}</pre>
+            <div
+              className="whitespace-pre-wrap font-sans text-sm"
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(editContent || "No content.") }}
+            />
           </div>
         ) : (
           <div className="h-full flex">
@@ -116,7 +120,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
                 className="w-full h-full p-3 font-mono text-sm resize-none focus:outline-none"
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
-                placeholder="Enter document content (Markdown supported)..."
+                placeholder="Enter document content (HTML supported)..."
               />
             </div>
             <div className="w-1/4 h-full overflow-auto p-4 bg-kfl-surface-subtle">
@@ -140,7 +144,6 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     </div>
   );
 }
-
 
 function DocumentSelector({ setDocId }: { setDocId: (id: string) => void }) {
   const { data: docs = [], isLoading } = useQuery({

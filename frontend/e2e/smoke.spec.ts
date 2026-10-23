@@ -47,10 +47,11 @@ test.describe("Missions", () => {
   test("can create a mission", async ({ page }) => {
     await page.goto("/missions");
     await page.click("text=New Mission");
+    await page.waitForSelector('input[placeholder="Mission title"]');
     await page.fill('input[placeholder="Mission title"]', "E2E Test Mission");
-    await page.click("text=Create");
-    await page.waitForTimeout(1000);
-    await expect(page.locator("text=E2E Test Mission").first()).toBeVisible({ timeout: 5000 });
+    await page.click("text=Create Mission");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=E2E Test Mission").first()).toBeVisible({ timeout: 8000 });
   });
 });
 

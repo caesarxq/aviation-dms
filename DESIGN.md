@@ -165,3 +165,15 @@ Use 6px for controls, 10px for cards, and pill shapes only for status badges and
 - Don't use gradients, neon colors, or decorative animation in operational workflows.
 - Don't communicate severity by color alone; include text and icons.
 - Don't place more than one high-emphasis action in a card.
+
+## Content Sanitization
+
+Document content may contain HTML formatting from OEM manuals and controlled documents. To preserve formatting while preventing XSS attacks, all rendered document content passes through **DOMPurify sanitization** before insertion into the DOM:
+
+- **Script tags** are stripped entirely.
+- **Event handlers** (`onclick`, `onerror`, etc.) are removed.
+- **Dangerous attributes** (`javascript:` URLs, `data:` URIs) are stripped.
+- **Safe formatting** (bold, italic, lists, tables, headings, links with `target="_blank"` and `rel="noopener"`) is preserved.
+- Sanitization applies to both the **Document Viewer** (read-only) and **Document Editor** (preview mode).
+
+All document content is stored raw in the database; sanitization happens only at render time.

@@ -2,6 +2,7 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/client";
 import { ArrowLeft, Copy } from "lucide-react";
+import { sanitizeHtml } from "../utils/sanitizeHtml";
 
 export function DocumentViewer() {
   const { docId } = useParams();
@@ -42,9 +43,12 @@ export function DocumentViewer() {
       </header>
 
       <section className="app-surface overflow-hidden p-5">
-        <div className="prose prose-lg max-w-none whitespace-pre-wrap bg-white p-4 rounded border border-kfl-border">
+        <div className="prose prose-lg max-w-none bg-white p-4 rounded border border-kfl-border">
           {content.content ? (
-            content.content
+            <div
+              className="whitespace-pre-wrap font-sans text-sm"
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(content.content) }}
+            />
           ) : (
             <p className="text-kfl-muted italic">No content available for this document.</p>
           )}
