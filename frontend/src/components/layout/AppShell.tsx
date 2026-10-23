@@ -1,28 +1,128 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, FileText, AlertTriangle, Plane, ClipboardList, ClipboardCheck, Wrench, AlertOctagon, ShieldAlert, Users, BarChart3, Calendar, Share2, Edit2, Monitor, Bell } from "lucide-react";
+import {
+  Activity,
+  LayoutDashboard,
+  FileText,
+  AlertTriangle,
+  ClipboardList,
+  ClipboardCheck,
+  AlertOctagon,
+  ShieldAlert,
+  Users,
+  Bell,
+  Shield,
+  KeyRound,
+  Upload,
+  ChevronDown,
+} from "lucide-react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../../api/safety";
+import api from "../../api/client";
 
-const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/notifications", icon: Bell, label: "Notifications" },
-  { to: "/documents", icon: FileText, label: "Documents" },
-  { to: "/occurrences", icon: AlertTriangle, label: "Safety Occurrences" },
-  { to: "/roc", icon: Plane, label: "ROC & Fleet" },
-  { to: "/missions", icon: ClipboardList, label: "Missions" },
-  { to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits" },
-  { to: "/corrective-actions", icon: Wrench, label: "Corrective Actions" },
-  { to: "/dangerous-goods", icon: AlertOctagon, label: "Dangerous Goods" },
-  { to: "/security", icon: ShieldAlert, label: "Security" },
-  { to: "/outsourced-functions", icon: Users, label: "Outsourced Functions" },
-  { to: "/safety-kpis", icon: BarChart3, label: "Safety KPIs" },
-  { to: "/security-reviews", icon: Calendar, label: "Security Reviews" },
-  { to: "/dg-responsibility-matrix", icon: Share2, label: "DG Responsibility" },
-];
+interface NavItem {
+  to: string;
+  icon: any;
+  label: string;
+}
 
-const utilityItems = [
-  { to: "/documents/DOC-001/edit", icon: Edit2, label: "Document Editor" },
-  { to: "/documents/DOC-001/view", icon: Monitor, label: "Document Viewer" },
+interface SectionProps {
+  label: string;
+  icon: any;
+  items: NavItem[];
+  initiallyOpen?: boolean;
+}
+
+function CollapsibleSection({ label, icon: Icon, items, initiallyOpen = false }: SectionProps) {
+  const [open, setOpen] = useState(initiallyOpen);
+
+  const isActive = items.some((i) => {
+    try {
+      return window.location.pathname === i.to || window.location.pathname.startsWith(i.to + "/");
+    } catch {
+      return false;
+    }
+  });
+
+  const effectiveOpen = open || isActive;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sky-200/70 hover:bg-white/10 transition"
+        aria-expanded={effectiveOpen}
+        aria-label={label}
+      >
+        <Icon size={16} className="shrink-0" />
+        <span className="flex-1">{label}</span>
+        <ChevronDown size={14} className={`shrink-0 transition-transform duration-200 ${effectiveOpen ? "" : "-rotate-90"}`} />
+      </button>
+      {effectiveOpen && (
+        <nav className="space-y-0.5 mt-1 ml-2 pl-3 border-l-2 border-white/5">
+          {items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                `flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
+                  isActive
+                    ? "bg-kfl-blue/20 text-white border-l-2 border-kfl-blue"
+                    : "text-slate-300 hover:bg-white/[0.05] hover:text-white border-l-2 border-transparent"
+                }`
+              }
+              onClick={() => setOpen(true)}
+            >
+              <item.icon size={14} className="shrink-0 opacity-70" />
+              <span className="nav-label truncate">{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+const sections: SectionProps[] = [
+  {
+    label: "Safety & Flight",
+    icon: AlertTriangle,
+    items: [
+      { to: "/occurrences", icon: AlertTriangle, label: "Safety Occurrences" },
+      { to: "/missions", icon: ClipboardList, label: "Missions" },
+      { to: "/dangerous-goods", icon: AlertOctagon, label: "Dangerous Goods" },
+      { to: "/security", icon: ShieldAlert, label: "Security" },
+    ],
+  },
+  {
+    label: "Quality & Compliance",
+    icon: ClipboardCheck,
+    items: [{ to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits" }],
+  },
+  {
+    label: "Personnel & Aircraft",
+    icon: Users,
+    items: [
+      { to: "/personnel-licenses", icon: KeyRound, label: "Personnel Licenses" },
+      { to: "/aircraft-insurance", icon: Shield, label: "Aircraft Insurance" },
+      { to: "/self-service-upload", icon: Upload, label: "Self-Service Upload" },
+    ],
+  },
+  {
+    label: "Document Control",
+    icon: FileText,
+    items: [
+      { to: "/documents", icon: FileText, label: "Documents" },
+      { to: "/document-proposals", icon: KeyRound, label: "Document Proposals" },
+      { to: "/version-diff", icon: Activity, label: "Version Diff" },
+    ],
+  },
+  {
+    label: "Administration",
+    icon: Activity,
+    items: [{ to: "/admin/observability", icon: Activity, label: "System Observability" }],
+  },
 ];
 
 export function AppShell() {
@@ -32,8 +132,14 @@ export function AppShell() {
     queryFn: () => safetyApi.getUnreadCount(),
     refetchInterval: 60000,
   });
+  const { data: authProfile } = useQuery({
+    queryKey: ["auth-profile"],
+    queryFn: () => api.get("/p0/auth/profile").then((response: any) => response.data),
+    staleTime: 300000,
+  });
 
   const unreadCount = unread?.unread_count ?? 0;
+  const visibleSections = sections.filter((section) => section.label !== "Administration" || authProfile?.role === "system_admin");
 
   return (
     <div className="flex min-h-screen bg-kfl-canvas">
@@ -56,53 +162,27 @@ export function AppShell() {
           </button>
         </div>
 
-        <div className="sidebar-section-label mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-200/70">Operations</div>
-        <nav className="space-y-1" aria-label="Primary navigation">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) =>
-                `group flex min-h-10 items-center gap-3 rounded-md border-l-[3px] px-3 text-[13px] font-medium transition ${
-                  isActive
-                    ? "border-kfl-blue bg-kfl-blue/20 text-white shadow-sm"
-                    : "border-transparent text-slate-300 hover:bg-white/[0.07] hover:text-white"
-                }`
-              }
-            >
-              <item.icon size={17} strokeWidth={1.8} className="shrink-0" />
-              <span className="nav-label truncate">{item.label}</span>
-            </NavLink>
+        <div className="space-y-2 px-1">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+          >
+            <LayoutDashboard size={16} className="shrink-0" />
+            <span className="nav-label">Dashboard</span>
+          </NavLink>
+          {visibleSections.map((section) => (
+            <CollapsibleSection key={section.label} {...section} />
           ))}
-        </nav>
-
-        <div className="sidebar-section-label mb-3 mt-7 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-200/70">Tools</div>
-        <nav className="space-y-1" aria-label="Tools navigation">
-          {utilityItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `group flex min-h-10 items-center gap-3 rounded-md border-l-[3px] px-3 text-[13px] font-medium transition ${
-                  isActive
-                    ? "border-kfl-blue bg-kfl-blue/20 text-white"
-                    : "border-transparent text-slate-300 hover:bg-white/[0.07] hover:text-white"
-                }`
-              }
-            >
-              <item.icon size={17} strokeWidth={1.8} className="shrink-0" />
-              <span className="nav-label truncate">{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+        </div>
 
         <div className="mt-auto border-t border-white/10 px-3 pt-4 text-[11px] text-slate-400">
           <div className="flex items-center gap-2 text-emerald-300">
             <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.15)]" />
             <span>Operational control active</span>
           </div>
-          <div className="mt-2 text-slate-500">KFL Aviation DMS · v1.0</div>
+          <div className="mt-2 text-slate-500">{authProfile?.user?.full_name || "Authenticated user"} · {authProfile?.role || "loading profile"}</div>
+          <div className="mt-1 text-slate-500">KFL Aviation DMS · v1.0</div>
         </div>
       </aside>
 

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { ClipboardCheck, Wrench } from "lucide-react";
+import { useToast } from "../components/ui/Toast";
+import { CorrectiveActionsModal } from "../components/ui/modals/CorrectiveActionsModal";
 
 function auditStatusClass(status: string) {
   switch (status) {
@@ -26,12 +28,15 @@ function carStatusClass(status: string) {
 
 export function QualityAudits() {
   const qc = useQueryClient();
+  const { toast } = useToast();
+  const [showCarModal, setShowCarModal] = useState(false);
   const { data: audits = [], isLoading } = useQuery({
     queryKey: ["quality-audits"],
     queryFn: () => api.get("/p1/quality-audits").then((r: any) => r.data),
   });
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [auditError, setAuditError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/quality-audits", data).then((r: any) => r.data),
@@ -39,6 +44,11 @@ export function QualityAudits() {
       qc.invalidateQueries({ queryKey: ["quality-audits"] });
       setShowForm(false);
       setTitle("");
+      setAuditError("");
+      toast({ title: "Audit created", message: "The new quality audit has been scheduled.", type: "success" });
+    },
+    onError: () => {
+      setAuditError("Failed to create audit. Please try again.");
     },
   });
 
@@ -55,6 +65,12 @@ export function QualityAudits() {
           className="app-btn-primary"
         >
           <ClipboardCheck size={16} /> {showForm ? "Cancel" : "New Audit"}
+        </button>
+        <button
+          onClick={() => setShowCarModal(true)}
+          className="app-btn-secondary"
+        >
+          <Wrench size={16} /> Create CAR
         </button>
       </header>
 
@@ -95,10 +111,22 @@ export function QualityAudits() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {auditError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {auditError}
+              </div>
+            )}
             <input className="app-input mb-3" placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
             <button
               disabled={!title.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ title, auditor_id: "u-quality" })}
+              onClick={() => {
+                setAuditError("");
+                if (!title.trim()) {
+                  setAuditError("Audit title is required.");
+                  return;
+                }
+                createMutation.mutate({ title, auditor_id: "u-quality" });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create Audit"}
@@ -143,6 +171,7 @@ export function QualityAudits() {
           </div>
         )}
       </section>
+      <CorrectiveActionsModal open={showCarModal} onClose={() => setShowCarModal(false)} />
     </div>
   );
 }

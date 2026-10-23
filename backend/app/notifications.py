@@ -226,6 +226,83 @@ async def check_and_notify(db, recipient_email: str = "safety@kfl-aviation.local
             )
             notifications_sent += 1
 
+    # Check personnel license expiry (tiered: 90/30/7 day)
+    cursor = await db.execute("SELECT license_id, person_id, license_type, expiry_date FROM personnel_licenses WHERE expiry_date IS NOT NULL AND status IN ('valid', 'expiring_soon')")
+    for row in await cursor.fetchall():
+        r = dict(row)
+        due = datetime.fromisoformat(r["expiry_date"])
+        days_until = (due - now).days
+        if days_until <= 7:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] URGENT: License expiring in {days_until} days - {r['license_type']}",
+                f"Person {r['person_id']} license {r['license_type']} ({r['license_id']}) expires on {r['expiry_date']}. "
+                f"Only {days_until} days remaining. Renew immediately.",
+            )
+            notifications_sent += 1
+        elif days_until <= 30:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] License expiring soon: {r['license_type']}",
+                f"Person {r['person_id']} license {r['license_type']} ({r['license_id']}) expires on {r['expiry_date']} "
+                f"({days_until} days remaining). Please initiate renewal.",
+            )
+            notifications_sent += 1
+        elif days_until <= 90:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] License renewal notice: {r['license_type']}",
+                f"Person {r['person_id']} license {r['license_type']} ({r['license_id']}) expires on {r['expiry_date']} "
+                f"({days_until} days remaining). Begin renewal planning.",
+            )
+            notifications_sent += 1
+
+    # Check aircraft insurance expiry (tiered: 30/7 day)
+    cursor = await db.execute("SELECT insurance_id, aircraft_id, insurance_type, expiry_date FROM aircraft_insurance WHERE expiry_date IS NOT NULL AND status IN ('valid', 'expiring_soon')")
+    for row in await cursor.fetchall():
+        r = dict(row)
+        due = datetime.fromisoformat(r["expiry_date"])
+        days_until = (due - now).days
+        if days_until <= 7:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] URGENT: Aircraft insurance expiring in {days_until} days - {r['insurance_type']}",
+                f"Aircraft {r['aircraft_id']} insurance {r['insurance_type']} ({r['insurance_id']}) expires on {r['expiry_date']}. "
+                f"Only {days_until} days remaining. Renew immediately to avoid grounding.",
+            )
+            notifications_sent += 1
+        elif days_until <= 30:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] Aircraft insurance expiring soon: {r['insurance_type']}",
+                f"Aircraft {r['aircraft_id']} insurance {r['insurance_type']} ({r['insurance_id']}) expires on {r['expiry_date']} "
+                f"({days_until} days remaining). Please initiate renewal.",
+            )
+            notifications_sent += 1
+
+    # Check aircraft document expiry (tiered: 30/7 day)
+    cursor = await db.execute("SELECT doc_id, aircraft_id, document_type, expiry_date FROM aircraft_documents WHERE expiry_date IS NOT NULL AND status IN ('valid', 'expiring_soon')")
+    for row in await cursor.fetchall():
+        r = dict(row)
+        due = datetime.fromisoformat(r["expiry_date"])
+        days_until = (due - now).days
+        if days_until <= 7:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] URGENT: Aircraft document expiring in {days_until} days - {r['document_type']}",
+                f"Aircraft {r['aircraft_id']} document {r['document_type']} ({r['doc_id']}) expires on {r['expiry_date']}. "
+                f"Only {days_until} days remaining. Renew immediately.",
+            )
+            notifications_sent += 1
+        elif days_until <= 30:
+            send_email(
+                recipient_email,
+                f"[KFL DMS] Aircraft document expiring soon: {r['document_type']}",
+                f"Aircraft {r['aircraft_id']} document {r['document_type']} ({r['doc_id']}) expires on {r['expiry_date']} "
+                f"({days_until} days remaining). Please initiate renewal.",
+            )
+            notifications_sent += 1
+
     # Check ROC expiry (90-day notice)
     cursor = await db.execute("SELECT roc_id, roc_number, expiry_date FROM roc_register WHERE expiry_date IS NOT NULL")
     for row in await cursor.fetchall():

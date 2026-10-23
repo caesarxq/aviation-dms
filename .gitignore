@@ -1,6 +1,7 @@
 # Database
 backend/data/dms.db
 backend/data/dms.db-*
+backend/data/uploads/
 
 # Node
 frontend/node_modules/

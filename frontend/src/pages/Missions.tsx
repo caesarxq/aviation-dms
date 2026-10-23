@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Plus } from "lucide-react";
+import { useToast } from "../components/ui/Toast";
 
 function missionStatusClass(status: string) {
   switch (status) {
@@ -39,12 +40,14 @@ function toneColor(tone: string) {
 
 export function Missions() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: missions = [], isLoading } = useQuery({
     queryKey: ["missions"],
     queryFn: () => api.get("/p1/missions").then((r: any) => r.data),
   });
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [missionError, setMissionError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/missions", data).then((r: any) => r.data),
@@ -52,6 +55,11 @@ export function Missions() {
       qc.invalidateQueries({ queryKey: ["missions"] });
       setShowForm(false);
       setTitle("");
+      setMissionError("");
+      toast({ title: "Mission created", message: "The new mission has been added to the register.", type: "success" });
+    },
+    onError: () => {
+      setMissionError("Failed to create mission. Please try again.");
     },
   });
 
@@ -121,10 +129,22 @@ export function Missions() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {missionError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {missionError}
+              </div>
+            )}
             <input className="app-input mb-3" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
             <button
               disabled={!title.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ title })}
+              onClick={() => {
+                setMissionError("");
+                if (!title.trim()) {
+                  setMissionError("Mission title is required.");
+                  return;
+                }
+                createMutation.mutate({ title });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create Mission"}

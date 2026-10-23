@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { Plus, Package } from "lucide-react";
+import { Plus, Package, Share2 } from "lucide-react";
+import { useToast } from "../components/ui/Toast";
+import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
 
 function dgStatusClass(status: string) {
   switch (status) {
@@ -14,14 +16,17 @@ function dgStatusClass(status: string) {
 
 export function DangerousGoods() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["dg-shipments"],
     queryFn: () => api.get("/p1/dg-shipments").then((r: any) => r.data),
   });
   const [showForm, setShowForm] = useState(false);
+  const [showDGModal, setShowDGModal] = useState(false);
   const [properShippingName, setProperShippingName] = useState("");
   const [dgClass, setDgClass] = useState("3");
   const [unNumber, setUnNumber] = useState("");
+  const [dgError, setDgError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/dg-shipments", data).then((r: any) => r.data),
@@ -31,6 +36,11 @@ export function DangerousGoods() {
       setProperShippingName("");
       setDgClass("3");
       setUnNumber("");
+      setDgError("");
+      toast({ title: "DG shipment created", message: "The dangerous goods shipment has been registered.", type: "success" });
+    },
+    onError: () => {
+      setDgError("Failed to create shipment. Please try again.");
     },
   });
 
@@ -47,6 +57,12 @@ export function DangerousGoods() {
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Shipment"}
+        </button>
+        <button
+          onClick={() => setShowDGModal(true)}
+          className="app-btn-secondary"
+        >
+          <Share2 size={16} /> Assign DG Responsibility
         </button>
       </header>
 
@@ -93,6 +109,11 @@ export function DangerousGoods() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {dgError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {dgError}
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">Proper Shipping Name</label>
@@ -109,7 +130,14 @@ export function DangerousGoods() {
             </div>
             <button
               disabled={!properShippingName.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ proper_shipping_name: properShippingName, dg_class: dgClass, un_number: unNumber })}
+              onClick={() => {
+                setDgError("");
+                if (!properShippingName.trim()) {
+                  setDgError("Proper shipping name is required.");
+                  return;
+                }
+                createMutation.mutate({ proper_shipping_name: properShippingName, dg_class: dgClass, un_number: unNumber });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create Shipment"}
@@ -154,6 +182,7 @@ export function DangerousGoods() {
           </div>
         )}
       </section>
+      <DGResponsibilityMatrixModal open={showDGModal} onClose={() => setShowDGModal(false)} />
     </div>
   );
 }

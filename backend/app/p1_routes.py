@@ -32,6 +32,44 @@ def _gen_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
 
+async def _check_mission_eligibility(db, aircraft_id=None, rpas_pilot_id=None, visual_observer_id=None):
+    """Hard-block on expiry: verify crew licenses and aircraft insurance are valid."""
+    errors = []
+    today = datetime.now().date().isoformat()
+
+    # Check pilot licenses
+    for person_id in [rpas_pilot_id, visual_observer_id]:
+        if not person_id:
+            continue
+        cursor = await db.execute(
+            "SELECT license_type, expiry_date, status FROM personnel_licenses WHERE person_id = ? AND status IN ('valid', 'expiring_soon')",
+            (person_id,)
+        )
+        rows = await cursor.fetchall()
+        if not rows:
+            errors.append(f"Person {person_id} has no valid licenses on record")
+            continue
+        for r in rows:
+            if r["expiry_date"] and r["expiry_date"] < today:
+                errors.append(f"Person {person_id} has expired {r['license_type']} (expired {r['expiry_date']})")
+
+    # Check aircraft insurance
+    if aircraft_id:
+        cursor = await db.execute(
+            "SELECT insurance_type, expiry_date, status FROM aircraft_insurance WHERE aircraft_id = ? AND status IN ('valid', 'expiring_soon')",
+            (aircraft_id,)
+        )
+        rows = await cursor.fetchall()
+        if not rows:
+            errors.append(f"Aircraft {aircraft_id} has no valid insurance on record")
+        for r in rows:
+            if r["expiry_date"] and r["expiry_date"] < today:
+                errors.append(f"Aircraft {aircraft_id} has expired {r['insurance_type']} insurance (expired {r['expiry_date']})")
+
+    if errors:
+        raise HTTPException(status_code=422, detail={"eligibility_errors": errors})
+
+
 def now_iso() -> str:
     return datetime.now().isoformat()
 
@@ -642,6 +680,8 @@ async def create_mission(mission: MissionCreate, request: Request):
     now = now_iso()
     db = await get_db()
     try:
+        # Hard-block on expiry: verify crew licenses and aircraft insurance
+        await _check_mission_eligibility(db, mission.aircraft_id, mission.rpas_pilot_id, mission.visual_observer_id)
         await db.execute(
             """INSERT INTO missions (mission_id, title, description, mission_type, status, priority, planned_date, location, aircraft_id, roc_id, rpas_pilot_id, visual_observer_id, dg_category, max_altitude_agl, bvlos_required, night_required, created_at, updated_at, created_by, updated_by)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -698,6 +738,15 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Mission not found")
+        # Hard-block on expiry when aircraft or crew is being changed
+        if update.aircraft_id is not None or update.rpas_pilot_id is not None or update.visual_observer_id is not None:
+            # Get current mission to fill in unchanged values
+            cursor = await db.execute("SELECT aircraft_id, rpas_pilot_id, visual_observer_id FROM missions WHERE mission_id = ?", (mission_id,))
+            row = await cursor.fetchone()
+            aid = update.aircraft_id if update.aircraft_id is not None else (row["aircraft_id"] if row else None)
+            pid = update.rpas_pilot_id if update.rpas_pilot_id is not None else (row["rpas_pilot_id"] if row else None)
+            vid = update.visual_observer_id if update.visual_observer_id is not None else (row["visual_observer_id"] if row else None)
+            await _check_mission_eligibility(db, aid, pid, vid)
         updates = []
         params = []
         field_map = {"title": update.title, "description": update.description, "mission_type": update.mission_type, "priority": update.priority, "planned_date": update.planned_date, "location": update.location, "aircraft_id": update.aircraft_id, "roc_id": update.roc_id, "rpas_pilot_id": update.rpas_pilot_id, "visual_observer_id": update.visual_observer_id, "dg_category": update.dg_category, "max_altitude_agl": update.max_altitude_agl, "risk_assessment_id": update.risk_assessment_id}
@@ -1775,6 +1824,45 @@ async def get_deadlines(request: Request, days_ahead: int = 30):
                 "entity_type": "distribution", "entity_id": r["distribution_id"],
                 "title": f"Acknowledgement overdue: {r['document_id']} → {r['recipient_id']}",
                 "due_date": dist_date, "overdue": overdue, "priority": "medium",
+            })
+
+        # 7. Personnel license expiry
+        cursor = await db.execute(
+            "SELECT license_id, person_id, license_type, expiry_date FROM personnel_licenses WHERE expiry_date IS NOT NULL AND expiry_date <= ?", (cutoff,)
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["expiry_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "personnel_license", "entity_id": r["license_id"],
+                "title": f"License expiry: {r['license_type']} - {r['person_id']}",
+                "due_date": r["expiry_date"], "overdue": overdue, "priority": "high",
+            })
+
+        # 8. Aircraft insurance expiry
+        cursor = await db.execute(
+            "SELECT insurance_id, aircraft_id, insurance_type, expiry_date FROM aircraft_insurance WHERE expiry_date IS NOT NULL AND expiry_date <= ?", (cutoff,)
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["expiry_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "aircraft_insurance", "entity_id": r["insurance_id"],
+                "title": f"Insurance expiry: {r['insurance_type']} - {r['aircraft_id']}",
+                "due_date": r["expiry_date"], "overdue": overdue, "priority": "critical",
+            })
+
+        # 9. Aircraft document expiry
+        cursor = await db.execute(
+            "SELECT doc_id, aircraft_id, document_type, expiry_date FROM aircraft_documents WHERE expiry_date IS NOT NULL AND expiry_date <= ?", (cutoff,)
+        )
+        for row in await cursor.fetchall():
+            r = dict(row)
+            overdue = r["expiry_date"] < now[:10]
+            deadlines.append({
+                "entity_type": "aircraft_document", "entity_id": r["doc_id"],
+                "title": f"Aircraft doc expiry: {r['document_type']} - {r['aircraft_id']}",
+                "due_date": r["expiry_date"], "overdue": overdue, "priority": "high",
             })
 
         overdue_count = sum(1 for d in deadlines if d["overdue"])

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { p2Api } from "../api/p2";
 import { Users, BarChart3, Calendar, Share2, Plus } from "lucide-react";
+import { useToast } from "../components/ui/Toast";
 
 function outsourcedStatusClass(status: string) {
   switch (status) {
@@ -14,6 +15,7 @@ function outsourcedStatusClass(status: string) {
 
 export function OutsourcedFunctions() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["outsourced-functions"],
     queryFn: () => p2Api.listOutsourcedFunctions(),
@@ -21,6 +23,7 @@ export function OutsourcedFunctions() {
   const [showForm, setShowForm] = useState(false);
   const [provider, setProvider] = useState("");
   const [scope, setScope] = useState("");
+  const [ofError, setOfError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createOutsourcedFunction(data),
@@ -29,6 +32,11 @@ export function OutsourcedFunctions() {
       setShowForm(false);
       setProvider("");
       setScope("");
+      setOfError("");
+      toast({ title: "Provider added", message: "Outsourced function recorded successfully.", type: "success" });
+    },
+    onError: () => {
+      setOfError("Failed to add outsourced function. Please try again.");
     },
   });
 
@@ -75,6 +83,11 @@ export function OutsourcedFunctions() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {ofError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {ofError}
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">Provider Name</label>
@@ -87,7 +100,14 @@ export function OutsourcedFunctions() {
             </div>
             <button
               disabled={!provider.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ provider_name: provider, scope })}
+              onClick={() => {
+                setOfError("");
+                if (!provider.trim()) {
+                  setOfError("Provider name is required.");
+                  return;
+                }
+                createMutation.mutate({ provider_name: provider, scope });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create Provider"}
@@ -134,6 +154,7 @@ export function OutsourcedFunctions() {
 
 export function SafetyKPIs() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["safety-kpis"],
     queryFn: () => p2Api.listSafetyKPIs(),
@@ -141,6 +162,7 @@ export function SafetyKPIs() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
+  const [kpiError, setKpiError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSafetyKPI(data),
@@ -149,6 +171,11 @@ export function SafetyKPIs() {
       setShowForm(false);
       setName("");
       setTarget("");
+      setKpiError("");
+      toast({ title: "KPI added", message: "Safety KPI recorded successfully.", type: "success" });
+    },
+    onError: () => {
+      setKpiError("Failed to add KPI. Please try again.");
     },
   });
 
@@ -191,6 +218,11 @@ export function SafetyKPIs() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {kpiError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {kpiError}
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">KPI Name</label>
@@ -203,7 +235,14 @@ export function SafetyKPIs() {
             </div>
             <button
               disabled={!name.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ kpi_name: name, target })}
+              onClick={() => {
+                setKpiError("");
+                if (!name.trim()) {
+                  setKpiError("KPI name is required.");
+                  return;
+                }
+                createMutation.mutate({ kpi_name: name, target });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create KPI"}
@@ -248,12 +287,14 @@ export function SafetyKPIs() {
 
 export function SecurityReviews() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["security-reviews"],
     queryFn: () => p2Api.listSecurityReviews(),
   });
   const [showForm, setShowForm] = useState(false);
   const [date, setDate] = useState("");
+  const [srError, setSrError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSecurityReview(data),
@@ -261,6 +302,11 @@ export function SecurityReviews() {
       qc.invalidateQueries({ queryKey: ["security-reviews"] });
       setShowForm(false);
       setDate("");
+      setSrError("");
+      toast({ title: "Review scheduled", message: "Security review meeting recorded successfully.", type: "success" });
+    },
+    onError: () => {
+      setSrError("Failed to schedule review. Please try again.");
     },
   });
 
@@ -303,10 +349,22 @@ export function SecurityReviews() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {srError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {srError}
+              </div>
+            )}
             <input type="date" className="app-input mb-3" value={date} onChange={(e) => setDate(e.target.value)} />
             <button
               disabled={!date || createMutation.isPending}
-              onClick={() => createMutation.mutate({ meeting_date: date })}
+              onClick={() => {
+                setSrError("");
+                if (!date) {
+                  setSrError("Meeting date is required.");
+                  return;
+                }
+                createMutation.mutate({ meeting_date: date });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Scheduling…" : "Schedule Review"}
@@ -351,6 +409,7 @@ export function SecurityReviews() {
 
 export function DGResponsibilityMatrix() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["dg-matrix"],
     queryFn: () => p2Api.listDGMatrix(),
@@ -359,6 +418,7 @@ export function DGResponsibilityMatrix() {
   const [project, setProject] = useState("");
   const [stage, setStage] = useState("");
   const [role, setRole] = useState("");
+  const [dgError, setDgError] = useState("");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createDGMatrix(data),
@@ -368,6 +428,11 @@ export function DGResponsibilityMatrix() {
       setProject("");
       setStage("");
       setRole("");
+      setDgError("");
+      toast({ title: "Entry added", message: "DG responsibility entry recorded successfully.", type: "success" });
+    },
+    onError: () => {
+      setDgError("Failed to add entry. Please try again.");
     },
   });
 
@@ -410,6 +475,11 @@ export function DGResponsibilityMatrix() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
+            {dgError && (
+              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                {dgError}
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="app-label">Project / Route</label>
@@ -426,7 +496,14 @@ export function DGResponsibilityMatrix() {
             </div>
             <button
               disabled={!project.trim() || createMutation.isPending}
-              onClick={() => createMutation.mutate({ project_or_route: project, process_stage: stage, responsible_role: role })}
+              onClick={() => {
+                setDgError("");
+                if (!project.trim()) {
+                  setDgError("Project / Route is required.");
+                  return;
+                }
+                createMutation.mutate({ project_or_route: project, process_stage: stage, responsible_role: role });
+              }}
               className="app-btn-primary w-full"
             >
               {createMutation.isPending ? "Creating…" : "Create Entry"}

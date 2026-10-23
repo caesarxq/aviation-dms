@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUpRight, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck } from "lucide-react";
 import { safetyApi } from "../api/safety";
+import { SafetyKPIsModal } from "../components/ui/modals/SafetyKPIsModal";
 
 function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
@@ -41,6 +43,7 @@ export function Dashboard() {
     queryKey: ["deadlines"],
     queryFn: () => safetyApi.getDeadlines(30),
   });
+  const [showKpiModal, setShowKpiModal] = useState(false);
 
   const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
   const isLoading = trendsLoading || deadlinesLoading;
@@ -58,6 +61,12 @@ export function Dashboard() {
           <Link to="/notifications" className="app-btn-secondary">
             View notifications <ArrowUpRight size={15} />
           </Link>
+          <button
+            onClick={() => setShowKpiModal(true)}
+            className="app-btn-secondary"
+          >
+            <BarChart3 size={16} /> View Safety KPIs
+          </button>
         </div>
       </header>
 
@@ -148,6 +157,7 @@ export function Dashboard() {
           </div>
         </div>
       </section>
+      <SafetyKPIsModal open={showKpiModal} onClose={() => setShowKpiModal(false)} />
     </div>
   );
 }

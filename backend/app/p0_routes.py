@@ -7,7 +7,7 @@ import json
 
 from .database import get_db
 from .audit import log_audit_event
-from .rbac import has_permission, check_sod
+from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware
 
@@ -33,6 +33,28 @@ def _gen_id(prefix: str) -> str:
 
 def now_iso() -> str:
     return datetime.now().isoformat()
+
+
+@router.get("/auth/profile")
+async def current_auth_profile(request: Request):
+    """Return the authenticated user's effective role and permission profile."""
+    actor = _actor(request)
+    role = _role(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT user_id, username, email, full_name, role, department, is_active FROM users WHERE user_id = ?",
+            (actor,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=401, detail="Authenticated user profile not found")
+        profile = dict(row)
+        if profile["role"] != role:
+            raise HTTPException(status_code=401, detail="Authenticated role does not match user profile")
+        return {"user": profile, "role": role, "authenticated_via": getattr(request.state, "authenticated_via", "unknown"), "permissions": sorted(ROLE_PERMISSIONS[role])}
+    finally:
+        await db.close()
 
 
 # --- Documents ---
@@ -163,16 +185,8 @@ async def transition_version_state(version_id: str, request: Request, state: str
     _check(request, "document:read")
     actor = _actor(request)
     role = _role(request)
-    # Permission checks based on target state
-    if state in ("approved", "kcaa_approved"):
-        if not has_permission(role, "document:approve"):
-            raise HTTPException(status_code=403, detail="Approve permission required")
-    if state == "published":
-        if not has_permission(role, "document:publish"):
-            raise HTTPException(status_code=403, detail="Publish permission required")
-    if state in ("draft", "in_review"):
-        if not has_permission(role, "document:update"):
-            raise HTTPException(status_code=403, detail="Update permission required")
+    if state not in {"draft", "in_review", "approved", "rejected", "kcaa_approved", "published"}:
+        raise HTTPException(status_code=422, detail=f"Invalid version state: {state}")
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM document_versions WHERE version_id = ?", (version_id,))
@@ -180,21 +194,34 @@ async def transition_version_state(version_id: str, request: Request, state: str
         if not row:
             raise HTTPException(status_code=404, detail="Version not found")
         row = dict(row)
-        # Check if parent document requires KCAA approval
-        cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (row["document_id"],))
-        doc_row = await cursor.fetchone()
-        kcaa_required = doc_row["kcaa_approval_required"] if doc_row else 0
-        # Permission checks for state transitions
-        if state in ("approved", "kcaa_approved", "published"):
+        allowed_transitions = {
+            "draft": {"in_review"},
+            "in_review": {"approved", "rejected", "draft"},
+            "approved": {"kcaa_approved", "published", "rejected"},
+            "kcaa_approved": {"published", "rejected"},
+            "rejected": {"draft"},
+            "published": set(),
+        }
+        if state not in allowed_transitions.get(row["state"], set()):
+            raise HTTPException(status_code=422, detail=f"Invalid version transition: {row['state']} -> {state}")
+        # Permission checks based on target state
+        if state in ("approved", "kcaa_approved"):
             if not has_permission(role, "document:approve"):
                 raise HTTPException(status_code=403, detail="Approve permission required")
         if state == "published":
             if not has_permission(role, "document:publish"):
                 raise HTTPException(status_code=403, detail="Publish permission required")
-            # SoD check
+        if state in ("draft", "in_review", "rejected"):
+            if not has_permission(role, "document:update"):
+                raise HTTPException(status_code=403, detail="Update permission required")
+        # Check if parent document requires KCAA approval
+        cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (row["document_id"],))
+        doc_row = await cursor.fetchone()
+        kcaa_required = doc_row["kcaa_approval_required"] if doc_row else 0
+        # KCAA gate and separation-of-duties checks for publication.
+        if state == "published":
             if not check_sod("version", "publish", actor, row["created_by"]):
                 raise HTTPException(status_code=403, detail="Cannot publish own version (SoD)")
-            # KCAA gate: if document requires KCAA approval, version must be kcaa_approved first
             if kcaa_required and row["kcaa_approved"] != 1:
                 raise HTTPException(status_code=403, detail="KCAA approval required before publishing")
         updates = ["state = ?", "updated_at = ?", "updated_by = ?"]
@@ -216,6 +243,13 @@ async def transition_version_state(version_id: str, request: Request, state: str
         params.append(version_id)
         await db.execute(f"UPDATE document_versions SET {', '.join(updates)} WHERE version_id = ?", params)
         await db.commit()
+        await log_audit_event(
+            "document_version",
+            version_id,
+            "state_changed",
+            actor,
+            {"from_state": row["state"], "to_state": state, "document_id": row["document_id"]},
+        )
         cursor = await db.execute("SELECT * FROM document_versions WHERE version_id = ?", (version_id,))
         row = await cursor.fetchone()
         return DocumentVersionResponse(**dict(row))
@@ -286,7 +320,6 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
             new_ver = update.version_number or "00.01.01"
 
         ver_id = _gen_id("VER")
-        kcaa_required_bool = kcaa_required == 1
 
         await db.execute(
             """INSERT INTO document_versions
@@ -295,9 +328,9 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 ver_id, doc_id, new_ver, "draft", update.content, update.change_summary,
-                1 if kcaa_required_bool else 0,
-                actor if kcaa_required_bool else None,
-                now if kcaa_required_bool else None,
+                0,
+                None,
+                None,
                 now, now, actor, actor,
             ),
         )
@@ -310,7 +343,7 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
             state="draft",
             content=update.content,
             change_summary=update.change_summary,
-            kcaa_approved=1 if kcaa_required_bool else 0,
+            kcaa_approved=0,
             created_at=now,
             updated_at=now,
         )
@@ -562,6 +595,58 @@ async def list_audit_events(request: Request, entity_type: Optional[str] = None,
     from .audit import query_audit_events
     events = await query_audit_events(entity_type=entity_type, entity_id=entity_id, limit=limit, offset=offset)
     return [AuditEventResponse(**e) for e in events]
+
+
+# --- System administrator observability ---
+@router.get("/admin/observability")
+async def system_admin_observability(request: Request):
+    """Return safe operational, workflow, audit, and RBAC telemetry for admins."""
+    if _role(request) != "system_admin":
+        raise HTTPException(status_code=403, detail="System administrator permission required")
+
+    async def grouped_counts(db, table: str, column: str) -> dict:
+        cursor = await db.execute(f"SELECT {column} AS value, COUNT(*) AS count FROM {table} GROUP BY {column} ORDER BY {column}")
+        rows = await cursor.fetchall()
+        return {str(row["value"]): row["count"] for row in rows}
+
+    db = await get_db()
+    try:
+        integrity_cursor = await db.execute("PRAGMA integrity_check")
+        integrity = await integrity_cursor.fetchone()
+        table_counts = {}
+        for table in ("users", "documents", "document_versions", "document_proposals", "change_requests", "audit_events", "notifications"):
+            cursor = await db.execute(f"SELECT COUNT(*) AS count FROM {table}")
+            table_counts[table] = (await cursor.fetchone())["count"]
+
+        user_cursor = await db.execute(
+            "SELECT user_id, username, full_name, role, department, is_active, updated_at FROM users ORDER BY full_name"
+        )
+        users = [dict(row) for row in await user_cursor.fetchall()]
+        audit_cursor = await db.execute(
+            "SELECT COUNT(*) AS count FROM audit_events WHERE timestamp >= datetime('now', '-24 hours')"
+        )
+        audit_last_24h = (await audit_cursor.fetchone())["count"]
+        scheduler = getattr(request.app.state, "scheduler", None)
+        scheduler_task = getattr(scheduler, "_task", None) if scheduler else None
+        scheduler_running = bool(scheduler and getattr(scheduler, "_running", False) and scheduler_task and not scheduler_task.done())
+        return {
+            "generated_at": now_iso(),
+            "health": {"status": "ok", "scheduler": "running" if scheduler_running else "not_started"},
+            "database": {"status": "ok" if integrity and integrity[0] == "ok" else "degraded", "integrity": integrity[0] if integrity else "unknown"},
+            "tables": table_counts,
+            "users": {"total": len(users), "active": sum(1 for user in users if user["is_active"]), "inactive": sum(1 for user in users if not user["is_active"])},
+            "user_profiles": users,
+            "audit": {"events_last_24h": audit_last_24h, "total_events": table_counts["audit_events"]},
+            "workflows": {
+                "document_versions": await grouped_counts(db, "document_versions", "state"),
+                "document_proposals": await grouped_counts(db, "document_proposals", "status"),
+                "change_requests": await grouped_counts(db, "change_requests", "status"),
+                "notifications": await grouped_counts(db, "notifications", "status"),
+            },
+            "role_matrix": all_role_profiles(),
+        }
+    finally:
+        await db.close()
 
 
 # --- Evidence Pack ---

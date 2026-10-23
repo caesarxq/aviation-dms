@@ -3,7 +3,7 @@ from app.rbac import has_permission, check_sod, ROLE_PERMISSIONS, PERMISSIONS
 
 
 def test_all_roles_defined():
-    assert len(ROLE_PERMISSIONS) == 15
+    assert len(ROLE_PERMISSIONS) == 16
 
 
 def test_system_admin_has_all_permissions():
@@ -44,6 +44,12 @@ def test_sod_creator_cannot_approve():
 def test_unknown_role_no_permissions():
     assert not has_permission("nonexistent_role", "document:read")
     assert has_permission("nonexistent_role", "document:read") is False
+
+
+def test_unknown_dev_role_returns_401(client):
+    response = client.get("/api/p0/documents", headers={"X-Role": "not-a-role", "X-Actor": "eval"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Unknown role: not-a-role"
 
 
 def test_as_contracted_minimal():

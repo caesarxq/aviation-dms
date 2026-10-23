@@ -725,6 +725,222 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_by TEXT NOT NULL
 );
 
+-- Document proposals (section/line/word/illustration-level change suggestions)
+CREATE TABLE IF NOT EXISTS document_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    change_request_id TEXT,
+    change_set_id TEXT,
+    proposal_type TEXT NOT NULL DEFAULT 'section',
+    target_ref TEXT NOT NULL,
+    section_number TEXT,
+    section_heading TEXT,
+    block_type TEXT,
+    block_index INTEGER,
+    anchor_id TEXT,
+    context_before TEXT,
+    context_after TEXT,
+    original_text TEXT,
+    proposed_text TEXT,
+    original_excerpt_html TEXT,
+    proposed_excerpt_html TEXT,
+    change_fingerprint TEXT,
+    change_sequence INTEGER,
+    changed_token_count INTEGER,
+    change_density REAL,
+    grouping_reason TEXT,
+    rationale TEXT,
+    severity TEXT NOT NULL DEFAULT 'minor',
+    status TEXT NOT NULL DEFAULT 'draft',
+    proposer_id TEXT NOT NULL,
+    reviewer_id TEXT,
+    reviewed_at TEXT,
+    disposition TEXT,
+    applied_at TEXT,
+    applied_version_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (version_id) REFERENCES document_versions(version_id),
+    FOREIGN KEY (change_request_id) REFERENCES change_requests(cr_id)
+);
+
+-- Document sections (for section-level targeting and navigation)
+CREATE TABLE IF NOT EXISTS document_sections (
+    section_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    section_number TEXT,
+    heading TEXT NOT NULL,
+    content_start_offset INTEGER,
+    content_end_offset INTEGER,
+    parent_section_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (version_id) REFERENCES document_versions(version_id)
+);
+
+-- Document annotations (comments/highlights on specific locations)
+CREATE TABLE IF NOT EXISTS document_annotations (
+    annotation_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    annotation_type TEXT NOT NULL DEFAULT 'comment',
+    target_ref TEXT NOT NULL,
+    selected_text TEXT,
+    content TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    resolved_by TEXT,
+    resolved_at TEXT,
+    parent_annotation_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (version_id) REFERENCES document_versions(version_id)
+);
+
+-- Personnel licenses (crew/role qualifications and credentials)
+CREATE TABLE IF NOT EXISTS personnel_licenses (
+    license_id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    license_type TEXT NOT NULL,
+    license_number TEXT,
+    issuing_authority TEXT,
+    issued_date TEXT,
+    expiry_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'valid',
+    document_ref TEXT,
+    aircraft_type TEXT,
+    notes TEXT,
+    verified_by TEXT,
+    verified_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (person_id) REFERENCES users(user_id)
+);
+
+-- License renewal history
+CREATE TABLE IF NOT EXISTS license_renewal_history (
+    renewal_id TEXT PRIMARY KEY,
+    license_id TEXT NOT NULL,
+    previous_expiry TEXT,
+    new_expiry TEXT NOT NULL,
+    renewal_date TEXT NOT NULL,
+    evidence_ref TEXT,
+    renewed_by TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (license_id) REFERENCES personnel_licenses(license_id)
+);
+
+-- Personnel self-service uploads (credential documents)
+CREATE TABLE IF NOT EXISTS personnel_uploads (
+    upload_id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    license_type TEXT NOT NULL,
+    document_type TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER,
+    content_type TEXT,
+    verification_status TEXT NOT NULL DEFAULT 'pending',
+    verified_by TEXT,
+    verified_at TEXT,
+    rejection_reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (person_id) REFERENCES users(user_id)
+);
+
+-- Aircraft insurance policies
+CREATE TABLE IF NOT EXISTS aircraft_insurance (
+    insurance_id TEXT PRIMARY KEY,
+    aircraft_id TEXT NOT NULL,
+    insurance_type TEXT NOT NULL,
+    policy_number TEXT,
+    insurer TEXT NOT NULL,
+    broker TEXT,
+    coverage_amount REAL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    premium_amount REAL,
+    premium_currency TEXT NOT NULL DEFAULT 'USD',
+    start_date TEXT,
+    expiry_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    document_ref TEXT,
+    renewal_status TEXT NOT NULL DEFAULT 'not_started',
+    renewal_notes TEXT,
+    verified_by TEXT,
+    verified_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (aircraft_id) REFERENCES aircraft(aircraft_id)
+);
+
+-- Insurance renewal history
+CREATE TABLE IF NOT EXISTS insurance_renewal_history (
+    renewal_id TEXT PRIMARY KEY,
+    insurance_id TEXT NOT NULL,
+    previous_expiry TEXT,
+    new_expiry TEXT NOT NULL,
+    renewal_date TEXT NOT NULL,
+    evidence_ref TEXT,
+    renewed_by TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (insurance_id) REFERENCES aircraft_insurance(insurance_id)
+);
+
+-- Aircraft documents (CoA, registration, ARC, noise cert, radio license, etc.)
+CREATE TABLE IF NOT EXISTS aircraft_documents (
+    doc_id TEXT PRIMARY KEY,
+    aircraft_id TEXT NOT NULL,
+    document_type TEXT NOT NULL,
+    document_number TEXT,
+    issuing_authority TEXT,
+    issue_date TEXT,
+    expiry_date TEXT,
+    status TEXT NOT NULL DEFAULT 'valid',
+    document_ref TEXT,
+    notes TEXT,
+    verified_by TEXT,
+    verified_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (aircraft_id) REFERENCES aircraft(aircraft_id)
+);
+
+-- Indexes for new tables
+CREATE INDEX IF NOT EXISTS idx_proposals_document ON document_proposals(document_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON document_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_proposer ON document_proposals(proposer_id);
+CREATE INDEX IF NOT EXISTS idx_annotations_document ON document_annotations(document_id);
+CREATE INDEX IF NOT EXISTS idx_annotations_status ON document_annotations(status);
+CREATE INDEX IF NOT EXISTS idx_personnel_licenses_person ON personnel_licenses(person_id);
+CREATE INDEX IF NOT EXISTS idx_personnel_licenses_expiry ON personnel_licenses(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_personnel_licenses_status ON personnel_licenses(status);
+CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_aircraft ON aircraft_insurance(aircraft_id);
+CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_expiry ON aircraft_insurance(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_status ON aircraft_insurance(status);
+CREATE INDEX IF NOT EXISTS idx_aircraft_documents_aircraft ON aircraft_documents(aircraft_id);
+CREATE INDEX IF NOT EXISTS idx_aircraft_documents_expiry ON aircraft_documents(expiry_date);
+CREATE INDEX IF NOT EXISTS idx_aircraft_documents_status ON aircraft_documents(status);
+
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient);
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
@@ -770,6 +986,29 @@ async def init_db():
             await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_approved_at TEXT")
         except Exception:
             pass
+        # document_proposals: atomic proposal location and excerpt metadata
+        proposal_columns = {
+            "change_set_id": "TEXT",
+            "section_number": "TEXT",
+            "section_heading": "TEXT",
+            "block_type": "TEXT",
+            "block_index": "INTEGER",
+            "anchor_id": "TEXT",
+            "context_before": "TEXT",
+            "context_after": "TEXT",
+            "original_excerpt_html": "TEXT",
+            "proposed_excerpt_html": "TEXT",
+            "change_fingerprint": "TEXT",
+            "change_sequence": "INTEGER",
+            "changed_token_count": "INTEGER",
+            "change_density": "REAL",
+            "grouping_reason": "TEXT",
+        }
+        for column, column_type in proposal_columns.items():
+            try:
+                await db.execute(f"ALTER TABLE document_proposals ADD COLUMN {column} {column_type}")
+            except Exception:
+                pass
         await db.commit()
     finally:
         await db.close()

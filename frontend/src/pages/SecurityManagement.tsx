@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { ShieldAlert, AlertTriangle } from "lucide-react";
+import { ShieldAlert, AlertTriangle, Calendar, Users } from "lucide-react";
+import { SecurityReviewsModal } from "../components/ui/modals/SecurityReviewsModal";
+import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunctionsModal";
 
 function incidentSeverityClass(severity: string) {
   switch (severity) {
@@ -21,6 +23,8 @@ export function SecurityManagement() {
   });
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [showSecurityReviewModal, setShowSecurityReviewModal] = useState(false);
+  const [showOutsourcedModal, setShowOutsourcedModal] = useState(false);
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/security-incidents", data).then((r: any) => r.data),
@@ -44,6 +48,18 @@ export function SecurityManagement() {
           className="app-btn-primary"
         >
           <AlertTriangle size={16} /> {showForm ? "Cancel" : "Report Incident"}
+        </button>
+        <button
+          onClick={() => setShowSecurityReviewModal(true)}
+          className="app-btn-secondary"
+        >
+          <Calendar size={16} /> Schedule Review
+        </button>
+        <button
+          onClick={() => setShowOutsourcedModal(true)}
+          className="app-btn-secondary"
+        >
+          <Users size={16} /> Register Outsourced Function
         </button>
       </header>
 
@@ -138,6 +154,8 @@ export function SecurityManagement() {
           </div>
         )}
       </section>
+      <SecurityReviewsModal open={showSecurityReviewModal} onClose={() => setShowSecurityReviewModal(false)} />
+      <OutsourcedFunctionsModal open={showOutsourcedModal} onClose={() => setShowOutsourcedModal(false)} />
     </div>
   );
 }

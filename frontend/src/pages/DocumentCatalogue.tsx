@@ -1,16 +1,58 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, FileText, Search, ShieldCheck } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, FileText, Search, ShieldCheck, Plus, Shuffle } from "lucide-react";
 import api from "../api/client";
+import { Modal } from "../components/ui/Modal";
+import { useToast } from "../components/ui/Toast";
+import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
 
 export function DocumentCatalogue() {
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [showNewDoc, setShowNewDoc] = useState(false);
+  const [showVersionDiffModal, setShowVersionDiffModal] = useState(false);
+  const [newDocForm, setNewDocForm] = useState({
+    document_id: "", title: "", doc_class: "manual", classification: "S2",
+    kcaa_approval_required: false, review_due_date: "", status: "draft",
+  });
+  const [newDocError, setNewDocError] = useState("");
+  const qc = useQueryClient();
   const { data: docs = [], isLoading } = useQuery({
     queryKey: ["documents"],
     queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
   });
+
+  const createMutation = useMutation({
+    mutationFn: (data: any) => api.post("/p0/documents", data).then((r: any) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["documents"] });
+      setShowNewDoc(false);
+      setNewDocForm({
+        document_id: "", title: "", doc_class: "manual", classification: "S2",
+        kcaa_approval_required: false, review_due_date: "", status: "draft",
+      });
+      setNewDocError("");
+      toast({ title: "Document created", message: "The new document has been added to the catalogue.", type: "success" });
+    },
+    onError: () => {
+      setNewDocError("Failed to create document. Please check your entries and try again.");
+    },
+  });
+
+  const handleCreate = () => {
+    setNewDocError("");
+    if (!newDocForm.document_id.trim()) {
+      setNewDocError("Document ID is required.");
+      return;
+    }
+    if (!newDocForm.title.trim()) {
+      setNewDocError("Document title is required.");
+      return;
+    }
+    createMutation.mutate(newDocForm);
+  };
 
   const filteredDocs = useMemo(() => docs.filter((d: any) => {
     const haystack = `${d.title} ${d.document_id} ${d.doc_class}`.toLowerCase();
@@ -25,8 +67,56 @@ export function DocumentCatalogue() {
           <h1 className="app-title">Document Catalogue</h1>
           <p className="app-subtitle">Find, review, and open the controlled documents that support safe operations.</p>
         </div>
-        <Link to="/documents/DOC-001/edit" className="app-btn-primary"><FileText size={16} /> Open editor <ArrowUpRight size={15} /></Link>
+        <div className="flex gap-2">
+          <button onClick={() => setShowNewDoc(true)} className="app-btn-secondary flex items-center gap-1">
+            <Plus size={16} /> New Document
+          </button>
+          <button onClick={() => setShowVersionDiffModal(true)} className="app-btn-secondary">
+            <Shuffle size={16} /> Version Diff
+          </button>
+          <Link to="/documents/DOC-001/edit" className="app-btn-primary"><FileText size={16} /> Open editor <ArrowUpRight size={15} /></Link>
+        </div>
       </header>
+
+      {/* New Document Modal */}
+      <Modal open={showNewDoc} onClose={() => setShowNewDoc(false)} title="Create New Document">
+        {newDocError && (
+          <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+            {newDocError}
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <input
+            className="border border-kfl-border rounded p-2 text-sm"
+            placeholder="Document ID (e.g., DOC-016)"
+            value={newDocForm.document_id}
+            onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })}
+          />
+          <input
+            className="border border-kfl-border rounded p-2 text-sm"
+            placeholder="Title"
+            value={newDocForm.title}
+            onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })}
+          />
+          <select className="border border-kfl-border rounded p-2 text-sm" value={newDocForm.doc_class} onChange={e => setNewDocForm({ ...newDocForm, doc_class: e.target.value })}>
+            <option value="manual">Manual</option><option value="procedure">Procedure</option><option value="form">Form</option><option value="checklist">Checklist</option><option value="report">Report</option>
+          </select>
+          <select className="border border-kfl-border rounded p-2 text-sm" value={newDocForm.classification} onChange={e => setNewDocForm({ ...newDocForm, classification: e.target.value })}>
+            <option value="S0">S0 Public</option><option value="S1">S1 Internal</option><option value="S2">S2 Confidential</option><option value="S3">S3 Restricted</option><option value="S4">S4 Highly Restricted</option>
+          </select>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={newDocForm.kcaa_approval_required} onChange={e => setNewDocForm({ ...newDocForm, kcaa_approval_required: e.target.checked })} />
+            KCAA Approval Required
+          </label>
+          <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Review Due Date" value={newDocForm.review_due_date} onChange={e => setNewDocForm({ ...newDocForm, review_due_date: e.target.value })} />
+        </div>
+        <div className="mt-4 flex gap-2 justify-end">
+          <button onClick={() => setShowNewDoc(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+          <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
+            {createMutation.isPending ? "Creating…" : "Create Document"}
+          </button>
+        </div>
+      </Modal>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="app-surface p-4"><div className="app-label">Total documents</div><div className="mt-2 text-2xl font-bold text-kfl-text">{docs.length}</div></div>
@@ -67,6 +157,9 @@ export function DocumentCatalogue() {
           </div>
         )}
       </section>
+      <VersionDiffModal open={showVersionDiffModal} onClose={() => setShowVersionDiffModal(false)} />
     </div>
   );
 }
+
+export default DocumentCatalogue;

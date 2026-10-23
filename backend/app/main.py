@@ -5,6 +5,7 @@ from .database import init_db
 from .p0_auth import P0AuthMiddleware
 from .p0_routes import router as p0_router
 from .p1_routes import router as p1_router
+from .p2_routes import router as p2_router
 
 from contextlib import asynccontextmanager
 
@@ -44,6 +45,7 @@ app.add_middleware(P0AuthMiddleware)
 
 app.include_router(p0_router, prefix="/api/p0")
 app.include_router(p1_router, prefix="/api/p1")
+app.include_router(p2_router, prefix="/api/p2")
 
 
 
