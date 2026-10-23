@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useParams } from "react-router-dom";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Eye, Save, ArrowLeft } from "lucide-react";
 
 export function DocumentEditor() {
-  const [docId, setDocId] = useState("");
+  const { docId: routeDocId } = useParams<{ docId: string }>();
+  const [docId, setDocId] = useState(routeDocId || "");
 
   return (
     <div className="app-page">
@@ -33,13 +35,18 @@ export function DocumentEditor() {
 
 function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (id: string) => void }) {
   const qc = useQueryClient();
-  const { isLoading } = useQuery({
+  const { data: content, isLoading } = useQuery({
     queryKey: ["doc-content", docId],
     queryFn: () => api.get(`/p0/documents/${docId}/content`).then((r: any) => r.data),
     enabled: !!docId,
   });
 
   const [editContent, setEditContent] = useState("");
+  useEffect(() => {
+    if (content?.content !== undefined) {
+      setEditContent(content.content || "");
+    }
+  }, [content?.content]);
   const [changeSummary, setChangeSummary] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [saving, setSaving] = useState(false);
