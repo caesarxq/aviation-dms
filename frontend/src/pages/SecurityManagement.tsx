@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
+import { ShieldAlert, AlertTriangle } from "lucide-react";
+
+function incidentSeverityClass(severity: string) {
+  switch (severity) {
+    case "critical": return "app-status app-status-critical";
+    case "high": return "app-status app-status-warning";
+    case "medium": return "app-status app-status-info";
+    case "low": return "app-status app-status-healthy";
+    default: return "app-status app-status-info";
+  }
+}
 
 export function SecurityManagement() {
   const qc = useQueryClient();
@@ -21,45 +32,112 @@ export function SecurityManagement() {
   });
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Security Management</h1>
-        <button onClick={() => setShowForm(!showForm)} className="bg-kfl-teal text-white px-4 py-2 rounded">
-          {showForm ? "Cancel" : "Report Incident"}
-        </button>
-      </div>
-      {showForm && (
-        <div className="bg-white p-4 rounded shadow mb-4">
-          <input className="border p-2 w-full mb-2 rounded" placeholder="Incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <button onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })} className="bg-kfl-teal text-white px-4 py-2 rounded">Report</button>
+    <div className="app-page">
+      <header className="app-page-header">
+        <div>
+          <div className="app-eyebrow">Security Management</div>
+          <h1 className="app-title">Security Incidents</h1>
+          <p className="app-subtitle">Report, track, and manage security incidents and assessments.</p>
         </div>
-      )}
-      {isLoading ? (
-        <p>Loading...</p>
-      ) : (
-        <table className="min-w-full bg-white border rounded shadow">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {incidents.map((i: any) => (
-              <tr key={i.incident_id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-sm">{i.incident_id}</td>
-                <td className="px-4 py-2 text-sm font-medium">{i.title}</td>
-                <td className="px-4 py-2 text-sm">{i.incident_type}</td>
-                <td className="px-4 py-2 text-sm">{i.severity}</td>
-                <td className="px-4 py-2 text-sm">{i.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="app-btn-primary"
+        >
+          <AlertTriangle size={16} /> {showForm ? "Cancel" : "Report Incident"}
+        </button>
+      </header>
+
+      <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="app-surface p-4">
+          <div className="app-label">Total Incidents</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-text">{incidents.length}</div>
+        </div>
+        <div className="app-surface p-4">
+          <div className="app-label">Critical / High</div>
+          <div className="mt-2 text-2xl font-bold text-red-700">{incidents.filter((i: any) => i.severity === "critical" || i.severity === "high").length}</div>
+        </div>
+        <div className="app-surface p-4">
+          <div className="app-label">Open</div>
+          <div className="mt-2 text-2xl font-bold text-amber-700">{incidents.filter((i: any) => i.status === "open").length}</div>
+        </div>
+      </section>
+
+      <section className="app-surface overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
+          <div className="relative min-w-0 flex-1 md:max-w-md">
+            <ShieldAlert size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
+            <input
+              value={showForm ? title : ""}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Search incidents…"
+              className="app-input pl-9 relative z-10"
+            />
+          </div>
+          <select className="app-input w-full md:w-auto">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="investigating">Investigating</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+
+        {showForm && (
+          <div className="app-surface p-5 mb-5">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <div className="app-label mb-1">New Security Incident</div>
+                <p className="text-xs text-kfl-muted">Report a security incident for investigation.</p>
+              </div>
+              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+            </div>
+            <input className="app-input mb-3" placeholder="Incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <button
+              disabled={!title.trim() || createMutation.isPending}
+              onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })}
+              className="app-btn-primary w-full"
+            >
+              {createMutation.isPending ? "Submitting…" : "Report Incident"}
+            </button>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">Loading incidents…</div>
+        ) : incidents.length === 0 ? (
+          <div className="app-surface border-dashed p-10 text-center">
+            <ShieldAlert size={26} className="mx-auto mb-2 text-kfl-muted" />
+            <p className="text-sm font-bold text-kfl-text">No security incidents.</p>
+            <p className="mt-1 text-xs text-kfl-muted">Report your first incident to begin security tracking.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
+                <tr>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">ID</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Title</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Type</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Severity</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-kfl-border">
+                {incidents.map((i: any) => (
+                  <tr key={i.incident_id} className="transition hover:bg-kfl-surface-subtle">
+                    <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{i.incident_id}</td>
+                    <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.title}</td>
+                    <td className="px-4 py-4 text-sm text-kfl-secondary">{i.incident_type}</td>
+                    <td className="px-4 py-4">
+                      <span className={incidentSeverityClass(i.severity)}>{i.severity}</span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-kfl-secondary">{i.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

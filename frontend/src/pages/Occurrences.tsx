@@ -1,6 +1,18 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
+import { AlertTriangle, FileText } from "lucide-react";
+
+function severityClass(severity: string) {
+  switch (severity) {
+    case "catastrophic": return "app-status app-status-critical";
+    case "hazardous": return "app-status app-status-warning";
+    case "major": return "app-status app-status-warning";
+    case "minor": return "app-status app-status-info";
+    case "negligible": return "app-status app-status-healthy";
+    default: return "app-status app-status-info";
+  }
+}
 
 export function Occurrences() {
   const qc = useQueryClient();
@@ -12,6 +24,7 @@ export function Occurrences() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("minor");
+  const [occurrenceType, setOccurrenceType] = useState("incident");
 
   const createMutation = useMutation({
     mutationFn: (data: any) => safetyApi.createOccurrence(data),
@@ -24,55 +37,139 @@ export function Occurrences() {
   });
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Safety Occurrences</h1>
-        <button onClick={() => setShowForm(!showForm)} className="bg-kfl-teal text-white px-4 py-2 rounded">
-          {showForm ? "Cancel" : "Report Occurrence"}
-        </button>
-      </div>
-      {showForm && (
-        <div className="bg-white p-4 rounded shadow mb-4">
-          <input className="border p-2 w-full mb-2 rounded" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="border p-2 w-full mb-2 rounded" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <select className="border p-2 mb-2 rounded" value={severity} onChange={(e) => setSeverity(e.target.value)}>
-            <option value="negligible">Negligible</option>
-            <option value="minor">Minor</option>
-            <option value="major">Major</option>
-            <option value="hazardous">Hazardous</option>
-            <option value="catastrophic">Catastrophic</option>
-          </select>
-          <button onClick={() => createMutation.mutate({ title, description, severity })} className="bg-kfl-teal text-white px-4 py-2 rounded">
-            Submit
-          </button>
+    <div className="app-page">
+      <header className="app-page-header">
+        <div>
+          <div className="app-eyebrow">Safety Management</div>
+          <h1 className="app-title">Safety Occurrences</h1>
+          <p className="app-subtitle">Report, track, and manage aviation safety occurrences.</p>
         </div>
-      )}
-      {isLoading ? (
-        <p>Loading...</p>
-      ) : (
-        <table className="min-w-full bg-white border rounded shadow">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Serial</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {occurrences.map((o: any) => (
-              <tr key={o.occurrence_id} className="hover:bg-gray-50">
-                <td className="px-4 py-2 text-sm">{o.serial_number}</td>
-                <td className="px-4 py-2 text-sm font-medium">{o.title}</td>
-                <td className="px-4 py-2 text-sm">{o.occurrence_type}</td>
-                <td className="px-4 py-2 text-sm">{o.severity}</td>
-                <td className="px-4 py-2 text-sm">{o.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className="app-btn-primary"
+        >
+          <AlertTriangle size={16} /> {showForm ? "Cancel" : "Report Occurrence"}
+        </button>
+      </header>
+
+      <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="app-surface p-4">
+          <div className="app-label">Total Occurrences</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-text">{occurrences.length}</div>
+        </div>
+        <div className="app-surface p-4">
+          <div className="app-label">Critical / Hazardous</div>
+          <div className="mt-2 text-2xl font-bold text-red-700">{occurrences.filter((o: any) => o.severity === "catastrophic" || o.severity === "hazardous").length}</div>
+        </div>
+        <div className="app-surface p-4">
+          <div className="app-label">Open / Reported</div>
+          <div className="mt-2 text-2xl font-bold text-amber-700">{occurrences.filter((o: any) => o.status === "reported").length}</div>
+        </div>
+      </section>
+
+      <section className="app-surface overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
+          <div className="relative min-w-0 flex-1 md:max-w-md">
+            <FileText size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
+            <input value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search occurrences…" className="app-input pl-9 relative z-10" />
+          </div>
+          <select className="app-input w-full md:w-auto">
+            <option value="">All statuses</option>
+            <option value="reported">Reported</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="investigating">Investigating</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+
+        {showForm && (
+          <div className="app-surface p-5 mb-5">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <div className="app-label mb-1">New Safety Occurrence</div>
+                <p className="text-xs text-kfl-muted">Report a safety occurrence for investigation.</p>
+              </div>
+              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+            </div>
+            <input className="app-input mb-3" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <textarea className="app-input mb-3" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="app-label">Occurrence Type</label>
+                <select value={occurrenceType} onChange={(e) => setOccurrenceType(e.target.value)} className="app-input">
+                  <option value="incident">Incident</option>
+                  <option value="accident">Accident</option>
+                  <option value="serious_incident">Serious Incident</option>
+                  <option value="near_miss">Near Miss</option>
+                </select>
+              </div>
+              <div>
+                <label className="app-label">Severity</label>
+                <select value={severity} onChange={(e) => setSeverity(e.target.value)} className="app-input">
+                  <option value="negligible">Negligible</option>
+                  <option value="minor">Minor</option>
+                  <option value="major">Major</option>
+                  <option value="hazardous">Hazardous</option>
+                  <option value="catastrophic">Catastrophic</option>
+                </select>
+              </div>
+            </div>
+            <button
+              disabled={!title.trim() || createMutation.isPending}
+              onClick={() => createMutation.mutate({ title, description, occurrence_type: occurrenceType, severity })}
+              className="app-btn-primary w-full"
+            >
+              {createMutation.isPending ? "Submitting…" : "Submit Report"}
+            </button>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">Loading occurrences…</div>
+        ) : occurrences.length === 0 ? (
+          <div className="app-surface border-dashed p-10 text-center">
+            <AlertTriangle size={26} className="mx-auto mb-2 text-kfl-muted" />
+            <p className="text-sm font-bold text-kfl-text">No occurrences reported.</p>
+            <p className="mt-1 text-xs text-kfl-muted">Report your first occurrence to begin safety tracking.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
+                <tr>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Serial</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Title</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Type</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Severity</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Open</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-kfl-border">
+                {occurrences.map((o: any) => (
+                  <tr key={o.occurrence_id} className="transition hover:bg-kfl-surface-subtle group">
+                    <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{o.serial_number}</td>
+                    <td className="px-4 py-4">
+                      <div className="font-semibold text-kfl-text">{o.title}</div>
+                      <div className="mt-1 text-xs text-kfl-muted">{o.location || "—"}</div>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-kfl-secondary">{o.occurrence_type}</td>
+                    <td className="px-4 py-4">
+                      <span className={severityClass(o.severity)}>{o.severity}</span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className="app-status app-status-info">{o.status}</span>
+                    </td>
+                    <td className="px-4 py-4 text-right text-sm">
+                      <button onClick={() => {}} className="text-xs font-medium text-kfl-blue hover:underline">Open</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

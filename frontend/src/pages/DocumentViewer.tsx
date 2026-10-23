@@ -11,15 +11,16 @@ export function DocumentViewer() {
     enabled: !!docId,
   });
 
-  if (isLoading) return <div className="p-6">Loading document...</div>;
-  if (!content) return <div className="p-6">Document not found</div>;
+  if (isLoading) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading document…</div></div>;
+  if (!content) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Document not found</div></div>;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex justify-between items-center mb-6 border-b pb-2">
+    <div className="app-page">
+      <header className="app-page-header">
         <div>
-          <h1 className="text-2xl font-bold">{docId}</h1>
-          <p className="text-gray-600 text-sm">
+          <div className="app-eyebrow">Document Control</div>
+          <h1 className="app-title">{docId}</h1>
+          <p className="app-subtitle">
             Version {content.version_number} • State: {content.state}
             {content.kcaa_approved ? " • KCAA Approved" : ""}
           </p>
@@ -27,66 +28,54 @@ export function DocumentViewer() {
         <div className="flex gap-2">
           <button
             onClick={() => navigator.clipboard.writeText(content.content || "")}
-            className="px-3 py-2 text-sm border rounded hover:bg-gray-100 flex items-center gap-1"
+            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
           >
             <Copy size={16} /> Copy Content
           </button>
           <button
             onClick={() => window.history.back()}
-            className="px-3 py-2 text-sm border rounded hover:bg-gray-100 flex items-center gap-1"
+            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
           >
             <ArrowLeft size={16} /> Back
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="bg-white border rounded shadow p-6">
-        <div className="prose prose-lg max-w-none">
+      <section className="app-surface overflow-hidden p-5">
+        <div className="prose prose-lg max-w-none whitespace-pre-wrap bg-white p-4 rounded border border-kfl-border">
           {content.content ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm">{content.content}</pre>
+            content.content
           ) : (
-            <p className="text-gray-500 italic">No content available for this document.</p>
+            <p className="text-kfl-muted italic">No content available for this document.</p>
           )}
         </div>
-      </div>
+      </section>
 
-      <div className="mt-6 p-4 bg-gray-50 rounded border">
-        <h3 className="font-semibold mb-2">Version Details</h3>
+      <section className="app-surface p-5">
+        <h2 className="font-semibold mb-2 text-kfl-text">Version Details</h2>
         <dl className="grid grid-cols-2 gap-4 text-sm">
-          <dt className="font-medium text-gray-500">Document ID</dt>
-          <dd className="font-mono">{content.document_id}</dd>
-          <dt className="font-medium text-gray-500">Version ID</dt>
-          <dd className="font-mono">{content.version_id}</dd>
-          <dt className="font-medium text-gray-500">Version Number</dt>
-          <dd>{content.version_number}</dd>
-          <dt className="font-medium text-gray-500">State</dt>
+          <dt className="font-medium text-kfl-muted">Document ID</dt>
+          <dd className="font-mono text-kfl-text">{content.document_id}</dd>
+          <dt className="font-medium text-kfl-muted">Version ID</dt>
+          <dd className="font-mono text-kfl-text">{content.version_id}</dd>
+          <dt className="font-medium text-kfl-muted">Version Number</dt>
+          <dd className="font-kfl-text">{content.version_number}</dd>
+          <dt className="font-medium text-kfl-muted">State</dt>
           <dd>
-            <span className={`px-2 py-1 rounded text-xs ${
-              content.state === "published" ? "bg-green-100 text-green-800" :
-              content.state === "draft" ? "bg-yellow-100 text-yellow-800" :
-              content.state === "approved" ? "bg-blue-100 text-blue-800" :
-              "bg-gray-100 text-gray-800"
-            }`}>
-              {content.state}
-            </span>
+            <span className={`app-status ${content.state === "published" ? "app-status-healthy" : content.state === "draft" ? "app-status-warning" : content.state === "approved" ? "app-status-info" : "app-status-info"}`}>{content.state}</span>
           </dd>
-          <dt className="font-medium text-gray-500">KCAA Approved</dt>
+          <dt className="font-medium text-kfl-muted">KCAA Approved</dt>
           <dd>
-            <span className={`px-2 py-1 rounded text-xs ${
-              content.kcaa_approved === 1 ? "bg-green-100 text-green-800" :
-              "bg-gray-100 text-gray-800"
-            }`}>
+            <span className={`app-status ${content.kcaa_approved === 1 ? "app-status-healthy" : "app-status-critical"}`}>
               {content.kcaa_approved === 1 ? "Yes" : "No"}
             </span>
           </dd>
-          <dt className="font-medium text-gray-500">Created</dt>
-          <dd>{content.created_at}</dd>
-          <dt className="font-medium text-gray-500">Updated</dt>
-          <dd>{content.updated_at}</dd>
+          <dt className="font-medium text-kfl-muted">Created</dt>
+          <dd className="font-mono text-kfl-text">{content.created_at}</dd>
+          <dt className="font-medium text-kfl-muted">Updated</dt>
+          <dd className="font-mono text-kfl-text">{content.updated_at}</dd>
         </dl>
-      </div>
+      </section>
     </div>
   );
 }
-
-export default DocumentViewer;
