@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { p2Api } from "../api/p2";
 import { Users, BarChart3, Calendar, Share2, Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
+import FormField from "../components/ui/FormField";
 
 function outsourcedStatusClass(status: string) {
   switch (status) {
@@ -89,14 +90,12 @@ export function OutsourcedFunctions() {
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="app-label">Provider Name</label>
+              <FormField htmlFor="provider_name_94" label="Provider name" hint="Use the legal or trading name of the external provider." required>
                 <input id="provider_name_94" name="provider_name" className="app-input" placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">Scope</label>
+              </FormField>
+              <FormField htmlFor="scope_of_work_98" label="Scope of work" hint="Describe the service being outsourced." required>
                 <input id="scope_of_work_98" name="scope_of_work" className="app-input" placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
-              </div>
+              </FormField>
             </div>
             <button
               disabled={!provider.trim() || createMutation.isPending}
@@ -224,14 +223,12 @@ export function SafetyKPIs() {
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="app-label">KPI Name</label>
+              <FormField htmlFor="kpi_name_229" label="KPI name" hint="Name the safety performance measure." required>
                 <input id="kpi_name_229" name="kpi_name" className="app-input" placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">Target</label>
+              </FormField>
+              <FormField htmlFor="target_value_233" label="Target value" hint="Include the unit or threshold in the target description.">
                 <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => setTarget(e.target.value)} />
-              </div>
+              </FormField>
             </div>
             <button
               disabled={!name.trim() || createMutation.isPending}
@@ -481,18 +478,15 @@ export function DGResponsibilityMatrix() {
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <label className="app-label">Project / Route</label>
+              <FormField htmlFor="project_or_route_486" label="Project or route" hint="Identify the operation or route covered." required>
                 <input id="project_or_route_486" name="project_or_route" className="app-input" placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">Process Stage</label>
+              </FormField>
+              <FormField htmlFor="process_stage_490" label="Process stage" hint="Name the stage where DG responsibility applies.">
                 <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => setStage(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">Responsible Role</label>
+              </FormField>
+              <FormField htmlFor="responsible_role_494" label="Responsible role" hint="Use the accountable post or role, not a password or secret.">
                 <input id="responsible_role_494" name="responsible_role" className="app-input" placeholder="Responsible role" value={role} onChange={(e) => setRole(e.target.value)} />
-              </div>
+              </FormField>
             </div>
             <button
               disabled={!project.trim() || createMutation.isPending}

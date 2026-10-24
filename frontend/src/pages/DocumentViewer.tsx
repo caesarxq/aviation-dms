@@ -281,17 +281,20 @@ export function DocumentViewer() {
             <button onClick={() => setNewAnnotationType("comment")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "comment" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Comment</button>
             <button onClick={() => setNewAnnotationType("highlight")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "highlight" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Highlight</button>
           </div>
+          <label htmlFor="add_a_comment_284" className="block text-xs font-semibold text-kfl-text mb-1">Comment</label>
           <textarea id="add_a_comment_284" name="add_a_comment"
             className="w-full h-16 p-2 border border-kfl-border rounded text-sm resize-none focus:outline-none mb-2"
             value={annotationContent}
             onChange={e => setAnnotationContent(e.target.value)}
-            placeholder="Add a comment…"
+            placeholder="Summarize the observation or required action"
           />
+          <label htmlFor="target_reference_290" className="block text-xs font-semibold text-kfl-text mb-1">Target reference</label>
+          <p className="text-[11px] text-kfl-muted mb-1">Identify the affected section, line, or illustration.</p>
           <input id="target_reference_290" name="target_reference"
             className="w-full p-2 border border-kfl-border rounded text-sm focus:outline-none mb-2"
             value={annotationTargetRef}
             onChange={e => setAnnotationTargetRef(e.target.value)}
-            placeholder="Target reference (e.g., section 3.2, line 15)"
+            placeholder="Section 3.2, line 15"
           />
           <div className="flex justify-end gap-2">
             <button onClick={closeToolbar} className="app-btn-secondary text-xs px-3 py-1.5">Cancel</button>
