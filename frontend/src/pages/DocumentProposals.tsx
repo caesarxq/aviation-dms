@@ -6,6 +6,7 @@ import api from "../api/client";
 import { Plus, Check, X, ArrowUpRight } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
+import FormField from "../components/ui/FormField";
 
 function ProposalExcerpt({ label, html, fallback, tone }: { label: string; html?: string; fallback?: string; tone: "removed" | "added" }) {
   const safeHtml = html ? DOMPurify.sanitize(html) : "";
@@ -139,16 +140,28 @@ export function DocumentProposals() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
-              <select id="proposal_type_142" name="proposal_type" className="border border-kfl-border rounded p-2 text-sm" value={form.proposal_type} onChange={e => setForm({ ...form, proposal_type: e.target.value })}>
-                <option value="word">Word</option><option value="line">Line</option><option value="section">Section</option><option value="illustration">Illustration</option><option value="table">Table</option>
-              </select>
-              <select id="severity_145" name="severity" className="border border-kfl-border rounded p-2 text-sm" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
-                <option value="minor">Minor</option><option value="major">Major</option><option value="critical">Critical</option>
-              </select>
-              <input id="target_ref_148" name="target_ref" className="border border-kfl-border rounded p-2 text-sm" placeholder="Target Ref (e.g., section 3.2, line 45)" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
-              <input id="original_text_149" name="original_text" className="border border-kfl-border rounded p-2 text-sm" placeholder="Original Text" value={form.original_text} onChange={e => setForm({ ...form, original_text: e.target.value })} />
-              <input id="proposed_text_150" name="proposed_text" className="border border-kfl-border rounded p-2 text-sm" placeholder="Proposed Text" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
-              <input id="rationale_151" name="rationale" className="border border-kfl-border rounded p-2 text-sm" placeholder="Rationale" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} />
+              <FormField htmlFor="proposal_type_142" label="Proposal type" hint="Select the smallest affected document unit.">
+                <select id="proposal_type_142" name="proposal_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.proposal_type} onChange={e => setForm({ ...form, proposal_type: e.target.value })}>
+                  <option value="word">Word</option><option value="line">Line</option><option value="section">Section</option><option value="illustration">Illustration</option><option value="table">Table</option>
+                </select>
+              </FormField>
+              <FormField htmlFor="severity_145" label="Severity" required>
+                <select id="severity_145" name="severity" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
+                  <option value="minor">Minor</option><option value="major">Major</option><option value="critical">Critical</option>
+                </select>
+              </FormField>
+              <FormField htmlFor="target_ref_148" label="Target reference" hint="Identify the section, block, line, or illustration affected." required>
+                <input id="target_ref_148" name="target_ref" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Section 3.2, line 45" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
+              </FormField>
+              <FormField htmlFor="original_text_149" label="Original text" hint="Paste the exact current wording.">
+                <input id="original_text_149" name="original_text" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Current wording" value={form.original_text} onChange={e => setForm({ ...form, original_text: e.target.value })} />
+              </FormField>
+              <FormField htmlFor="proposed_text_150" label="Proposed text" hint="Enter the replacement wording.">
+                <input id="proposed_text_150" name="proposed_text" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Replacement wording" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
+              </FormField>
+              <FormField htmlFor="rationale_151" label="Rationale" hint="Explain the compliance, safety, or operational reason for the change.">
+                <input id="rationale_151" name="rationale" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Why is this change needed?" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} />
+              </FormField>
             </div>
             <div className="mt-4 flex gap-2 justify-end">
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

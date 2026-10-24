@@ -5,6 +5,7 @@ import { Shield, Plus, AlertTriangle, Calendar, KeyRound } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 import { RenewalProgressModal } from "../components/ui/modals/RenewalProgressModal";
+import FormField from "../components/ui/FormField";
 
 const INSURANCE_TYPES = ["hull", "liability", "war_risk", "passenger_liability", "cargo_liability"];
 const AIRCRAFT_DOC_TYPES = ["airworthiness_cert", "registration", "arc", "noise_cert", "radio_license", "maintenance_release"];
@@ -177,16 +178,18 @@ export function AircraftInsurance() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <select id="insurance_type_180" name="insurance_type" className="border border-kfl-border rounded p-2 text-sm" value={insForm.insurance_type} onChange={e => setInsForm({ ...insForm, insurance_type: e.target.value })}>
-                  {INSURANCE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-                </select>
-                <input id="insurer_183" name="insurer" className="border border-kfl-border rounded p-2 text-sm" placeholder="Insurer" value={insForm.insurer} onChange={e => setInsForm({ ...insForm, insurer: e.target.value })} />
-                <input id="policy_number_184" name="policy_number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Policy Number" value={insForm.policy_number} onChange={e => setInsForm({ ...insForm, policy_number: e.target.value })} />
-                <input id="broker_185" name="broker" className="border border-kfl-border rounded p-2 text-sm" placeholder="Broker" value={insForm.broker} onChange={e => setInsForm({ ...insForm, broker: e.target.value })} />
-                <input id="start_date_186" name="start_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Start Date" value={insForm.start_date} onChange={e => setInsForm({ ...insForm, start_date: e.target.value })} />
-                <input id="expiry_date_187" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={insForm.expiry_date} onChange={e => setInsForm({ ...insForm, expiry_date: e.target.value })} />
-                <input id="coverage_amount_188" name="coverage_amount" type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Coverage Amount" value={insForm.coverage_amount} onChange={e => setInsForm({ ...insForm, coverage_amount: e.target.value })} />
-                <input id="premium_amount_189" name="premium_amount" type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Premium Amount" value={insForm.premium_amount} onChange={e => setInsForm({ ...insForm, premium_amount: e.target.value })} />
+                <FormField htmlFor="insurance_type_180" label="Insurance type" required>
+                  <select id="insurance_type_180" name="insurance_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={insForm.insurance_type} onChange={e => setInsForm({ ...insForm, insurance_type: e.target.value })}>
+                    {INSURANCE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+                  </select>
+                </FormField>
+                <FormField htmlFor="insurer_183" label="Insurer" required><input id="insurer_183" name="insurer" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Insurer" value={insForm.insurer} onChange={e => setInsForm({ ...insForm, insurer: e.target.value })} /></FormField>
+                <FormField htmlFor="policy_number_184" label="Policy number" required><input id="policy_number_184" name="policy_number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Policy number" value={insForm.policy_number} onChange={e => setInsForm({ ...insForm, policy_number: e.target.value })} /></FormField>
+                <FormField htmlFor="broker_185" label="Broker"><input id="broker_185" name="broker" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Broker" value={insForm.broker} onChange={e => setInsForm({ ...insForm, broker: e.target.value })} /></FormField>
+                <FormField htmlFor="start_date_186" label="Start date"><input id="start_date_186" name="start_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={insForm.start_date} onChange={e => setInsForm({ ...insForm, start_date: e.target.value })} /></FormField>
+                <FormField htmlFor="expiry_date_187" label="Expiry date" hint="Required for renewal tracking." required><input id="expiry_date_187" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={insForm.expiry_date} onChange={e => setInsForm({ ...insForm, expiry_date: e.target.value })} /></FormField>
+                <FormField htmlFor="coverage_amount_188" label="Coverage amount"><input id="coverage_amount_188" name="coverage_amount" type="number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Coverage amount" value={insForm.coverage_amount} onChange={e => setInsForm({ ...insForm, coverage_amount: e.target.value })} /></FormField>
+                <FormField htmlFor="premium_amount_189" label="Premium amount"><input id="premium_amount_189" name="premium_amount" type="number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Premium amount" value={insForm.premium_amount} onChange={e => setInsForm({ ...insForm, premium_amount: e.target.value })} /></FormField>
               </div>
               <div className="mt-4 flex gap-2 justify-end">
                 <button onClick={() => setShowInsForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

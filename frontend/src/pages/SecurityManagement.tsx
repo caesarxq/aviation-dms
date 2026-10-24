@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { ShieldAlert, AlertTriangle, Calendar, Users } from "lucide-react";
+import FormField from "../components/ui/FormField";
 import { SecurityReviewsModal } from "../components/ui/modals/SecurityReviewsModal";
 import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunctionsModal";
 
@@ -106,7 +107,9 @@ export function SecurityManagement() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
-            <input id="incident_title_109" name="incident_title" className="app-input mb-3" placeholder="Incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <FormField htmlFor="incident_title_109" label="Incident title" hint="Summarize the security event without including sensitive credentials or secrets." required>
+              <input id="incident_title_109" name="incident_title" className="app-input" placeholder="Security incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </FormField>
             <button
               disabled={!title.trim() || createMutation.isPending}
               onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })}
