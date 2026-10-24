@@ -252,14 +252,16 @@ export function AircraftInsurance() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <select id="document_type_252" name="document_type" className="border border-kfl-border rounded p-2 text-sm" value={docForm.document_type} onChange={e => setDocForm({ ...docForm, document_type: e.target.value })}>
-                  {AIRCRAFT_DOC_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-                </select>
-                <input id="document_number_255" name="document_number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Document Number" value={docForm.document_number} onChange={e => setDocForm({ ...docForm, document_number: e.target.value })} />
-                <input id="issuing_authority_256" name="issuing_authority" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issuing Authority" value={docForm.issuing_authority} onChange={e => setDocForm({ ...docForm, issuing_authority: e.target.value })} />
-                <input id="issue_date_257" name="issue_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issue Date" value={docForm.issue_date} onChange={e => setDocForm({ ...docForm, issue_date: e.target.value })} />
-                <input id="expiry_date_258" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} />
-                <input id="notes_259" name="notes" className="border border-kfl-border rounded p-2 text-sm" placeholder="Notes" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} />
+                <FormField htmlFor="document_type_252" label="Document type" required>
+                  <select id="document_type_252" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.document_type} onChange={e => setDocForm({ ...docForm, document_type: e.target.value })}>
+                    {AIRCRAFT_DOC_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+                  </select>
+                </FormField>
+                <FormField htmlFor="document_number_255" label="Document number" required><input id="document_number_255" name="document_number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Document number" value={docForm.document_number} onChange={e => setDocForm({ ...docForm, document_number: e.target.value })} /></FormField>
+                <FormField htmlFor="issuing_authority_256" label="Issuing authority" required><input id="issuing_authority_256" name="issuing_authority" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Issuing authority" value={docForm.issuing_authority} onChange={e => setDocForm({ ...docForm, issuing_authority: e.target.value })} /></FormField>
+                <FormField htmlFor="issue_date_257" label="Issue date"><input id="issue_date_257" name="issue_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.issue_date} onChange={e => setDocForm({ ...docForm, issue_date: e.target.value })} /></FormField>
+                <FormField htmlFor="expiry_date_258" label="Expiry date" hint="Enter the expiry date when the document is time-limited."><input id="expiry_date_258" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} /></FormField>
+                <FormField htmlFor="notes_259" label="Notes"><input id="notes_259" name="notes" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Additional notes" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} /></FormField>
               </div>
               <div className="mt-4 flex gap-2 justify-end">
                 <button onClick={() => setShowDocForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
