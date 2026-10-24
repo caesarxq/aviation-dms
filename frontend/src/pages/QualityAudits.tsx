@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { ClipboardCheck, Wrench } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
+import FormField from "../components/ui/FormField";
 import { CorrectiveActionsModal } from "../components/ui/modals/CorrectiveActionsModal";
 
 function auditStatusClass(status: string) {
@@ -116,7 +117,9 @@ export function QualityAudits() {
                 {auditError}
               </div>
             )}
-            <input id="audit_title_119" name="audit_title" className="app-input mb-3" placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <FormField htmlFor="audit_title_119" label="Audit title" hint="Use the audit scope or activity name." required>
+              <input id="audit_title_119" name="audit_title" className="app-input" placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </FormField>
             <button
               disabled={!title.trim() || createMutation.isPending}
               onClick={() => {

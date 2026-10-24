@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
+import FormField from "../components/ui/FormField";
 
 function missionStatusClass(status: string) {
   switch (status) {
@@ -134,7 +135,9 @@ export function Missions() {
                 {missionError}
               </div>
             )}
-            <input id="mission_title_137" name="mission_title" className="app-input mb-3" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <FormField htmlFor="mission_title_137" label="Mission title" hint="Use the operational mission name or reference." required>
+              <input id="mission_title_137" name="mission_title" className="app-input" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </FormField>
             <button
               disabled={!title.trim() || createMutation.isPending}
               onClick={() => {

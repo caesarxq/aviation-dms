@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { AlertTriangle, FileText } from "lucide-react";
+import FormField from "../components/ui/FormField";
 
 function severityClass(severity: string) {
   switch (severity) {
@@ -91,8 +92,14 @@ export function Occurrences() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
-            <input id="title_94" name="title" className="app-input mb-3" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <textarea id="description_95" name="description" className="app-input mb-3" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+            <div className="space-y-3 mb-4">
+              <FormField htmlFor="title_94" label="Occurrence title" hint="Summarize the event clearly and concisely." required>
+                <input id="title_94" name="title" className="app-input" placeholder="Occurrence title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              </FormField>
+              <FormField htmlFor="description_95" label="Description" hint="Include what happened, where, and any immediate action taken.">
+                <textarea id="description_95" name="description" className="app-input" placeholder="Describe the occurrence" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+              </FormField>
+            </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="app-label">Occurrence Type</label>

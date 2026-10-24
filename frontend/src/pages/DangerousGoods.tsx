@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Plus, Package, Share2 } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
+import FormField from "../components/ui/FormField";
 import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
 
 function dgStatusClass(status: string) {
@@ -115,18 +116,15 @@ export function DangerousGoods() {
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="app-label">Proper Shipping Name</label>
-                <input id="field_120" name="field" className="app-input" placeholder="e.g. Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">DG Class</label>
-                <input id="field_124" name="field" className="app-input" placeholder="e.g. Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
-              </div>
-              <div>
-                <label className="app-label">UN Number</label>
-                <input id="field_128" name="field" className="app-input" placeholder="e.g. UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
-              </div>
+              <FormField htmlFor="field_120" label="Proper shipping name" hint="Use the name shown in the dangerous goods declaration." required>
+                <input id="field_120" name="proper_shipping_name" className="app-input" placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
+              </FormField>
+              <FormField htmlFor="field_124" label="DG class" hint="Enter the applicable hazard class, for example Class 3." required>
+                <input id="field_124" name="dg_class" className="app-input" placeholder="Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
+              </FormField>
+              <FormField htmlFor="field_128" label="UN number" hint="Use the four-digit UN number where applicable.">
+                <input id="field_128" name="un_number" className="app-input" placeholder="UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
+              </FormField>
             </div>
             <button
               disabled={!properShippingName.trim() || createMutation.isPending}
