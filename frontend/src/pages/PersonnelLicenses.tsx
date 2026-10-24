@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { AlertTriangle, Plus, KeyRound } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
+import FormField from "../components/ui/FormField";
 import { useToast } from "../components/ui/Toast";
 import { RenewalProgressModal } from "../components/ui/modals/RenewalProgressModal";
 
@@ -126,41 +127,32 @@ export function PersonnelLicenses() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <input id="person_id_129" name="person_id"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Person ID"
-            value={form.person_id}
-            onChange={e => setForm({ ...form, person_id: e.target.value })}
-          />
-          <select id="license_type_135" name="license_type" className="border border-kfl-border rounded p-2 text-sm" value={form.license_type} onChange={e => setForm({ ...form, license_type: e.target.value })}>
-            {LICENSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-          </select>
-          <input id="license_number_138" name="license_number"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="License Number"
-            value={form.license_number}
-            onChange={e => setForm({ ...form, license_number: e.target.value })}
-          />
-          <input id="issuing_authority_144" name="issuing_authority"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Issuing Authority"
-            value={form.issuing_authority}
-            onChange={e => setForm({ ...form, issuing_authority: e.target.value })}
-          />
-          <input id="issued_date_150" name="issued_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issued Date" value={form.issued_date} onChange={e => setForm({ ...form, issued_date: e.target.value })} />
-          <input id="expiry_date_151" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
-          <input id="aircraft_type_152" name="aircraft_type"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Aircraft Type (for type ratings)"
-            value={form.aircraft_type}
-            onChange={e => setForm({ ...form, aircraft_type: e.target.value })}
-          />
-          <input id="notes_158" name="notes"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Notes"
-            value={form.notes}
-            onChange={e => setForm({ ...form, notes: e.target.value })}
-          />
+          <FormField htmlFor="person_id_129" label="Person ID" hint="Use the ID from the personnel register, for example u-safety." required>
+            <input id="person_id_129" name="person_id" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="u-safety" value={form.person_id} onChange={e => setForm({ ...form, person_id: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="license_type_135" label="License type" required>
+            <select id="license_type_135" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.license_type} onChange={e => setForm({ ...form, license_type: e.target.value })}>
+              {LICENSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+            </select>
+          </FormField>
+          <FormField htmlFor="license_number_138" label="License number" required>
+            <input id="license_number_138" name="license_number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="License number" value={form.license_number} onChange={e => setForm({ ...form, license_number: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="issuing_authority_144" label="Issuing authority" required>
+            <input id="issuing_authority_144" name="issuing_authority" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Issuing authority" value={form.issuing_authority} onChange={e => setForm({ ...form, issuing_authority: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="issued_date_150" label="Issued date">
+            <input id="issued_date_150" name="issued_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.issued_date} onChange={e => setForm({ ...form, issued_date: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="expiry_date_151" label="Expiry date" hint="Required for renewal tracking." required>
+            <input id="expiry_date_151" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="aircraft_type_152" label="Aircraft type" hint="Complete this for type ratings; otherwise leave blank.">
+            <input id="aircraft_type_152" name="aircraft_type" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Aircraft type" value={form.aircraft_type} onChange={e => setForm({ ...form, aircraft_type: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="notes_158" label="Notes">
+            <input id="notes_158" name="notes" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Additional notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
           <button onClick={() => setShowForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

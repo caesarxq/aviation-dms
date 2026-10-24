@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, FileText, Search, ShieldCheck, Plus, Shuffle } from "lucide-react";
 import api from "../api/client";
 import { Modal } from "../components/ui/Modal";
+import FormField from "../components/ui/FormField";
 import { useToast } from "../components/ui/Toast";
 import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
 
@@ -86,29 +87,29 @@ export function DocumentCatalogue() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <input id="document_id_89" name="document_id"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Document ID (e.g., DOC-016)"
-            value={newDocForm.document_id}
-            onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })}
-          />
-          <input id="title_95" name="title"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Title"
-            value={newDocForm.title}
-            onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })}
-          />
-          <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm" value={newDocForm.doc_class} onChange={e => setNewDocForm({ ...newDocForm, doc_class: e.target.value })}>
-            <option value="manual">Manual</option><option value="procedure">Procedure</option><option value="form">Form</option><option value="checklist">Checklist</option><option value="report">Report</option>
-          </select>
-          <select id="classification_104" name="classification" className="border border-kfl-border rounded p-2 text-sm" value={newDocForm.classification} onChange={e => setNewDocForm({ ...newDocForm, classification: e.target.value })}>
-            <option value="S0">S0 Public</option><option value="S1">S1 Internal</option><option value="S2">S2 Confidential</option><option value="S3">S3 Restricted</option><option value="S4">S4 Highly Restricted</option>
-          </select>
-          <label className="flex items-center gap-2 text-sm">
+          <FormField htmlFor="document_id_89" label="Document ID" hint="Use the controlled identifier, for example DOC-016." required>
+            <input id="document_id_89" name="document_id" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="title_95" label="Document title" required>
+            <input id="title_95" name="title" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Title" value={newDocForm.title} onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="doc_class_101" label="Document class" hint="Choose the controlled-document category.">
+            <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.doc_class} onChange={e => setNewDocForm({ ...newDocForm, doc_class: e.target.value })}>
+              <option value="manual">Manual</option><option value="procedure">Procedure</option><option value="form">Form</option><option value="checklist">Checklist</option><option value="report">Report</option>
+            </select>
+          </FormField>
+          <FormField htmlFor="classification_104" label="Classification" hint="Select the highest applicable handling restriction.">
+            <select id="classification_104" name="classification" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.classification} onChange={e => setNewDocForm({ ...newDocForm, classification: e.target.value })}>
+              <option value="S0">S0 Public</option><option value="S1">S1 Internal</option><option value="S2">S2 Confidential</option><option value="S3">S3 Restricted</option><option value="S4">S4 Highly Restricted</option>
+            </select>
+          </FormField>
+          <label className="flex items-center gap-2 text-sm self-end pb-2">
             <input id="kcaa_approval_required_108" name="kcaa_approval_required" type="checkbox" checked={newDocForm.kcaa_approval_required} onChange={e => setNewDocForm({ ...newDocForm, kcaa_approval_required: e.target.checked })} />
-            KCAA Approval Required
+            KCAA approval required
           </label>
-          <input id="review_due_date_111" name="review_due_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Review Due Date" value={newDocForm.review_due_date} onChange={e => setNewDocForm({ ...newDocForm, review_due_date: e.target.value })} />
+          <FormField htmlFor="review_due_date_111" label="Review due date" hint="Set the next controlled-document review date.">
+            <input id="review_due_date_111" name="review_due_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.review_due_date} onChange={e => setNewDocForm({ ...newDocForm, review_due_date: e.target.value })} />
+          </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
           <button onClick={() => setShowNewDoc(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

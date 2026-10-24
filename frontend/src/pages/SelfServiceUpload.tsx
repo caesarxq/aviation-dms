@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Upload, CheckCircle, Clock, AlertTriangle } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
+import FormField from "../components/ui/FormField";
 import { useToast } from "../components/ui/Toast";
 
 const DOCUMENT_TYPES = [
@@ -109,35 +110,22 @@ export function SelfServiceUpload() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <input id="your_person_id_112" name="your_person_id"
-            className="border border-kfl-border rounded p-2 text-sm"
-            placeholder="Your Person ID (e.g., u-safety)"
-            value={uploadForm.person_id}
-            onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })}
-          />
-          <select id="license_type_118" name="license_type"
-            className="border border-kfl-border rounded p-2 text-sm"
-            value={uploadForm.license_type}
-            onChange={e => setUploadForm({ ...uploadForm, license_type: e.target.value })}
-          >
-            {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-          </select>
-          <select id="document_type_125" name="document_type"
-            className="border border-kfl-border rounded p-2 text-sm"
-            value={uploadForm.document_type}
-            onChange={e => setUploadForm({ ...uploadForm, document_type: e.target.value })}
-          >
-            <option value="license_copy">License Copy</option>
-            <option value="certificate">Certificate</option>
-            <option value="medical_cert">Medical Certificate</option>
-            <option value="training_record">Training Record</option>
-            <option value="other">Other</option>
-          </select>
-          <input id="file_136" name="file"
-            type="file"
-            className="border border-kfl-border rounded p-2 text-sm col-span-2"
-            onChange={e => setSelectedFile(e.target.files?.[0] || null)}
-          />
+          <FormField htmlFor="your_person_id_112" label="Person ID" hint="Use your personnel register ID, for example u-safety." required>
+            <input id="your_person_id_112" name="your_person_id" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="u-safety" value={uploadForm.person_id} onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })} />
+          </FormField>
+          <FormField htmlFor="license_type_118" label="Credential type" required>
+            <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => setUploadForm({ ...uploadForm, license_type: e.target.value })}>
+              {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+            </select>
+          </FormField>
+          <FormField htmlFor="document_type_125" label="Document type" required>
+            <select id="document_type_125" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.document_type} onChange={e => setUploadForm({ ...uploadForm, document_type: e.target.value })}>
+              <option value="license_copy">License Copy</option><option value="certificate">Certificate</option><option value="medical_cert">Medical Certificate</option><option value="training_record">Training Record</option><option value="other">Other</option>
+            </select>
+          </FormField>
+          <FormField htmlFor="file_136" label="Credential file" hint="Upload a clear PDF or image for compliance verification." required className="col-span-2">
+            <input id="file_136" name="file" type="file" className="border border-kfl-border rounded p-2 text-sm w-full" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+          </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
           <button onClick={() => setShowUpload(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
