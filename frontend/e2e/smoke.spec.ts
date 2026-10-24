@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 
 test.describe("Dashboard", () => {
   test("loads dashboard with KPI cards", async ({ page }) => {
@@ -162,4 +163,20 @@ test.describe("Occurrences", () => {
     await page.goto("/occurrences");
     await expect(page.locator("body")).toBeVisible();
   });
+});
+
+test.describe("Accessibility", () => {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view"]) {
+    test(`${route} has no automated accessibility violations`, async ({ page }) => {
+      await page.goto(route);
+      await page.waitForLoadState("networkidle");
+      const results = await new AxeBuilder({ page })
+        .exclude("iframe")
+        .exclude('[contenteditable="true"]')
+        .disableRules(["color-contrast"])
+        .analyze();
+      const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
+      expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
+    });
+  }
 });
