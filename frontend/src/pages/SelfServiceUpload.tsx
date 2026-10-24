@@ -6,6 +6,7 @@ import { Modal } from "../components/ui/Modal";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 const DOCUMENT_TYPES = [
   "pilot_license", "medical", "type_rating", "proficiency_check",
@@ -19,6 +20,7 @@ export function SelfServiceUpload() {
   const [personId] = useState("u-safety"); // default actor
   const [statusFilter, setStatusFilter] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [uploadForm, setUploadForm] = useState({
     person_id: personId, license_type: "pilot_license", document_type: "license_copy",
   });
@@ -35,6 +37,8 @@ export function SelfServiceUpload() {
 
   const filteredUploads = uploads.filter((u: any) => !statusFilter || u.verification_status === statusFilter);
 
+  useUnsavedChanges(showUpload && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: { person_id: string; license_type: string; document_type: string; file: File }) => {
       const formData = new FormData();
@@ -49,6 +53,7 @@ export function SelfServiceUpload() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personnel-uploads", personId] });
       setShowUpload(false);
+      setDirty(false);
       setUploadError("");
       setUploadForm({ person_id: personId, license_type: "pilot_license", document_type: "license_copy" });
       setSelectedFile(null);
@@ -118,26 +123,26 @@ export function SelfServiceUpload() {
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="your_person_id_112" label="Person ID" hint="Use your personnel register ID, for example u-safety." required>
-            <input id="your_person_id_112" name="your_person_id" aria-describedby="your_person_id_112-error" aria-invalid={!!uploadFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={uploadForm.person_id} onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })} />
+            <input id="your_person_id_112" name="your_person_id" aria-describedby="your_person_id_112-error" aria-invalid={!!uploadFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={uploadForm.person_id} onChange={e => { setUploadForm({ ...uploadForm, person_id: e.target.value }); setDirty(true); }} />
             {uploadFieldErrors.person_id && <p id="your_person_id_112-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.person_id}</p>}
           </FormField>
           <FormField htmlFor="license_type_118" label="Credential type" required>
-            <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => setUploadForm({ ...uploadForm, license_type: e.target.value })}>
+            <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => { setUploadForm({ ...uploadForm, license_type: e.target.value }); setDirty(true); }}>
               {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
             </select>
           </FormField>
           <FormField htmlFor="document_type_125" label="Document type" required>
-            <select id="document_type_125" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.document_type} onChange={e => setUploadForm({ ...uploadForm, document_type: e.target.value })}>
+            <select id="document_type_125" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.document_type} onChange={e => { setUploadForm({ ...uploadForm, document_type: e.target.value }); setDirty(true); }}>
               <option value="license_copy">License Copy</option><option value="certificate">Certificate</option><option value="medical_cert">Medical Certificate</option><option value="training_record">Training Record</option><option value="other">Other</option>
             </select>
           </FormField>
           <FormField htmlFor="file_136" label="Credential file" hint="Upload a clear PDF or image for compliance verification." required className="col-span-2">
-            <input id="file_136" name="file" type="file" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+            <input id="file_136" name="file" type="file" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => { setSelectedFile(e.target.files?.[0] || null); setDirty(true); }} />
             {uploadFieldErrors.file && <p id="file_136-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.file}</p>}
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={() => setShowUpload(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+          <button onClick={() => { setShowUpload(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
           <button onClick={handleUpload} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Uploading…" : "Submit for Verification"}
           </button>

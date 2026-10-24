@@ -6,6 +6,7 @@ import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { CorrectiveActionsModal } from "../components/ui/modals/CorrectiveActionsModal";
 import { useValidation } from "../utils/validation";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 function auditStatusClass(status: string) {
   switch (status) {
@@ -39,6 +40,7 @@ export function QualityAudits() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [auditError, setAuditError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: qaFieldErrors, isValid: qaIsValid } = useValidation(
     { title },
@@ -47,11 +49,14 @@ export function QualityAudits() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/quality-audits", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["quality-audits"] });
       setShowForm(false);
+      setDirty(false);
       setTitle("");
       setAuditError("");
       toast({ title: "Audit created", message: "The new quality audit has been scheduled.", type: "success" });
@@ -118,7 +123,7 @@ export function QualityAudits() {
                 <div className="app-label mb-1">New Quality Audit</div>
                 <p className="text-xs text-kfl-muted">Schedule a quality audit.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
             </div>
             {auditError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -126,8 +131,8 @@ export function QualityAudits() {
               </div>
             )}
             <FormField htmlFor="audit_title_119" label="Audit title" hint="Use the audit scope or activity name." required>
-              <input id="audit_title_119" name="audit_title" aria-describedby="audit_title_119-error" aria-invalid={!!qaFieldErrors.title} className={`app-input ${qaFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
-              {qaFieldErrors.title && <p id="audit_title_119-error" className="text-[11px] text-rose-700 mt-1">{qaFieldErrors.title}</p>}
+              <input id="audit_title_150" name="audit_title" aria-describedby="audit_title_150-error" aria-invalid={!!qaFieldErrors.title} className={`app-input ${qaFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Audit title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              {qaFieldErrors.title && <p id="audit_title_150-error" className="text-[11px] text-rose-700 mt-1">{qaFieldErrors.title}</p>}
             </FormField>
             <button
               disabled={!qaIsValid || createMutation.isPending}

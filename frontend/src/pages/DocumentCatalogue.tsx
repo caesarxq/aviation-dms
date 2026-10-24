@@ -8,6 +8,7 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 export function DocumentCatalogue() {
   const { toast } = useToast();
@@ -15,6 +16,7 @@ export function DocumentCatalogue() {
   const [status, setStatus] = useState("");
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [showVersionDiffModal, setShowVersionDiffModal] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [newDocForm, setNewDocForm] = useState({
     document_id: "", title: "", doc_class: "manual", classification: "S2",
     kcaa_approval_required: false, review_due_date: "", status: "draft",
@@ -26,11 +28,19 @@ export function DocumentCatalogue() {
     queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
   });
 
+  useUnsavedChanges(showNewDoc && dirty);
+
+  const setField = <K extends keyof typeof newDocForm>(key: K, value: (typeof newDocForm)[K]) => {
+    setNewDocForm(prev => ({ ...prev, [key]: value }));
+    setDirty(true);
+  };
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p0/documents", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["documents"] });
       setShowNewDoc(false);
+      setDirty(false);
       setNewDocForm({
         document_id: "", title: "", doc_class: "manual", classification: "S2",
         kcaa_approval_required: false, review_due_date: "", status: "draft",
@@ -92,33 +102,33 @@ export function DocumentCatalogue() {
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="document_id_89" label="Document ID" hint="Use the controlled identifier, for example DOC-016." required>
-            <input id="document_id_89" name="document_id" aria-describedby="document_id_89-error" aria-invalid={!!docErrors.document_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.document_id ? "border-rose-400" : ""}`} placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })} />
+            <input id="document_id_89" name="document_id" aria-describedby="document_id_89-error" aria-invalid={!!docErrors.document_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.document_id ? "border-rose-400" : ""}`} placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setField("document_id", e.target.value)} />
             {docErrors.document_id && <p id="document_id_89-error" className="text-[11px] text-rose-700 mt-1">{docErrors.document_id}</p>}
           </FormField>
           <FormField htmlFor="title_95" label="Document title" required>
-            <input id="title_95" name="title" aria-describedby="title_95-error" aria-invalid={!!docErrors.title} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.title ? "border-rose-400" : ""}`} placeholder="Title" value={newDocForm.title} onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })} />
+            <input id="title_95" name="title" aria-describedby="title_95-error" aria-invalid={!!docErrors.title} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.title ? "border-rose-400" : ""}`} placeholder="Title" value={newDocForm.title} onChange={e => setField("title", e.target.value)} />
             {docErrors.title && <p id="title_95-error" className="text-[11px] text-rose-700 mt-1">{docErrors.title}</p>}
           </FormField>
           <FormField htmlFor="doc_class_101" label="Document class" hint="Choose the controlled-document category.">
-            <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.doc_class} onChange={e => setNewDocForm({ ...newDocForm, doc_class: e.target.value })}>
+            <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.doc_class} onChange={e => setField("doc_class", e.target.value)}>
               <option value="manual">Manual</option><option value="procedure">Procedure</option><option value="form">Form</option><option value="checklist">Checklist</option><option value="report">Report</option>
             </select>
           </FormField>
           <FormField htmlFor="classification_104" label="Classification" hint="Select the highest applicable handling restriction.">
-            <select id="classification_104" name="classification" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.classification} onChange={e => setNewDocForm({ ...newDocForm, classification: e.target.value })}>
+            <select id="classification_104" name="classification" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.classification} onChange={e => setField("classification", e.target.value)}>
               <option value="S0">S0 Public</option><option value="S1">S1 Internal</option><option value="S2">S2 Confidential</option><option value="S3">S3 Restricted</option><option value="S4">S4 Highly Restricted</option>
             </select>
           </FormField>
           <label className="flex items-center gap-2 text-sm self-end pb-2">
-            <input id="kcaa_approval_required_108" name="kcaa_approval_required" type="checkbox" checked={newDocForm.kcaa_approval_required} onChange={e => setNewDocForm({ ...newDocForm, kcaa_approval_required: e.target.checked })} />
+            <input id="kcaa_approval_required_108" name="kcaa_approval_required" type="checkbox" checked={newDocForm.kcaa_approval_required} onChange={e => setField("kcaa_approval_required", e.target.checked)} />
             KCAA approval required
           </label>
           <FormField htmlFor="review_due_date_111" label="Review due date" hint="Set the next controlled-document review date.">
-            <input id="review_due_date_111" name="review_due_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.review_due_date} onChange={e => setNewDocForm({ ...newDocForm, review_due_date: e.target.value })} />
+            <input id="review_due_date_111" name="review_due_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.review_due_date} onChange={e => setField("review_due_date", e.target.value)} />
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={() => setShowNewDoc(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+          <button onClick={() => { setShowNewDoc(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
           <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Creating…" : "Create Document"}
           </button>

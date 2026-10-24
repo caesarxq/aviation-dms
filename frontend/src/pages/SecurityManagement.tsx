@@ -6,6 +6,7 @@ import FormField from "../components/ui/FormField";
 import { SecurityReviewsModal } from "../components/ui/modals/SecurityReviewsModal";
 import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunctionsModal";
 import { useValidation } from "../utils/validation";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 function incidentSeverityClass(severity: string) {
   switch (severity) {
@@ -24,6 +25,7 @@ export function SecurityManagement() {
     queryFn: () => api.get("/p1/security-incidents").then((r: any) => r.data),
   });
   const [showForm, setShowForm] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [title, setTitle] = useState("");
   const [showSecurityReviewModal, setShowSecurityReviewModal] = useState(false);
   const [showOutsourcedModal, setShowOutsourcedModal] = useState(false);
@@ -35,13 +37,17 @@ export function SecurityManagement() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/security-incidents", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["security-incidents"] });
       setShowForm(false);
+      setDirty(false);
       setTitle("");
     },
+    onError: () => {},
   });
 
   return (
@@ -113,10 +119,10 @@ export function SecurityManagement() {
                 <div className="app-label mb-1">New Security Incident</div>
                 <p className="text-xs text-kfl-muted">Report a security incident for investigation.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             <FormField htmlFor="incident_title_109" label="Incident title" hint="Summarize the security event without including sensitive credentials or secrets." required>
-              <input id="incident_title_109" name="incident_title" aria-describedby="incident_title_109-error" aria-invalid={!!smFieldErrors.title} className={`app-input ${smFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Security incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input id="incident_title_109" name="incident_title" aria-describedby="incident_title_109-error" aria-invalid={!!smFieldErrors.title} className={`app-input ${smFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Security incident title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {smFieldErrors.title && <p id="incident_title_109-error" className="text-[11px] text-rose-700 mt-1">{smFieldErrors.title}</p>}
             </FormField>
             <button

@@ -6,6 +6,7 @@ import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
 import { useValidation } from "../utils/validation";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 function dgStatusClass(status: string) {
   switch (status) {
@@ -29,6 +30,7 @@ export function DangerousGoods() {
   const [dgClass, setDgClass] = useState("3");
   const [unNumber, setUnNumber] = useState("");
   const [dgError, setDgError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: dgShipFieldErrors, isValid: dgShipIsValid } = useValidation(
     { proper_shipping_name: properShippingName, dg_class: dgClass },
@@ -38,11 +40,14 @@ export function DangerousGoods() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/dg-shipments", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dg-shipments"] });
       setShowForm(false);
+      setDirty(false);
       setProperShippingName("");
       setDgClass("3");
       setUnNumber("");
@@ -117,7 +122,7 @@ export function DangerousGoods() {
                 <div className="app-label mb-1">New DG Shipment</div>
                 <p className="text-xs text-kfl-muted">Register a dangerous goods shipment for acceptance.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
             </div>
             {dgError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -126,15 +131,15 @@ export function DangerousGoods() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="field_120" label="Proper shipping name" hint="Use the name shown in the dangerous goods declaration." required>
-                <input id="field_120" name="proper_shipping_name" aria-describedby="field_120-error" aria-invalid={!!dgShipFieldErrors.proper_shipping_name} className={`app-input ${dgShipFieldErrors.proper_shipping_name ? "border-rose-400" : ""}`} placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
+                <input id="field_120" name="proper_shipping_name" aria-describedby="field_120-error" aria-invalid={!!dgShipFieldErrors.proper_shipping_name} className={`app-input ${dgShipFieldErrors.proper_shipping_name ? "border-rose-400" : ""}`} placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => { setProperShippingName(e.target.value); setDirty(true); }} />
                 {dgShipFieldErrors.proper_shipping_name && <p id="field_120-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.proper_shipping_name}</p>}
               </FormField>
               <FormField htmlFor="field_124" label="DG class" hint="Enter the applicable hazard class, for example Class 3." required>
-                <input id="field_124" name="dg_class" aria-describedby="field_124-error" aria-invalid={!!dgShipFieldErrors.dg_class} className={`app-input ${dgShipFieldErrors.dg_class ? "border-rose-400" : ""}`} placeholder="Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
+                <input id="field_124" name="dg_class" aria-describedby="field_124-error" aria-invalid={!!dgShipFieldErrors.dg_class} className={`app-input ${dgShipFieldErrors.dg_class ? "border-rose-400" : ""}`} placeholder="Class 3" value={dgClass} onChange={(e) => { setDgClass(e.target.value); setDirty(true); }} />
                 {dgShipFieldErrors.dg_class && <p id="field_124-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.dg_class}</p>}
               </FormField>
               <FormField htmlFor="field_128" label="UN number" hint="Use the four-digit UN number where applicable.">
-                <input id="field_128" name="un_number" className="app-input" placeholder="UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
+                <input id="field_128" name="un_number" className="app-input" placeholder="UN3480" value={unNumber} onChange={(e) => { setUnNumber(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
             <button

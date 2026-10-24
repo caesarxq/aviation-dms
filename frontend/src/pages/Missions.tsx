@@ -5,6 +5,7 @@ import { Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 function missionStatusClass(status: string) {
   switch (status) {
@@ -50,6 +51,7 @@ export function Missions() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [missionError, setMissionError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: missionFieldErrors, isValid: missionIsValid } = useValidation(
     { title },
@@ -58,11 +60,14 @@ export function Missions() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/missions", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["missions"] });
       setShowForm(false);
+      setDirty(false);
       setTitle("");
       setMissionError("");
       toast({ title: "Mission created", message: "The new mission has been added to the register.", type: "success" });
@@ -136,7 +141,7 @@ export function Missions() {
                 <div className="app-label mb-1">New Mission</div>
                 <p className="text-xs text-kfl-muted">Create a new mission plan.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
             </div>
             {missionError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -144,7 +149,7 @@ export function Missions() {
               </div>
             )}
             <FormField htmlFor="mission_title_137" label="Mission title" hint="Use the operational mission name or reference." required>
-              <input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={`app-input ${missionFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={`app-input ${missionFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Mission title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {missionFieldErrors.title && <p id="mission_title_137-error" className="text-[11px] text-rose-700 mt-1">{missionFieldErrors.title}</p>}
             </FormField>
             <button

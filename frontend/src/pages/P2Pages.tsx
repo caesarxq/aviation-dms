@@ -5,6 +5,7 @@ import { Users, BarChart3, Calendar, Share2, Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 function outsourcedStatusClass(status: string) {
   switch (status) {
@@ -26,6 +27,7 @@ export function OutsourcedFunctions() {
   const [provider, setProvider] = useState("");
   const [scope, setScope] = useState("");
   const [ofError, setOfError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: ofFieldErrors, isValid: ofIsValid } = useValidation(
     { provider_name: provider, scope_of_work: scope },
@@ -35,11 +37,14 @@ export function OutsourcedFunctions() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createOutsourcedFunction(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["outsourced-functions"] });
       setShowForm(false);
+      setDirty(false);
       setProvider("");
       setScope("");
       setOfError("");
@@ -91,7 +96,7 @@ export function OutsourcedFunctions() {
                 <div className="app-label mb-1">New Outsourced Function</div>
                 <p className="text-xs text-kfl-muted">Register an external service provider.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             {ofError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -100,11 +105,11 @@ export function OutsourcedFunctions() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="provider_name_94" label="Provider name" hint="Use the legal or trading name of the external provider." required>
-                <input id="provider_name_94" name="provider_name" aria-describedby="provider_name_94-error" aria-invalid={!!ofFieldErrors.provider_name} className={`app-input ${ofFieldErrors.provider_name ? "border-rose-400" : ""}`} placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
+                <input id="provider_name_94" name="provider_name" aria-describedby="provider_name_94-error" aria-invalid={!!ofFieldErrors.provider_name} className={`app-input ${ofFieldErrors.provider_name ? "border-rose-400" : ""}`} placeholder="Provider name" value={provider} onChange={(e) => { setProvider(e.target.value); setDirty(true); }} />
                 {ofFieldErrors.provider_name && <p id="provider_name_94-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.provider_name}</p>}
               </FormField>
               <FormField htmlFor="scope_of_work_98" label="Scope of work" hint="Describe the service being outsourced." required>
-                <input id="scope_of_work_98" name="scope_of_work" aria-describedby="scope_of_work_98-error" aria-invalid={!!ofFieldErrors.scope_of_work} className={`app-input ${ofFieldErrors.scope_of_work ? "border-rose-400" : ""}`} placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
+                <input id="scope_of_work_98" name="scope_of_work" aria-describedby="scope_of_work_98-error" aria-invalid={!!ofFieldErrors.scope_of_work} className={`app-input ${ofFieldErrors.scope_of_work ? "border-rose-400" : ""}`} placeholder="Scope of work" value={scope} onChange={(e) => { setScope(e.target.value); setDirty(true); }} />
                 {ofFieldErrors.scope_of_work && <p id="scope_of_work_98-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.scope_of_work}</p>}
               </FormField>
             </div>
@@ -173,6 +178,7 @@ export function SafetyKPIs() {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [kpiError, setKpiError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: kpiFieldErrors, isValid: kpiIsValid } = useValidation(
     { kpi_name: name },
@@ -181,11 +187,14 @@ export function SafetyKPIs() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSafetyKPI(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["safety-kpis"] });
       setShowForm(false);
+      setDirty(false);
       setName("");
       setTarget("");
       setKpiError("");
@@ -233,7 +242,7 @@ export function SafetyKPIs() {
                 <div className="app-label mb-1">New Safety KPI</div>
                 <p className="text-xs text-kfl-muted">Define a safety performance indicator.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             {kpiError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -242,11 +251,11 @@ export function SafetyKPIs() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="kpi_name_229" label="KPI name" hint="Name the safety performance measure." required>
-                <input id="kpi_name_229" name="kpi_name" aria-describedby="kpi_name_229-error" aria-invalid={!!kpiFieldErrors.kpi_name} className={`app-input ${kpiFieldErrors.kpi_name ? "border-rose-400" : ""}`} placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
+                <input id="kpi_name_229" name="kpi_name" aria-describedby="kpi_name_229-error" aria-invalid={!!kpiFieldErrors.kpi_name} className={`app-input ${kpiFieldErrors.kpi_name ? "border-rose-400" : ""}`} placeholder="KPI name" value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} />
                 {kpiFieldErrors.kpi_name && <p id="kpi_name_229-error" className="text-[11px] text-rose-700 mt-1">{kpiFieldErrors.kpi_name}</p>}
               </FormField>
               <FormField htmlFor="target_value_233" label="Target value" hint="Include the unit or threshold in the target description.">
-                <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => setTarget(e.target.value)} />
+                <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => { setTarget(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
             <button
@@ -311,6 +320,7 @@ export function SecurityReviews() {
   const [showForm, setShowForm] = useState(false);
   const [date, setDate] = useState("");
   const [srError, setSrError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: srFieldErrors, isValid: srIsValid } = useValidation(
     { meeting_date: date },
@@ -319,11 +329,14 @@ export function SecurityReviews() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSecurityReview(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["security-reviews"] });
       setShowForm(false);
+      setDirty(false);
       setDate("");
       setSrError("");
       toast({ title: "Review scheduled", message: "Security review meeting recorded successfully.", type: "success" });
@@ -370,7 +383,7 @@ export function SecurityReviews() {
                 <div className="app-label mb-1">Schedule Security Review</div>
                 <p className="text-xs text-kfl-muted">Create a security review meeting record.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             {srError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -378,7 +391,7 @@ export function SecurityReviews() {
               </div>
             )}
             <FormField htmlFor="date_357" label="Meeting date" required>
-              <input id="date_357" name="date" aria-describedby="date_357-error" aria-invalid={!!srFieldErrors.meeting_date} type="date" className={`app-input mb-3 ${srFieldErrors.meeting_date ? "border-rose-400" : ""}`} value={date} onChange={(e) => setDate(e.target.value)} />
+              <input id="date_357" name="date" aria-describedby="date_357-error" aria-invalid={!!srFieldErrors.meeting_date} type="date" className={`app-input mb-3 ${srFieldErrors.meeting_date ? "border-rose-400" : ""}`} value={date} onChange={(e) => { setDate(e.target.value); setDirty(true); }} />
               {srFieldErrors.meeting_date && <p id="date_357-error" className="text-[11px] text-rose-700 mt-1">{srFieldErrors.meeting_date}</p>}
             </FormField>
             <button
@@ -445,6 +458,7 @@ export function DGResponsibilityMatrix() {
   const [stage, setStage] = useState("");
   const [role, setRole] = useState("");
   const [dgError, setDgError] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { errors: dgFieldErrors, isValid: dgIsValid } = useValidation(
     { project_or_route: project, process_stage: stage, responsible_role: role },
@@ -453,11 +467,14 @@ export function DGResponsibilityMatrix() {
     }
   );
 
+  useUnsavedChanges(showForm && dirty);
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createDGMatrix(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dg-matrix"] });
       setShowForm(false);
+      setDirty(false);
       setProject("");
       setStage("");
       setRole("");
@@ -506,7 +523,7 @@ export function DGResponsibilityMatrix() {
                 <div className="app-label mb-1">New DG Responsibility Entry</div>
                 <p className="text-xs text-kfl-muted">Assign DG responsibility for a project or route.</p>
               </div>
-              <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             {dgError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
@@ -515,14 +532,14 @@ export function DGResponsibilityMatrix() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <FormField htmlFor="project_or_route_486" label="Project or route" hint="Identify the operation or route covered." required>
-                <input id="project_or_route_486" name="project_or_route" aria-describedby="project_or_route_486-error" aria-invalid={!!dgFieldErrors.project_or_route} className={`app-input ${dgFieldErrors.project_or_route ? "border-rose-400" : ""}`} placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
+                <input id="project_or_route_486" name="project_or_route" aria-describedby="project_or_route_486-error" aria-invalid={!!dgFieldErrors.project_or_route} className={`app-input ${dgFieldErrors.project_or_route ? "border-rose-400" : ""}`} placeholder="Project or route" value={project} onChange={(e) => { setProject(e.target.value); setDirty(true); }} />
                 {dgFieldErrors.project_or_route && <p id="project_or_route_486-error" className="text-[11px] text-rose-700 mt-1">{dgFieldErrors.project_or_route}</p>}
               </FormField>
               <FormField htmlFor="process_stage_490" label="Process stage" hint="Name the stage where DG responsibility applies.">
-                <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => setStage(e.target.value)} />
+                <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => { setStage(e.target.value); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="responsible_role_494" label="Responsible role" hint="Use the accountable post or role, not a password or secret.">
-                <input id="responsible_role_494" name="responsible_role" className="app-input" placeholder="Responsible role" value={role} onChange={(e) => setRole(e.target.value)} />
+                <input id="responsible_role_494" name="responsible_role" className="app-input" placeholder="Responsible role" value={role} onChange={(e) => { setRole(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
             <button

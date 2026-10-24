@@ -7,6 +7,7 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { RenewalProgressModal } from "../components/ui/modals/RenewalProgressModal";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 
 const LICENSE_TYPES = [
   "pilot_license", "medical", "type_rating", "proficiency_check",
@@ -20,6 +21,7 @@ export function PersonnelLicenses() {
   const [showForm, setShowForm] = useState(false);
   const [showRenewalModal, setShowRenewalModal] = useState(false);
   const [filter, setFilter] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   const { data: licenses = [], isLoading } = useQuery({
     queryKey: ["personnel-licenses", filter],
@@ -47,6 +49,7 @@ export function PersonnelLicenses() {
       qc.invalidateQueries({ queryKey: ["personnel-licenses"] });
       qc.invalidateQueries({ queryKey: ["expiring-licenses"] });
       setShowForm(false);
+      setDirty(false);
       setLicenseError("");
       setForm({
         person_id: "", license_type: "pilot_license", license_number: "",
@@ -59,6 +62,13 @@ export function PersonnelLicenses() {
       setLicenseError("Failed to add license. Please check your entries and try again.");
     },
   });
+
+  useUnsavedChanges(showForm && dirty);
+
+  const setField = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+    setDirty(true);
+  };
 
   const licenseRules = {
     person_id: { required: true },
@@ -135,38 +145,38 @@ export function PersonnelLicenses() {
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="person_id_129" label="Person ID" hint="Use the ID from the personnel register, for example u-safety." required>
-            <input id="person_id_129" name="person_id" aria-describedby="person_id_129-error" aria-invalid={!!licenseFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={form.person_id} onChange={e => setForm({ ...form, person_id: e.target.value })} />
+            <input id="person_id_129" name="person_id" aria-describedby="person_id_129-error" aria-invalid={!!licenseFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={form.person_id} onChange={e => setField("person_id", e.target.value)} />
             {licenseFieldErrors.person_id && <p id="person_id_129-error" className="text-[11px] text-rose-700 mt-1">{licenseFieldErrors.person_id}</p>}
           </FormField>
           <FormField htmlFor="license_type_135" label="License type" required>
-            <select id="license_type_135" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.license_type} onChange={e => setForm({ ...form, license_type: e.target.value })}>
+            <select id="license_type_135" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.license_type} onChange={e => setField("license_type", e.target.value)}>
               {LICENSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
             </select>
           </FormField>
           <FormField htmlFor="license_number_138" label="License number" required>
-            <input id="license_number_138" name="license_number" aria-describedby="license_number_138-error" aria-invalid={!!licenseFieldErrors.license_number} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.license_number ? "border-rose-400" : ""}`} placeholder="License number" value={form.license_number} onChange={e => setForm({ ...form, license_number: e.target.value })} />
+            <input id="license_number_138" name="license_number" aria-describedby="license_number_138-error" aria-invalid={!!licenseFieldErrors.license_number} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.license_number ? "border-rose-400" : ""}`} placeholder="License number" value={form.license_number} onChange={e => setField("license_number", e.target.value)} />
             {licenseFieldErrors.license_number && <p id="license_number_138-error" className="text-[11px] text-rose-700 mt-1">{licenseFieldErrors.license_number}</p>}
           </FormField>
           <FormField htmlFor="issuing_authority_144" label="Issuing authority" required>
-            <input id="issuing_authority_144" name="issuing_authority" aria-describedby="issuing_authority_144-error" aria-invalid={!!licenseFieldErrors.issuing_authority} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.issuing_authority ? "border-rose-400" : ""}`} placeholder="Issuing authority" value={form.issuing_authority} onChange={e => setForm({ ...form, issuing_authority: e.target.value })} />
+            <input id="issuing_authority_144" name="issuing_authority" aria-describedby="issuing_authority_144-error" aria-invalid={!!licenseFieldErrors.issuing_authority} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.issuing_authority ? "border-rose-400" : ""}`} placeholder="Issuing authority" value={form.issuing_authority} onChange={e => setField("issuing_authority", e.target.value)} />
             {licenseFieldErrors.issuing_authority && <p id="issuing_authority_144-error" className="text-[11px] text-rose-700 mt-1">{licenseFieldErrors.issuing_authority}</p>}
           </FormField>
           <FormField htmlFor="issued_date_150" label="Issued date">
-            <input id="issued_date_150" name="issued_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.issued_date} onChange={e => setForm({ ...form, issued_date: e.target.value })} />
+            <input id="issued_date_150" name="issued_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.issued_date} onChange={e => setField("issued_date", e.target.value)} />
           </FormField>
           <FormField htmlFor="expiry_date_151" label="Expiry date" hint="Required for renewal tracking." required>
-            <input id="expiry_date_151" name="expiry_date" type="date" aria-describedby="expiry_date_151-error" aria-invalid={!!licenseFieldErrors.expiry_date} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.expiry_date ? "border-rose-400" : ""}`} value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
+            <input id="expiry_date_151" name="expiry_date" type="date" aria-describedby="expiry_date_151-error" aria-invalid={!!licenseFieldErrors.expiry_date} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.expiry_date ? "border-rose-400" : ""}`} value={form.expiry_date} onChange={e => setField("expiry_date", e.target.value)} />
             {licenseFieldErrors.expiry_date && <p id="expiry_date_151-error" className="text-[11px] text-rose-700 mt-1">{licenseFieldErrors.expiry_date}</p>}
           </FormField>
           <FormField htmlFor="aircraft_type_152" label="Aircraft type" hint="Complete this for type ratings; otherwise leave blank.">
-            <input id="aircraft_type_152" name="aircraft_type" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Aircraft type" value={form.aircraft_type} onChange={e => setForm({ ...form, aircraft_type: e.target.value })} />
+            <input id="aircraft_type_152" name="aircraft_type" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Aircraft type" value={form.aircraft_type} onChange={e => setField("aircraft_type", e.target.value)} />
           </FormField>
           <FormField htmlFor="notes_158" label="Notes">
-            <input id="notes_158" name="notes" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Additional notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+            <input id="notes_158" name="notes" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Additional notes" value={form.notes} onChange={e => setField("notes", e.target.value)} />
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={() => setShowForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+          <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
           <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Saving…" : "Save"}
           </button>
