@@ -9,7 +9,8 @@
     "test:e2e": "playwright test",
     "test": "vitest run",
     "test:watch": "vitest",
-    "mutation:pilot": "stryker run"
+    "mutation:pilot": "stryker run",
+    "audit:forms": "node scripts/audit-form-controls.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.28.0",

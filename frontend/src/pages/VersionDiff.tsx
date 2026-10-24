@@ -43,21 +43,21 @@ export function VersionDiff() {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Document</label>
-            <select className="border border-kfl-border rounded p-2 text-sm w-full" value={docId} onChange={e => { setDocId(e.target.value); setVersionA(""); setVersionB(""); }}>
+            <select id="docid_46" name="docid" className="border border-kfl-border rounded p-2 text-sm w-full" value={docId} onChange={e => { setDocId(e.target.value); setVersionA(""); setVersionB(""); }}>
               <option value="">— Select document —</option>
               {docs.map((d: any) => <option key={d.document_id} value={d.document_id}>{d.document_id} — {d.title}</option>)}
             </select>
           </div>
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Version A (left)</label>
-            <select className="border border-kfl-border rounded p-2 text-sm w-full" value={versionA} onChange={e => setVersionA(e.target.value)} disabled={!docId}>
+            <select id="versiona_53" name="versiona" className="border border-kfl-border rounded p-2 text-sm w-full" value={versionA} onChange={e => setVersionA(e.target.value)} disabled={!docId}>
               <option value="">— Select version —</option>
               {versions.map((v: any) => <option key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</option>)}
             </select>
           </div>
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Version B (right)</label>
-            <select className="border border-kfl-border rounded p-2 text-sm w-full" value={versionB} onChange={e => setVersionB(e.target.value)} disabled={!docId}>
+            <select id="versionb_60" name="versionb" className="border border-kfl-border rounded p-2 text-sm w-full" value={versionB} onChange={e => setVersionB(e.target.value)} disabled={!docId}>
               <option value="">— Select version —</option>
               {versions.map((v: any) => <option key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</option>)}
             </select>

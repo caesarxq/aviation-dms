@@ -112,7 +112,7 @@ export function DocumentProposals() {
       {/* Document selector */}
       <div className="app-surface p-4 mb-4">
         <label className="text-sm font-semibold text-kfl-muted mb-2 block">Select Document</label>
-        <select className="border border-kfl-border rounded p-2 text-sm w-full max-w-md" value={docId} onChange={e => setDocId(e.target.value)}>
+        <select id="docid_115" name="docid" className="border border-kfl-border rounded p-2 text-sm w-full max-w-md" value={docId} onChange={e => setDocId(e.target.value)}>
           <option value="">— Select a document —</option>
           {docs.map((d: any) => <option key={d.document_id} value={d.document_id}>{d.document_id} — {d.title}</option>)}
         </select>
@@ -139,16 +139,16 @@ export function DocumentProposals() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
-              <select className="border border-kfl-border rounded p-2 text-sm" value={form.proposal_type} onChange={e => setForm({ ...form, proposal_type: e.target.value })}>
+              <select id="proposal_type_142" name="proposal_type" className="border border-kfl-border rounded p-2 text-sm" value={form.proposal_type} onChange={e => setForm({ ...form, proposal_type: e.target.value })}>
                 <option value="word">Word</option><option value="line">Line</option><option value="section">Section</option><option value="illustration">Illustration</option><option value="table">Table</option>
               </select>
-              <select className="border border-kfl-border rounded p-2 text-sm" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
+              <select id="severity_145" name="severity" className="border border-kfl-border rounded p-2 text-sm" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
                 <option value="minor">Minor</option><option value="major">Major</option><option value="critical">Critical</option>
               </select>
-              <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Target Ref (e.g., section 3.2, line 45)" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
-              <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Original Text" value={form.original_text} onChange={e => setForm({ ...form, original_text: e.target.value })} />
-              <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Proposed Text" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
-              <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Rationale" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} />
+              <input id="target_ref_148" name="target_ref" className="border border-kfl-border rounded p-2 text-sm" placeholder="Target Ref (e.g., section 3.2, line 45)" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
+              <input id="original_text_149" name="original_text" className="border border-kfl-border rounded p-2 text-sm" placeholder="Original Text" value={form.original_text} onChange={e => setForm({ ...form, original_text: e.target.value })} />
+              <input id="proposed_text_150" name="proposed_text" className="border border-kfl-border rounded p-2 text-sm" placeholder="Proposed Text" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
+              <input id="rationale_151" name="rationale" className="border border-kfl-border rounded p-2 text-sm" placeholder="Rationale" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} />
             </div>
             <div className="mt-4 flex gap-2 justify-end">
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

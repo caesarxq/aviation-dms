@@ -116,7 +116,7 @@ export function RenewalProgressModal({ open, onClose }: { open: boolean; onClose
         <div className="space-y-3">
           <div className="mb-3">
             <label className="block text-xs font-medium text-white/70 mb-1">Select Aircraft</label>
-            <select
+            <select id="selectedaircraft_119" name="selectedaircraft"
               className="w-full border border-white/20 rounded p-1.5 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
               value={selectedAircraft}
               onChange={(e) => setSelectedAircraft(e.target.value)}

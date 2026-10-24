@@ -46,7 +46,7 @@ export function SafetyKPIsModal({ open, onClose }: { open: boolean; onClose: () 
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">KPI Name</label>
-          <input
+          <input id="kpi_name_49" name="kpi_name"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="KPI name"
             value={name}
@@ -55,7 +55,7 @@ export function SafetyKPIsModal({ open, onClose }: { open: boolean; onClose: () 
         </div>
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Target</label>
-          <input
+          <input id="target_value_58" name="target_value"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Target value"
             value={target}

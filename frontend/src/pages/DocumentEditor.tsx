@@ -523,7 +523,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
                       const checked = selectedChangeSequences.includes(change.change_sequence);
                       return (
                         <label key={change.change_sequence} className="flex cursor-pointer gap-2 rounded border border-kfl-border bg-white p-2 text-xs">
-                          <input
+                          <input id="checked_526" name="checked"
                             type="checkbox"
                             checked={checked}
                             onChange={(event) => setSelectedChangeSequences((current) => event.target.checked ? [...current, change.change_sequence] : current.filter((sequence) => sequence !== change.change_sequence))}

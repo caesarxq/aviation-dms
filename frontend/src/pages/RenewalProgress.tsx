@@ -161,7 +161,7 @@ export function RenewalProgress() {
         <>
           <div className="app-surface p-4 mb-4">
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Select Aircraft</label>
-            <select className="border border-kfl-border rounded p-2 text-sm w-full max-w-md" value={selectedAircraft} onChange={e => setSelectedAircraft(e.target.value)}>
+            <select id="selectedaircraft_164" name="selectedaircraft" className="border border-kfl-border rounded p-2 text-sm w-full max-w-md" value={selectedAircraft} onChange={e => setSelectedAircraft(e.target.value)}>
               <option value="">— Select an aircraft —</option>
               {aircraft.map((a: any) => <option key={a.aircraft_id} value={a.aircraft_id}>{a.registration} — {a.model}</option>)}
             </select>

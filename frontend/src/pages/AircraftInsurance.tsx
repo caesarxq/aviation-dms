@@ -146,7 +146,7 @@ export function AircraftInsurance() {
       {/* Aircraft selector */}
       <div className="app-surface p-4 mb-4">
         <label className="text-sm font-semibold text-kfl-muted mb-2 block">Select Aircraft</label>
-        <select
+        <select id="selectedaircraft_149" name="selectedaircraft"
           className="border border-kfl-border rounded p-2 text-sm w-full max-w-md"
           value={selectedAircraft}
           onChange={e => setSelectedAircraft(e.target.value)}
@@ -177,16 +177,16 @@ export function AircraftInsurance() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <select className="border border-kfl-border rounded p-2 text-sm" value={insForm.insurance_type} onChange={e => setInsForm({ ...insForm, insurance_type: e.target.value })}>
+                <select id="insurance_type_180" name="insurance_type" className="border border-kfl-border rounded p-2 text-sm" value={insForm.insurance_type} onChange={e => setInsForm({ ...insForm, insurance_type: e.target.value })}>
                   {INSURANCE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
                 </select>
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Insurer" value={insForm.insurer} onChange={e => setInsForm({ ...insForm, insurer: e.target.value })} />
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Policy Number" value={insForm.policy_number} onChange={e => setInsForm({ ...insForm, policy_number: e.target.value })} />
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Broker" value={insForm.broker} onChange={e => setInsForm({ ...insForm, broker: e.target.value })} />
-                <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Start Date" value={insForm.start_date} onChange={e => setInsForm({ ...insForm, start_date: e.target.value })} />
-                <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={insForm.expiry_date} onChange={e => setInsForm({ ...insForm, expiry_date: e.target.value })} />
-                <input type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Coverage Amount" value={insForm.coverage_amount} onChange={e => setInsForm({ ...insForm, coverage_amount: e.target.value })} />
-                <input type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Premium Amount" value={insForm.premium_amount} onChange={e => setInsForm({ ...insForm, premium_amount: e.target.value })} />
+                <input id="insurer_183" name="insurer" className="border border-kfl-border rounded p-2 text-sm" placeholder="Insurer" value={insForm.insurer} onChange={e => setInsForm({ ...insForm, insurer: e.target.value })} />
+                <input id="policy_number_184" name="policy_number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Policy Number" value={insForm.policy_number} onChange={e => setInsForm({ ...insForm, policy_number: e.target.value })} />
+                <input id="broker_185" name="broker" className="border border-kfl-border rounded p-2 text-sm" placeholder="Broker" value={insForm.broker} onChange={e => setInsForm({ ...insForm, broker: e.target.value })} />
+                <input id="start_date_186" name="start_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Start Date" value={insForm.start_date} onChange={e => setInsForm({ ...insForm, start_date: e.target.value })} />
+                <input id="expiry_date_187" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={insForm.expiry_date} onChange={e => setInsForm({ ...insForm, expiry_date: e.target.value })} />
+                <input id="coverage_amount_188" name="coverage_amount" type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Coverage Amount" value={insForm.coverage_amount} onChange={e => setInsForm({ ...insForm, coverage_amount: e.target.value })} />
+                <input id="premium_amount_189" name="premium_amount" type="number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Premium Amount" value={insForm.premium_amount} onChange={e => setInsForm({ ...insForm, premium_amount: e.target.value })} />
               </div>
               <div className="mt-4 flex gap-2 justify-end">
                 <button onClick={() => setShowInsForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
@@ -249,14 +249,14 @@ export function AircraftInsurance() {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <select className="border border-kfl-border rounded p-2 text-sm" value={docForm.document_type} onChange={e => setDocForm({ ...docForm, document_type: e.target.value })}>
+                <select id="document_type_252" name="document_type" className="border border-kfl-border rounded p-2 text-sm" value={docForm.document_type} onChange={e => setDocForm({ ...docForm, document_type: e.target.value })}>
                   {AIRCRAFT_DOC_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
                 </select>
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Document Number" value={docForm.document_number} onChange={e => setDocForm({ ...docForm, document_number: e.target.value })} />
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Issuing Authority" value={docForm.issuing_authority} onChange={e => setDocForm({ ...docForm, issuing_authority: e.target.value })} />
-                <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issue Date" value={docForm.issue_date} onChange={e => setDocForm({ ...docForm, issue_date: e.target.value })} />
-                <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} />
-                <input className="border border-kfl-border rounded p-2 text-sm" placeholder="Notes" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} />
+                <input id="document_number_255" name="document_number" className="border border-kfl-border rounded p-2 text-sm" placeholder="Document Number" value={docForm.document_number} onChange={e => setDocForm({ ...docForm, document_number: e.target.value })} />
+                <input id="issuing_authority_256" name="issuing_authority" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issuing Authority" value={docForm.issuing_authority} onChange={e => setDocForm({ ...docForm, issuing_authority: e.target.value })} />
+                <input id="issue_date_257" name="issue_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issue Date" value={docForm.issue_date} onChange={e => setDocForm({ ...docForm, issue_date: e.target.value })} />
+                <input id="expiry_date_258" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={docForm.expiry_date} onChange={e => setDocForm({ ...docForm, expiry_date: e.target.value })} />
+                <input id="notes_259" name="notes" className="border border-kfl-border rounded p-2 text-sm" placeholder="Notes" value={docForm.notes} onChange={e => setDocForm({ ...docForm, notes: e.target.value })} />
               </div>
               <div className="mt-4 flex gap-2 justify-end">
                 <button onClick={() => setShowDocForm(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>

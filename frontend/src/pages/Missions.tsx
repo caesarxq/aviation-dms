@@ -109,9 +109,9 @@ export function Missions() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search missions…" className="app-input pl-9 relative z-10" />
+            <input id="search_missions_112" name="search_missions" value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search missions…" className="app-input pl-9 relative z-10" />
           </div>
-          <select className="app-input w-full md:w-auto">
+          <select id="select_field_114" name="select_field" className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="planned">Planned</option>
             <option value="in_progress">In Progress</option>
@@ -134,7 +134,7 @@ export function Missions() {
                 {missionError}
               </div>
             )}
-            <input className="app-input mb-3" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input id="mission_title_137" name="mission_title" className="app-input mb-3" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
             <button
               disabled={!title.trim() || createMutation.isPending}
               onClick={() => {

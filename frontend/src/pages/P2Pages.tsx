@@ -70,7 +70,7 @@ export function OutsourcedFunctions() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input value={showForm ? provider : ""} onChange={(e) => setProvider(e.target.value)} placeholder="Search providers…" className="app-input pl-9 relative z-10" />
+            <input id="search_providers_73" name="search_providers" value={showForm ? provider : ""} onChange={(e) => setProvider(e.target.value)} placeholder="Search providers…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -91,11 +91,11 @@ export function OutsourcedFunctions() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">Provider Name</label>
-                <input className="app-input" placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
+                <input id="provider_name_94" name="provider_name" className="app-input" placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">Scope</label>
-                <input className="app-input" placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
+                <input id="scope_of_work_98" name="scope_of_work" className="app-input" placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
               </div>
             </div>
             <button
@@ -205,7 +205,7 @@ export function SafetyKPIs() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input value={showForm ? name : ""} onChange={(e) => setName(e.target.value)} placeholder="Search KPIs…" className="app-input pl-9 relative z-10" />
+            <input id="search_kpis_208" name="search_kpis" value={showForm ? name : ""} onChange={(e) => setName(e.target.value)} placeholder="Search KPIs…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -226,11 +226,11 @@ export function SafetyKPIs() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">KPI Name</label>
-                <input className="app-input" placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
+                <input id="kpi_name_229" name="kpi_name" className="app-input" placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">Target</label>
-                <input className="app-input" placeholder="Target value" value={target} onChange={(e) => setTarget(e.target.value)} />
+                <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => setTarget(e.target.value)} />
               </div>
             </div>
             <button
@@ -336,7 +336,7 @@ export function SecurityReviews() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input value={showForm ? date : ""} onChange={(e) => setDate(e.target.value)} placeholder="Search reviews…" className="app-input pl-9 relative z-10" />
+            <input id="search_reviews_339" name="search_reviews" value={showForm ? date : ""} onChange={(e) => setDate(e.target.value)} placeholder="Search reviews…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -354,7 +354,7 @@ export function SecurityReviews() {
                 {srError}
               </div>
             )}
-            <input type="date" className="app-input mb-3" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input id="date_357" name="date" type="date" className="app-input mb-3" value={date} onChange={(e) => setDate(e.target.value)} />
             <button
               disabled={!date || createMutation.isPending}
               onClick={() => {
@@ -462,7 +462,7 @@ export function DGResponsibilityMatrix() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input value={showForm ? project : ""} onChange={(e) => setProject(e.target.value)} placeholder="Search matrix entries…" className="app-input pl-9 relative z-10" />
+            <input id="search_matrix_entries_465" name="search_matrix_entries" value={showForm ? project : ""} onChange={(e) => setProject(e.target.value)} placeholder="Search matrix entries…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -483,15 +483,15 @@ export function DGResponsibilityMatrix() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label className="app-label">Project / Route</label>
-                <input className="app-input" placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
+                <input id="project_or_route_486" name="project_or_route" className="app-input" placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">Process Stage</label>
-                <input className="app-input" placeholder="Process stage" value={stage} onChange={(e) => setStage(e.target.value)} />
+                <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => setStage(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">Responsible Role</label>
-                <input className="app-input" placeholder="Responsible role" value={role} onChange={(e) => setRole(e.target.value)} />
+                <input id="responsible_role_494" name="responsible_role" className="app-input" placeholder="Responsible role" value={role} onChange={(e) => setRole(e.target.value)} />
               </div>
             </div>
             <button

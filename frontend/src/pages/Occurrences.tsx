@@ -71,9 +71,9 @@ export function Occurrences() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <FileText size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search occurrences…" className="app-input pl-9 relative z-10" />
+            <input id="search_occurrences_74" name="search_occurrences" value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search occurrences…" className="app-input pl-9 relative z-10" />
           </div>
-          <select className="app-input w-full md:w-auto">
+          <select id="select_field_76" name="select_field" className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="reported">Reported</option>
             <option value="acknowledged">Acknowledged</option>
@@ -91,12 +91,12 @@ export function Occurrences() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
-            <input className="app-input mb-3" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <textarea className="app-input mb-3" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+            <input id="title_94" name="title" className="app-input mb-3" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <textarea id="description_95" name="description" className="app-input mb-3" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="app-label">Occurrence Type</label>
-                <select value={occurrenceType} onChange={(e) => setOccurrenceType(e.target.value)} className="app-input">
+                <select id="occurrencetype_99" name="occurrencetype" value={occurrenceType} onChange={(e) => setOccurrenceType(e.target.value)} className="app-input">
                   <option value="incident">Incident</option>
                   <option value="accident">Accident</option>
                   <option value="serious_incident">Serious Incident</option>
@@ -105,7 +105,7 @@ export function Occurrences() {
               </div>
               <div>
                 <label className="app-label">Severity</label>
-                <select value={severity} onChange={(e) => setSeverity(e.target.value)} className="app-input">
+                <select id="severity_108" name="severity" value={severity} onChange={(e) => setSeverity(e.target.value)} className="app-input">
                   <option value="negligible">Negligible</option>
                   <option value="minor">Minor</option>
                   <option value="major">Major</option>

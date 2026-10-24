@@ -45,7 +45,7 @@ export function DGResponsibilityMatrixModal({ open, onClose }: { open: boolean; 
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Project / Route</label>
-          <input
+          <input id="project_or_route_48" name="project_or_route"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Project or route"
             value={project}
@@ -54,7 +54,7 @@ export function DGResponsibilityMatrixModal({ open, onClose }: { open: boolean; 
         </div>
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Process Stage</label>
-          <input
+          <input id="process_stage_57" name="process_stage"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Process stage"
             value={stage}
@@ -63,7 +63,7 @@ export function DGResponsibilityMatrixModal({ open, onClose }: { open: boolean; 
         </div>
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Responsible Role</label>
-          <input
+          <input id="responsible_role_66" name="responsible_role"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Responsible role"
             value={role}

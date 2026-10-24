@@ -34,7 +34,7 @@ export function VersionDiffModal({ open, onClose }: { open: boolean; onClose: ()
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
           <label className="block text-[10px] font-medium text-white/70 mb-1">Document</label>
-          <select
+          <select id="docid_37" name="docid"
             className="w-full border border-white/20 rounded p-1.5 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             value={docId}
             onChange={(e) => { setDocId(e.target.value); setVersionA(""); setVersionB(""); }}
@@ -49,7 +49,7 @@ export function VersionDiffModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
         <div>
           <label className="block text-[10px] font-medium text-white/70 mb-1">Version A</label>
-          <select
+          <select id="versiona_52" name="versiona"
             className="w-full border border-white/20 rounded p-1.5 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             value={versionA}
             onChange={(e) => setVersionA(e.target.value)}
@@ -65,7 +65,7 @@ export function VersionDiffModal({ open, onClose }: { open: boolean; onClose: ()
         </div>
         <div>
           <label className="block text-[10px] font-medium text-white/70 mb-1">Version B</label>
-          <select
+          <select id="versionb_68" name="versionb"
             className="w-full border border-white/20 rounded p-1.5 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             value={versionB}
             onChange={(e) => setVersionB(e.target.value)}

@@ -126,36 +126,36 @@ export function PersonnelLicenses() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <input
+          <input id="person_id_129" name="person_id"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="Person ID"
             value={form.person_id}
             onChange={e => setForm({ ...form, person_id: e.target.value })}
           />
-          <select className="border border-kfl-border rounded p-2 text-sm" value={form.license_type} onChange={e => setForm({ ...form, license_type: e.target.value })}>
+          <select id="license_type_135" name="license_type" className="border border-kfl-border rounded p-2 text-sm" value={form.license_type} onChange={e => setForm({ ...form, license_type: e.target.value })}>
             {LICENSE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
           </select>
-          <input
+          <input id="license_number_138" name="license_number"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="License Number"
             value={form.license_number}
             onChange={e => setForm({ ...form, license_number: e.target.value })}
           />
-          <input
+          <input id="issuing_authority_144" name="issuing_authority"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="Issuing Authority"
             value={form.issuing_authority}
             onChange={e => setForm({ ...form, issuing_authority: e.target.value })}
           />
-          <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issued Date" value={form.issued_date} onChange={e => setForm({ ...form, issued_date: e.target.value })} />
-          <input type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
-          <input
+          <input id="issued_date_150" name="issued_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Issued Date" value={form.issued_date} onChange={e => setForm({ ...form, issued_date: e.target.value })} />
+          <input id="expiry_date_151" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm" placeholder="Expiry Date" value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
+          <input id="aircraft_type_152" name="aircraft_type"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="Aircraft Type (for type ratings)"
             value={form.aircraft_type}
             onChange={e => setForm({ ...form, aircraft_type: e.target.value })}
           />
-          <input
+          <input id="notes_158" name="notes"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="Notes"
             value={form.notes}

@@ -58,7 +58,7 @@ export function Notifications() {
           <button onClick={() => setShowPrefs(!showPrefs)} className="app-btn-secondary">
             <Settings size={16} /> Preferences
           </button>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-auto min-w-[120px]">
+          <select id="statusfilter_61" name="statusfilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-auto min-w-[120px]">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="sent">Sent</option>
@@ -81,7 +81,7 @@ export function Notifications() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="flex min-h-10 items-center gap-2 rounded-md border border-kfl-border bg-kfl-surface-subtle px-3 text-sm font-medium text-kfl-text">
-              <input type="checkbox" checked={Boolean(prefsForm.email_enabled)} onChange={(e) => updatePref("email_enabled", e.target.checked)} className="h-4 w-4 accent-kfl-blue" />
+              <input id="email_enabled_84" name="email_enabled" type="checkbox" checked={Boolean(prefsForm.email_enabled)} onChange={(e) => updatePref("email_enabled", e.target.checked)} className="h-4 w-4 accent-kfl-blue" />
               Email notifications enabled
             </label>
             {[
@@ -93,7 +93,7 @@ export function Notifications() {
             ].map(([key, label, suffix]) => (
               <label key={key} className="text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">{label} ({suffix})</span>
-                <input type="number" min={0} value={Number(prefsForm[key as keyof typeof prefsForm])} onChange={(e) => updatePref(key, Number(e.target.value))} className="app-input" />
+                <input id="number_96" name="number" type="number" min={0} value={Number(prefsForm[key as keyof typeof prefsForm])} onChange={(e) => updatePref(key, Number(e.target.value))} className="app-input" />
               </label>
             ))}
           </div>

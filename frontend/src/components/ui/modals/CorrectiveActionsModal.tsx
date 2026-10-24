@@ -46,7 +46,7 @@ export function CorrectiveActionsModal({ open, onClose }: { open: boolean; onClo
 
       <div className="mb-4">
         <label className="block text-xs font-medium text-white/70 mb-1">CAR Title</label>
-        <input
+        <input id="enter_corrective_action_title_49" name="enter_corrective_action_title"
           className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
           placeholder="Enter corrective action title"
           value={title}

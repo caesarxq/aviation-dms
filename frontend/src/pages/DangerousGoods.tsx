@@ -85,14 +85,14 @@ export function DangerousGoods() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Package size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input
+            <input id="search_shipments_88" name="search_shipments"
               value={showForm ? properShippingName : ""}
               onChange={(e) => setProperShippingName(e.target.value)}
               placeholder="Search shipments…"
               className="app-input pl-9 relative z-10"
             />
           </div>
-          <select className="app-input w-full md:w-auto">
+          <select id="select_field_95" name="select_field" className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="accepted">Accepted</option>
@@ -117,15 +117,15 @@ export function DangerousGoods() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="app-label">Proper Shipping Name</label>
-                <input className="app-input" placeholder="e.g. Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
+                <input id="field_120" name="field" className="app-input" placeholder="e.g. Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">DG Class</label>
-                <input className="app-input" placeholder="e.g. Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
+                <input id="field_124" name="field" className="app-input" placeholder="e.g. Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
               </div>
               <div>
                 <label className="app-label">UN Number</label>
-                <input className="app-input" placeholder="e.g. UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
+                <input id="field_128" name="field" className="app-input" placeholder="e.g. UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
               </div>
             </div>
             <button

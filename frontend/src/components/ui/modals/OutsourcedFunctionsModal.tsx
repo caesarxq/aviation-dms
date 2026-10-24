@@ -43,7 +43,7 @@ export function OutsourcedFunctionsModal({ open, onClose }: { open: boolean; onC
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Provider Name</label>
-          <input
+          <input id="provider_name_46" name="provider_name"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Provider name"
             value={provider}
@@ -52,7 +52,7 @@ export function OutsourcedFunctionsModal({ open, onClose }: { open: boolean; onC
         </div>
         <div>
           <label className="block text-xs font-medium text-white/70 mb-1">Scope</label>
-          <input
+          <input id="scope_of_work_55" name="scope_of_work"
             className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
             placeholder="Scope of work"
             value={scope}

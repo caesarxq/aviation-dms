@@ -109,20 +109,20 @@ export function SelfServiceUpload() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <input
+          <input id="your_person_id_112" name="your_person_id"
             className="border border-kfl-border rounded p-2 text-sm"
             placeholder="Your Person ID (e.g., u-safety)"
             value={uploadForm.person_id}
             onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })}
           />
-          <select
+          <select id="license_type_118" name="license_type"
             className="border border-kfl-border rounded p-2 text-sm"
             value={uploadForm.license_type}
             onChange={e => setUploadForm({ ...uploadForm, license_type: e.target.value })}
           >
             {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
           </select>
-          <select
+          <select id="document_type_125" name="document_type"
             className="border border-kfl-border rounded p-2 text-sm"
             value={uploadForm.document_type}
             onChange={e => setUploadForm({ ...uploadForm, document_type: e.target.value })}
@@ -133,7 +133,7 @@ export function SelfServiceUpload() {
             <option value="training_record">Training Record</option>
             <option value="other">Other</option>
           </select>
-          <input
+          <input id="file_136" name="file"
             type="file"
             className="border border-kfl-border rounded p-2 text-sm col-span-2"
             onChange={e => setSelectedFile(e.target.files?.[0] || null)}

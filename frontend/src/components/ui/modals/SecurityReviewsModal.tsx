@@ -40,7 +40,7 @@ export function SecurityReviewsModal({ open, onClose }: { open: boolean; onClose
 
       <div className="mb-4">
         <label className="block text-xs font-medium text-white/70 mb-1">Meeting Date</label>
-        <input
+        <input id="date_43" name="date"
           type="date"
           className="w-full border border-white/20 rounded p-2 text-sm bg-white/10 text-white focus:border-kfl-blue focus:outline-none"
           value={date}

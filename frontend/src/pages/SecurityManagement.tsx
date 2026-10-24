@@ -82,14 +82,14 @@ export function SecurityManagement() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <ShieldAlert size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input
+            <input id="search_incidents_85" name="search_incidents"
               value={showForm ? title : ""}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Search incidents…"
               className="app-input pl-9 relative z-10"
             />
           </div>
-          <select className="app-input w-full md:w-auto">
+          <select id="select_field_92" name="select_field" className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="open">Open</option>
             <option value="investigating">Investigating</option>
@@ -106,7 +106,7 @@ export function SecurityManagement() {
               </div>
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
-            <input className="app-input mb-3" placeholder="Incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input id="incident_title_109" name="incident_title" className="app-input mb-3" placeholder="Incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
             <button
               disabled={!title.trim() || createMutation.isPending}
               onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })}

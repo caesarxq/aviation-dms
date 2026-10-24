@@ -281,13 +281,13 @@ export function DocumentViewer() {
             <button onClick={() => setNewAnnotationType("comment")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "comment" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Comment</button>
             <button onClick={() => setNewAnnotationType("highlight")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "highlight" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Highlight</button>
           </div>
-          <textarea
+          <textarea id="add_a_comment_284" name="add_a_comment"
             className="w-full h-16 p-2 border border-kfl-border rounded text-sm resize-none focus:outline-none mb-2"
             value={annotationContent}
             onChange={e => setAnnotationContent(e.target.value)}
             placeholder="Add a comment…"
           />
-          <input
+          <input id="target_reference_290" name="target_reference"
             className="w-full p-2 border border-kfl-border rounded text-sm focus:outline-none mb-2"
             value={annotationTargetRef}
             onChange={e => setAnnotationTargetRef(e.target.value)}
