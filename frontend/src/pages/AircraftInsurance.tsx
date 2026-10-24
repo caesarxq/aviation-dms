@@ -170,7 +170,7 @@ export function AircraftInsurance() {
             </div>
 
             {/* Insurance Modal */}
-            <Modal open={showInsForm} onClose={() => setShowInsForm(false)} title="Add Insurance Policy">
+            <Modal open={showInsForm} onClose={() => setShowInsForm(false)} title="Add Insurance Policy" description="Record the policy for the selected aircraft. Enter the insurer and policy number exactly as issued, then provide coverage, premium, start, and expiry details for compliance tracking.">
               {insError && (
                 <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
                   {insError}
@@ -242,7 +242,7 @@ export function AircraftInsurance() {
             </div>
 
             {/* Aircraft Document Modal */}
-            <Modal open={showDocForm} onClose={() => setShowDocForm(false)} title="Add Aircraft Document">
+            <Modal open={showDocForm} onClose={() => setShowDocForm(false)} title="Add Aircraft Document" description="Record an airworthiness, registration, or other aircraft document for the selected aircraft. Use the document number and issuing authority exactly as printed and include expiry details when applicable.">
               {docError && (
                 <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
                   {docError}

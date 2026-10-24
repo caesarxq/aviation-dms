@@ -119,7 +119,7 @@ export function PersonnelLicenses() {
       )}
 
       {/* Add License Modal */}
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Personnel License">
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add Personnel License" description="Record one current personnel credential. Use the person ID from the personnel register, enter the issuing authority and dates exactly as shown on the credential, and provide the expiry date for renewal tracking.">
         {licenseError && (
           <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
             {licenseError}

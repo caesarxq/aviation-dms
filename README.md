@@ -280,6 +280,8 @@ See `.env.example` for the full template.
 
 `DESIGN.md` defines KFL brand tokens: brand blue `#1B7ABF`, deep aviation navy `#0B2942`, canvas gray, semantic status colors, and component specifications. Implemented via Tailwind CSS and custom CSS variables.
 
+Form UX, accessibility, and mutation-testing guidance is documented in [`docs/FORM-UX-AND-QUALITY-PLAN.md`](docs/FORM-UX-AND-QUALITY-PLAN.md).
+
 ## Security
 
 - Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy headers

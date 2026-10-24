@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+import { FormGuide } from "./FormGuide";
+
 interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: string;
   className?: string;
+  description?: string;
   children: React.ReactNode;
 }
 
@@ -16,7 +19,7 @@ interface ModalProps {
  * - Closes on Escape key or backdrop click.
  * - Traps focus (basic) and restores scroll on close.
  */
-export function Modal({ open, onClose, title, className, children }: ModalProps) {
+export function Modal({ open, onClose, title, className, description = "Complete the required fields below. Use the examples and guidance provided before saving." , children }: ModalProps) {
   const navigate = useNavigate();
   const mountRef = useRef(false);
 
@@ -59,6 +62,8 @@ export function Modal({ open, onClose, title, className, children }: ModalProps)
       className="fixed inset-0 z-[100] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={title ? "modal-title" : undefined}
+      aria-describedby={description ? "modal-description" : undefined}
       aria-label={title || "Dialog"}
     >
       {/* Backdrop */}
@@ -73,7 +78,7 @@ export function Modal({ open, onClose, title, className, children }: ModalProps)
       >
         {title && (
           <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
-            <h3 className="text-lg font-semibold text-white">{title}</h3>
+            <h3 id="modal-title" className="text-lg font-semibold text-white">{title}</h3>
             <button
               onClick={onClose}
               className="rounded-md p-1.5 text-white/70 hover:text-white hover:bg-white/10 transition"
@@ -83,6 +88,7 @@ export function Modal({ open, onClose, title, className, children }: ModalProps)
             </button>
           </div>
         )}
+        {description && <FormGuide id="modal-description">{description}</FormGuide>}
         <div className="text-white/90">{children}</div>
       </div>
     </div>

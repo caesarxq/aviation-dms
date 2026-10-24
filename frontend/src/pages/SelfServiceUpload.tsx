@@ -102,7 +102,7 @@ export function SelfServiceUpload() {
       </header>
 
       {/* Upload Credential Modal */}
-      <Modal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Credential Document">
+      <Modal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Credential Document" description="Upload a clear, legible credential file belonging to the selected person. Confirm the credential type before choosing the file; the document will be held for verification.">
         {uploadError && (
           <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
             {uploadError}

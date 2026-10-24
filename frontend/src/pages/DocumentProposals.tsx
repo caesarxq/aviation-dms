@@ -132,7 +132,7 @@ export function DocumentProposals() {
           </div>
 
           {/* Proposal Modal */}
-          <Modal open={showForm} onClose={() => setShowForm(false)} title="Create Proposal">
+          <Modal open={showForm} onClose={() => setShowForm(false)} title="Create Proposal" description="Describe one controlled-document change. Target the exact section or block, show the original and proposed text, and explain why the change is needed before submitting it for review.">
             {proposalError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
                 {proposalError}

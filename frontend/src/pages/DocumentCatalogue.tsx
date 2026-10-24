@@ -79,7 +79,7 @@ export function DocumentCatalogue() {
       </header>
 
       {/* New Document Modal */}
-      <Modal open={showNewDoc} onClose={() => setShowNewDoc(false)} title="Create New Document">
+      <Modal open={showNewDoc} onClose={() => setShowNewDoc(false)} title="Create New Document" description="Create the controlled-document record first. Use the official document identifier, choose the document class and classification, and mark KCAA approval when regulatory approval is required.">
         {newDocError && (
           <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
             {newDocError}
