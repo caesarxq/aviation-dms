@@ -5,6 +5,7 @@ import { Plus, Package, Share2 } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
+import { useValidation } from "../utils/validation";
 
 function dgStatusClass(status: string) {
   switch (status) {
@@ -28,6 +29,14 @@ export function DangerousGoods() {
   const [dgClass, setDgClass] = useState("3");
   const [unNumber, setUnNumber] = useState("");
   const [dgError, setDgError] = useState("");
+
+  const { errors: dgShipFieldErrors, isValid: dgShipIsValid } = useValidation(
+    { proper_shipping_name: properShippingName, dg_class: dgClass },
+    {
+      proper_shipping_name: { required: true, minLength: 2 },
+      dg_class: { required: true },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/dg-shipments", data).then((r: any) => r.data),
@@ -117,23 +126,21 @@ export function DangerousGoods() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="field_120" label="Proper shipping name" hint="Use the name shown in the dangerous goods declaration." required>
-                <input id="field_120" name="proper_shipping_name" className="app-input" placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
+                <input id="field_120" name="proper_shipping_name" aria-describedby="field_120-error" aria-invalid={!!dgShipFieldErrors.proper_shipping_name} className={`app-input ${dgShipFieldErrors.proper_shipping_name ? "border-rose-400" : ""}`} placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => setProperShippingName(e.target.value)} />
+                {dgShipFieldErrors.proper_shipping_name && <p id="field_120-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.proper_shipping_name}</p>}
               </FormField>
               <FormField htmlFor="field_124" label="DG class" hint="Enter the applicable hazard class, for example Class 3." required>
-                <input id="field_124" name="dg_class" className="app-input" placeholder="Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
+                <input id="field_124" name="dg_class" aria-describedby="field_124-error" aria-invalid={!!dgShipFieldErrors.dg_class} className={`app-input ${dgShipFieldErrors.dg_class ? "border-rose-400" : ""}`} placeholder="Class 3" value={dgClass} onChange={(e) => setDgClass(e.target.value)} />
+                {dgShipFieldErrors.dg_class && <p id="field_124-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.dg_class}</p>}
               </FormField>
               <FormField htmlFor="field_128" label="UN number" hint="Use the four-digit UN number where applicable.">
                 <input id="field_128" name="un_number" className="app-input" placeholder="UN3480" value={unNumber} onChange={(e) => setUnNumber(e.target.value)} />
               </FormField>
             </div>
             <button
-              disabled={!properShippingName.trim() || createMutation.isPending}
+              disabled={!dgShipIsValid || createMutation.isPending}
               onClick={() => {
                 setDgError("");
-                if (!properShippingName.trim()) {
-                  setDgError("Proper shipping name is required.");
-                  return;
-                }
                 createMutation.mutate({ proper_shipping_name: properShippingName, dg_class: dgClass, un_number: unNumber });
               }}
               className="app-btn-primary w-full"

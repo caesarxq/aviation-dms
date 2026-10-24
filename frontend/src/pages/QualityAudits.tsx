@@ -5,6 +5,7 @@ import { ClipboardCheck, Wrench } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { CorrectiveActionsModal } from "../components/ui/modals/CorrectiveActionsModal";
+import { useValidation } from "../utils/validation";
 
 function auditStatusClass(status: string) {
   switch (status) {
@@ -38,6 +39,13 @@ export function QualityAudits() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [auditError, setAuditError] = useState("");
+
+  const { errors: qaFieldErrors, isValid: qaIsValid } = useValidation(
+    { title },
+    {
+      title: { required: true, minLength: 2 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/quality-audits", data).then((r: any) => r.data),
@@ -118,16 +126,13 @@ export function QualityAudits() {
               </div>
             )}
             <FormField htmlFor="audit_title_119" label="Audit title" hint="Use the audit scope or activity name." required>
-              <input id="audit_title_119" name="audit_title" className="app-input" placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input id="audit_title_119" name="audit_title" aria-describedby="audit_title_119-error" aria-invalid={!!qaFieldErrors.title} className={`app-input ${qaFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Audit title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              {qaFieldErrors.title && <p id="audit_title_119-error" className="text-[11px] text-rose-700 mt-1">{qaFieldErrors.title}</p>}
             </FormField>
             <button
-              disabled={!title.trim() || createMutation.isPending}
+              disabled={!qaIsValid || createMutation.isPending}
               onClick={() => {
                 setAuditError("");
-                if (!title.trim()) {
-                  setAuditError("Audit title is required.");
-                  return;
-                }
                 createMutation.mutate({ title, auditor_id: "u-quality" });
               }}
               className="app-btn-primary w-full"

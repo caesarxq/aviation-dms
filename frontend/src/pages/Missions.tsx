@@ -4,6 +4,7 @@ import api from "../api/client";
 import { Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 
 function missionStatusClass(status: string) {
   switch (status) {
@@ -49,6 +50,13 @@ export function Missions() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [missionError, setMissionError] = useState("");
+
+  const { errors: missionFieldErrors, isValid: missionIsValid } = useValidation(
+    { title },
+    {
+      title: { required: true, minLength: 2 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/missions", data).then((r: any) => r.data),
@@ -136,16 +144,13 @@ export function Missions() {
               </div>
             )}
             <FormField htmlFor="mission_title_137" label="Mission title" hint="Use the operational mission name or reference." required>
-              <input id="mission_title_137" name="mission_title" className="app-input" placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={`app-input ${missionFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Mission title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              {missionFieldErrors.title && <p id="mission_title_137-error" className="text-[11px] text-rose-700 mt-1">{missionFieldErrors.title}</p>}
             </FormField>
             <button
-              disabled={!title.trim() || createMutation.isPending}
+              disabled={!missionIsValid || createMutation.isPending}
               onClick={() => {
                 setMissionError("");
-                if (!title.trim()) {
-                  setMissionError("Mission title is required.");
-                  return;
-                }
                 createMutation.mutate({ title });
               }}
               className="app-btn-primary w-full"

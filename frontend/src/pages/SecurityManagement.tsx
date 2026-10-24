@@ -5,6 +5,7 @@ import { ShieldAlert, AlertTriangle, Calendar, Users } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { SecurityReviewsModal } from "../components/ui/modals/SecurityReviewsModal";
 import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunctionsModal";
+import { useValidation } from "../utils/validation";
 
 function incidentSeverityClass(severity: string) {
   switch (severity) {
@@ -26,6 +27,13 @@ export function SecurityManagement() {
   const [title, setTitle] = useState("");
   const [showSecurityReviewModal, setShowSecurityReviewModal] = useState(false);
   const [showOutsourcedModal, setShowOutsourcedModal] = useState(false);
+
+  const { errors: smFieldErrors, isValid: smIsValid } = useValidation(
+    { title },
+    {
+      title: { required: true, minLength: 2 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/p1/security-incidents", data).then((r: any) => r.data),
@@ -108,10 +116,11 @@ export function SecurityManagement() {
               <button onClick={() => setShowForm(false)} className="app-btn-secondary px-3 py-2">Cancel</button>
             </div>
             <FormField htmlFor="incident_title_109" label="Incident title" hint="Summarize the security event without including sensitive credentials or secrets." required>
-              <input id="incident_title_109" name="incident_title" className="app-input" placeholder="Security incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <input id="incident_title_109" name="incident_title" aria-describedby="incident_title_109-error" aria-invalid={!!smFieldErrors.title} className={`app-input ${smFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Security incident title" value={title} onChange={(e) => setTitle(e.target.value)} />
+              {smFieldErrors.title && <p id="incident_title_109-error" className="text-[11px] text-rose-700 mt-1">{smFieldErrors.title}</p>}
             </FormField>
             <button
-              disabled={!title.trim() || createMutation.isPending}
+              disabled={!smIsValid || createMutation.isPending}
               onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })}
               className="app-btn-primary w-full"
             >

@@ -7,6 +7,7 @@ import { Plus, Check, X, ArrowUpRight } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 
 function ProposalExcerpt({ label, html, fallback, tone }: { label: string; html?: string; fallback?: string; tone: "removed" | "added" }) {
   const safeHtml = html ? DOMPurify.sanitize(html) : "";
@@ -29,6 +30,15 @@ export function DocumentProposals() {
     rationale: "", severity: "minor",
   });
   const [proposalError, setProposalError] = useState("");
+
+  const { errors: proposalFieldErrors, isValid: proposalIsValid } = useValidation(
+    { target_ref: form.target_ref, proposed_text: form.proposed_text, severity: form.severity },
+    {
+      target_ref: { required: true, minLength: 2 },
+      proposed_text: { required: true, minLength: 2 },
+      severity: { required: true },
+    }
+  );
 
   const { data: docs = [] } = useQuery({
     queryKey: ["documents"],
@@ -89,12 +99,8 @@ export function DocumentProposals() {
 
   const handleCreate = () => {
     setProposalError("");
-    if (!form.target_ref.trim()) {
-      setProposalError("Target reference is required.");
-      return;
-    }
-    if (!form.proposed_text.trim()) {
-      setProposalError("Proposed text is required.");
+    if (!proposalIsValid) {
+      setProposalError("Please complete all required fields.");
       return;
     }
     createMutation.mutate(form);
@@ -146,18 +152,21 @@ export function DocumentProposals() {
                 </select>
               </FormField>
               <FormField htmlFor="severity_145" label="Severity" required>
-                <select id="severity_145" name="severity" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
+                <select id="severity_145" name="severity" aria-describedby="severity_145-error" aria-invalid={!!proposalFieldErrors.severity} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.severity ? "border-rose-400" : ""}`} value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}>
                   <option value="minor">Minor</option><option value="major">Major</option><option value="critical">Critical</option>
                 </select>
+                {proposalFieldErrors.severity && <p id="severity_145-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.severity}</p>}
               </FormField>
               <FormField htmlFor="target_ref_148" label="Target reference" hint="Identify the section, block, line, or illustration affected." required>
-                <input id="target_ref_148" name="target_ref" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Section 3.2, line 45" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
+                <input id="target_ref_148" name="target_ref" aria-describedby="target_ref_148-error" aria-invalid={!!proposalFieldErrors.target_ref} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.target_ref ? "border-rose-400" : ""}`} placeholder="Section 3.2, line 45" value={form.target_ref} onChange={e => setForm({ ...form, target_ref: e.target.value })} />
+                {proposalFieldErrors.target_ref && <p id="target_ref_148-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.target_ref}</p>}
               </FormField>
               <FormField htmlFor="original_text_149" label="Original text" hint="Paste the exact current wording.">
                 <input id="original_text_149" name="original_text" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Current wording" value={form.original_text} onChange={e => setForm({ ...form, original_text: e.target.value })} />
               </FormField>
               <FormField htmlFor="proposed_text_150" label="Proposed text" hint="Enter the replacement wording.">
-                <input id="proposed_text_150" name="proposed_text" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Replacement wording" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
+                <input id="proposed_text_150" name="proposed_text" aria-describedby="proposed_text_150-error" aria-invalid={!!proposalFieldErrors.proposed_text} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.proposed_text ? "border-rose-400" : ""}`} placeholder="Replacement wording" value={form.proposed_text} onChange={e => setForm({ ...form, proposed_text: e.target.value })} />
+                {proposalFieldErrors.proposed_text && <p id="proposed_text_150-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.proposed_text}</p>}
               </FormField>
               <FormField htmlFor="rationale_151" label="Rationale" hint="Explain the compliance, safety, or operational reason for the change.">
                 <input id="rationale_151" name="rationale" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Why is this change needed?" value={form.rationale} onChange={e => setForm({ ...form, rationale: e.target.value })} />

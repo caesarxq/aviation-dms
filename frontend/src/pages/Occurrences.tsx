@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { AlertTriangle, FileText } from "lucide-react";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 
 function severityClass(severity: string) {
   switch (severity) {
@@ -26,6 +27,14 @@ export function Occurrences() {
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("minor");
   const [occurrenceType, setOccurrenceType] = useState("incident");
+
+  const { errors: occFieldErrors, isValid: occIsValid } = useValidation(
+    { title, description, severity, occurrence_type: occurrenceType },
+    {
+      title: { required: true, minLength: 2 },
+      description: { required: true, minLength: 5 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => safetyApi.createOccurrence(data),
@@ -94,10 +103,12 @@ export function Occurrences() {
             </div>
             <div className="space-y-3 mb-4">
               <FormField htmlFor="title_94" label="Occurrence title" hint="Summarize the event clearly and concisely." required>
-                <input id="title_94" name="title" className="app-input" placeholder="Occurrence title" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <input id="title_94" name="title" aria-describedby="title_94-error" aria-invalid={!!occFieldErrors.title} className={`app-input ${occFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Occurrence title" value={title} onChange={(e) => setTitle(e.target.value)} />
+                {occFieldErrors.title && <p id="title_94-error" className="text-[11px] text-rose-700 mt-1">{occFieldErrors.title}</p>}
               </FormField>
-              <FormField htmlFor="description_95" label="Description" hint="Include what happened, where, and any immediate action taken.">
-                <textarea id="description_95" name="description" className="app-input" placeholder="Describe the occurrence" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+              <FormField htmlFor="description_95" label="Description" hint="Include what happened, where, and any immediate action taken." required>
+                <textarea id="description_95" name="description" aria-describedby="description_95-error" aria-invalid={!!occFieldErrors.description} className={`app-input ${occFieldErrors.description ? "border-rose-400" : ""}`} placeholder="Describe the occurrence" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+                {occFieldErrors.description && <p id="description_95-error" className="text-[11px] text-rose-700 mt-1">{occFieldErrors.description}</p>}
               </FormField>
             </div>
             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -122,7 +133,7 @@ export function Occurrences() {
               </div>
             </div>
             <button
-              disabled={!title.trim() || createMutation.isPending}
+              disabled={!occIsValid || createMutation.isPending}
               onClick={() => createMutation.mutate({ title, description, occurrence_type: occurrenceType, severity })}
               className="app-btn-primary w-full"
             >

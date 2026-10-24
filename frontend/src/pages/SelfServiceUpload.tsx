@@ -4,6 +4,7 @@ import api from "../api/client";
 import { Upload, CheckCircle, Clock, AlertTriangle } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 
 const DOCUMENT_TYPES = [
@@ -76,17 +77,23 @@ export function SelfServiceUpload() {
     return <Clock size={14} className="text-yellow-600" />;
   };
 
+  const uploadRules = {
+    person_id: { required: true },
+    file: { required: "Please select a file to upload." },
+  } as const;
+
+  const { errors: uploadFieldErrors, isValid: uploadIsValid } = useValidation(
+    { ...uploadForm, file: selectedFile ? "file" : "" },
+    uploadRules
+  );
+
   const handleUpload = () => {
     setUploadError("");
-    if (!uploadForm.person_id.trim()) {
-      setUploadError("Your Person ID is required.");
+    if (!uploadIsValid) {
+      setUploadError("Please correct the fields marked below.");
       return;
     }
-    if (!selectedFile) {
-      setUploadError("Please select a file to upload.");
-      return;
-    }
-    createMutation.mutate({ ...uploadForm, file: selectedFile });
+    createMutation.mutate({ ...uploadForm, file: selectedFile! });
   };
 
   return (
@@ -111,7 +118,8 @@ export function SelfServiceUpload() {
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="your_person_id_112" label="Person ID" hint="Use your personnel register ID, for example u-safety." required>
-            <input id="your_person_id_112" name="your_person_id" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="u-safety" value={uploadForm.person_id} onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })} />
+            <input id="your_person_id_112" name="your_person_id" aria-describedby="your_person_id_112-error" aria-invalid={!!uploadFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={uploadForm.person_id} onChange={e => setUploadForm({ ...uploadForm, person_id: e.target.value })} />
+            {uploadFieldErrors.person_id && <p id="your_person_id_112-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.person_id}</p>}
           </FormField>
           <FormField htmlFor="license_type_118" label="Credential type" required>
             <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => setUploadForm({ ...uploadForm, license_type: e.target.value })}>
@@ -124,7 +132,8 @@ export function SelfServiceUpload() {
             </select>
           </FormField>
           <FormField htmlFor="file_136" label="Credential file" hint="Upload a clear PDF or image for compliance verification." required className="col-span-2">
-            <input id="file_136" name="file" type="file" className="border border-kfl-border rounded p-2 text-sm w-full" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+            <input id="file_136" name="file" type="file" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+            {uploadFieldErrors.file && <p id="file_136-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.file}</p>}
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">

@@ -5,6 +5,7 @@ import { ArrowUpRight, FileText, Search, ShieldCheck, Plus, Shuffle } from "luci
 import api from "../api/client";
 import { Modal } from "../components/ui/Modal";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
 
@@ -42,14 +43,17 @@ export function DocumentCatalogue() {
     },
   });
 
+  const newDocRules = {
+    document_id: { required: true },
+    title: { required: true },
+  } as const;
+
+  const { errors: docErrors, isValid: docIsValid } = useValidation(newDocForm, newDocRules);
+
   const handleCreate = () => {
     setNewDocError("");
-    if (!newDocForm.document_id.trim()) {
-      setNewDocError("Document ID is required.");
-      return;
-    }
-    if (!newDocForm.title.trim()) {
-      setNewDocError("Document title is required.");
+    if (!docIsValid) {
+      setNewDocError("Please correct the fields marked below.");
       return;
     }
     createMutation.mutate(newDocForm);
@@ -88,10 +92,12 @@ export function DocumentCatalogue() {
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="document_id_89" label="Document ID" hint="Use the controlled identifier, for example DOC-016." required>
-            <input id="document_id_89" name="document_id" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })} />
+            <input id="document_id_89" name="document_id" aria-describedby="document_id_89-error" aria-invalid={!!docErrors.document_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.document_id ? "border-rose-400" : ""}`} placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setNewDocForm({ ...newDocForm, document_id: e.target.value })} />
+            {docErrors.document_id && <p id="document_id_89-error" className="text-[11px] text-rose-700 mt-1">{docErrors.document_id}</p>}
           </FormField>
           <FormField htmlFor="title_95" label="Document title" required>
-            <input id="title_95" name="title" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Title" value={newDocForm.title} onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })} />
+            <input id="title_95" name="title" aria-describedby="title_95-error" aria-invalid={!!docErrors.title} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.title ? "border-rose-400" : ""}`} placeholder="Title" value={newDocForm.title} onChange={e => setNewDocForm({ ...newDocForm, title: e.target.value })} />
+            {docErrors.title && <p id="title_95-error" className="text-[11px] text-rose-700 mt-1">{docErrors.title}</p>}
           </FormField>
           <FormField htmlFor="doc_class_101" label="Document class" hint="Choose the controlled-document category.">
             <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.doc_class} onChange={e => setNewDocForm({ ...newDocForm, doc_class: e.target.value })}>

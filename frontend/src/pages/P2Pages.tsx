@@ -4,6 +4,7 @@ import { p2Api } from "../api/p2";
 import { Users, BarChart3, Calendar, Share2, Plus } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
+import { useValidation } from "../utils/validation";
 
 function outsourcedStatusClass(status: string) {
   switch (status) {
@@ -25,6 +26,14 @@ export function OutsourcedFunctions() {
   const [provider, setProvider] = useState("");
   const [scope, setScope] = useState("");
   const [ofError, setOfError] = useState("");
+
+  const { errors: ofFieldErrors, isValid: ofIsValid } = useValidation(
+    { provider_name: provider, scope_of_work: scope },
+    {
+      provider_name: { required: true, minLength: 2 },
+      scope_of_work: { required: true, minLength: 2 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createOutsourcedFunction(data),
@@ -91,18 +100,20 @@ export function OutsourcedFunctions() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="provider_name_94" label="Provider name" hint="Use the legal or trading name of the external provider." required>
-                <input id="provider_name_94" name="provider_name" className="app-input" placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
+                <input id="provider_name_94" name="provider_name" aria-describedby="provider_name_94-error" aria-invalid={!!ofFieldErrors.provider_name} className={`app-input ${ofFieldErrors.provider_name ? "border-rose-400" : ""}`} placeholder="Provider name" value={provider} onChange={(e) => setProvider(e.target.value)} />
+                {ofFieldErrors.provider_name && <p id="provider_name_94-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.provider_name}</p>}
               </FormField>
               <FormField htmlFor="scope_of_work_98" label="Scope of work" hint="Describe the service being outsourced." required>
-                <input id="scope_of_work_98" name="scope_of_work" className="app-input" placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
+                <input id="scope_of_work_98" name="scope_of_work" aria-describedby="scope_of_work_98-error" aria-invalid={!!ofFieldErrors.scope_of_work} className={`app-input ${ofFieldErrors.scope_of_work ? "border-rose-400" : ""}`} placeholder="Scope of work" value={scope} onChange={(e) => setScope(e.target.value)} />
+                {ofFieldErrors.scope_of_work && <p id="scope_of_work_98-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.scope_of_work}</p>}
               </FormField>
             </div>
             <button
-              disabled={!provider.trim() || createMutation.isPending}
+              disabled={!ofIsValid || createMutation.isPending}
               onClick={() => {
                 setOfError("");
-                if (!provider.trim()) {
-                  setOfError("Provider name is required.");
+                if (!provider.trim() || !scope.trim()) {
+                  setOfError("Please complete all required fields.");
                   return;
                 }
                 createMutation.mutate({ provider_name: provider, scope });
@@ -162,6 +173,13 @@ export function SafetyKPIs() {
   const [name, setName] = useState("");
   const [target, setTarget] = useState("");
   const [kpiError, setKpiError] = useState("");
+
+  const { errors: kpiFieldErrors, isValid: kpiIsValid } = useValidation(
+    { kpi_name: name },
+    {
+      kpi_name: { required: true, minLength: 2 },
+    }
+  );
 
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSafetyKPI(data),
@@ -224,14 +242,15 @@ export function SafetyKPIs() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="kpi_name_229" label="KPI name" hint="Name the safety performance measure." required>
-                <input id="kpi_name_229" name="kpi_name" className="app-input" placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
+                <input id="kpi_name_229" name="kpi_name" aria-describedby="kpi_name_229-error" aria-invalid={!!kpiFieldErrors.kpi_name} className={`app-input ${kpiFieldErrors.kpi_name ? "border-rose-400" : ""}`} placeholder="KPI name" value={name} onChange={(e) => setName(e.target.value)} />
+                {kpiFieldErrors.kpi_name && <p id="kpi_name_229-error" className="text-[11px] text-rose-700 mt-1">{kpiFieldErrors.kpi_name}</p>}
               </FormField>
               <FormField htmlFor="target_value_233" label="Target value" hint="Include the unit or threshold in the target description.">
                 <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => setTarget(e.target.value)} />
               </FormField>
             </div>
             <button
-              disabled={!name.trim() || createMutation.isPending}
+              disabled={!kpiIsValid || createMutation.isPending}
               onClick={() => {
                 setKpiError("");
                 if (!name.trim()) {
@@ -293,6 +312,13 @@ export function SecurityReviews() {
   const [date, setDate] = useState("");
   const [srError, setSrError] = useState("");
 
+  const { errors: srFieldErrors, isValid: srIsValid } = useValidation(
+    { meeting_date: date },
+    {
+      meeting_date: { required: true },
+    }
+  );
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createSecurityReview(data),
     onSuccess: () => {
@@ -351,9 +377,12 @@ export function SecurityReviews() {
                 {srError}
               </div>
             )}
-            <input id="date_357" name="date" type="date" className="app-input mb-3" value={date} onChange={(e) => setDate(e.target.value)} />
+            <FormField htmlFor="date_357" label="Meeting date" required>
+              <input id="date_357" name="date" aria-describedby="date_357-error" aria-invalid={!!srFieldErrors.meeting_date} type="date" className={`app-input mb-3 ${srFieldErrors.meeting_date ? "border-rose-400" : ""}`} value={date} onChange={(e) => setDate(e.target.value)} />
+              {srFieldErrors.meeting_date && <p id="date_357-error" className="text-[11px] text-rose-700 mt-1">{srFieldErrors.meeting_date}</p>}
+            </FormField>
             <button
-              disabled={!date || createMutation.isPending}
+              disabled={!srIsValid || createMutation.isPending}
               onClick={() => {
                 setSrError("");
                 if (!date) {
@@ -417,6 +446,13 @@ export function DGResponsibilityMatrix() {
   const [role, setRole] = useState("");
   const [dgError, setDgError] = useState("");
 
+  const { errors: dgFieldErrors, isValid: dgIsValid } = useValidation(
+    { project_or_route: project, process_stage: stage, responsible_role: role },
+    {
+      project_or_route: { required: true, minLength: 2 },
+    }
+  );
+
   const createMutation = useMutation({
     mutationFn: (data: any) => p2Api.createDGMatrix(data),
     onSuccess: () => {
@@ -479,7 +515,8 @@ export function DGResponsibilityMatrix() {
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <FormField htmlFor="project_or_route_486" label="Project or route" hint="Identify the operation or route covered." required>
-                <input id="project_or_route_486" name="project_or_route" className="app-input" placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
+                <input id="project_or_route_486" name="project_or_route" aria-describedby="project_or_route_486-error" aria-invalid={!!dgFieldErrors.project_or_route} className={`app-input ${dgFieldErrors.project_or_route ? "border-rose-400" : ""}`} placeholder="Project or route" value={project} onChange={(e) => setProject(e.target.value)} />
+                {dgFieldErrors.project_or_route && <p id="project_or_route_486-error" className="text-[11px] text-rose-700 mt-1">{dgFieldErrors.project_or_route}</p>}
               </FormField>
               <FormField htmlFor="process_stage_490" label="Process stage" hint="Name the stage where DG responsibility applies.">
                 <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => setStage(e.target.value)} />
@@ -489,7 +526,7 @@ export function DGResponsibilityMatrix() {
               </FormField>
             </div>
             <button
-              disabled={!project.trim() || createMutation.isPending}
+              disabled={!dgIsValid || createMutation.isPending}
               onClick={() => {
                 setDgError("");
                 if (!project.trim()) {
