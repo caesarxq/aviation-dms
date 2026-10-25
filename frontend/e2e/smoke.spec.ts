@@ -203,8 +203,36 @@ test.describe("Risk Assessments", () => {
   });
 });
 
+test.describe("Investigations", () => {
+  test("loads investigations page", async ({ page }) => {
+    await page.goto("/investigations");
+    await expect(page.getByRole("heading", { name: "Investigations" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create an investigation", async ({ page }) => {
+    await page.goto("/occurrences");
+    await page.click("text=Report Occurrence");
+    await page.waitForSelector('input[placeholder="Occurrence title"]');
+    await page.fill('input[placeholder="Occurrence title"]', "E2E Investigation Occurrence");
+    await page.fill('textarea[placeholder="Describe the occurrence"]', "Test occurrence for investigation E2E");
+    await page.click("text=Submit Report");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("text=E2E Investigation Occurrence").first()).toBeVisible({ timeout: 8000 });
+
+    await page.goto("/investigations");
+    await page.click("text=New Investigation");
+    await page.waitForSelector('input[placeholder="e.g. OCC-..."]');
+    await page.fill('input[placeholder="e.g. OCC-..."]', "E2E Investigation Occurrence");
+    await page.fill('input[placeholder="e.g. u-safety"]', "u-safety");
+    await page.click("text=Open Investigation");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("text=u-safety").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

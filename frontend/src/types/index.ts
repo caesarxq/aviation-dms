@@ -133,6 +133,20 @@ export interface RiskAssessment {
   updated_at: string | null;
 }
 
+export interface Investigation {
+  investigation_id: string;
+  occurrence_id: string;
+  investigator_id: string;
+  status: string;
+  findings: string | null;
+  root_cause: string | null;
+  recommendations: string | null;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ROCRegister {
   roc_id: string;
   roc_number: string;
