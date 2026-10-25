@@ -314,6 +314,34 @@ async def list_risk_assessments(request: Request, hazard_id: Optional[str] = Non
         await db.close()
 
 
+@router.patch("/risk-assessments/{assessment_id}", response_model=RiskAssessmentResponse)
+async def update_risk_assessment(assessment_id: str, update: RiskAssessmentUpdate, request: Request):
+    _check(request, "safety:update")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Risk assessment not found")
+        updates = []
+        params = []
+        field_map = {"title": update.title, "description": update.description, "likelihood": update.likelihood, "severity": update.severity, "risk_level": update.risk_level, "mitigation_measures": update.mitigation_measures, "residual_risk": update.residual_risk, "status": update.status, "reviewed_by": update.reviewed_by}
+        for col, val in field_map.items():
+            if val is not None:
+                updates.append(f"{col} = ?")
+                params.append(val)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(assessment_id)
+            await db.execute(f"UPDATE risk_assessments SET {', '.join(updates)} WHERE assessment_id = ?", params)
+            await db.commit()
+        cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
+        row = await cursor.fetchone()
+        return RiskAssessmentResponse(**dict(row))
+    finally:
+        await db.close()
+
+
 # ==================== INVESTIGATIONS ====================
 
 @router.post("/investigations", response_model=InvestigationResponse, status_code=201)

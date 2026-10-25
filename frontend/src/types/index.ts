@@ -112,6 +112,27 @@ export interface SafetyAction {
   updated_at: string;
 }
 
+export interface RiskAssessment {
+  assessment_id: string;
+  hazard_id: string | null;
+  occurrence_id: string | null;
+  mission_id: string | null;
+  title: string;
+  description: string | null;
+  likelihood: string;
+  severity: string;
+  risk_level: string;
+  mitigation_measures: string | null;
+  residual_risk: string | null;
+  assessor_id: string;
+  assessed_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface ROCRegister {
   roc_id: string;
   roc_number: string;

@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -19,6 +19,13 @@ export const safetyApi = {
     api.post<Hazard>("/p1/hazards", data).then((r: any) => r.data),
   updateHazard: (id: string, data: any) =>
     api.patch<Hazard>(`/p1/hazards/${id}`, data).then((r: any) => r.data),
+
+  listRiskAssessments: (params?: Record<string, any>) =>
+    api.get<RiskAssessment[]>("/p1/risk-assessments", { params }).then((r: any) => r.data),
+  createRiskAssessment: (data: any) =>
+    api.post<RiskAssessment>("/p1/risk-assessments", data).then((r: any) => r.data),
+  updateRiskAssessment: (id: string, data: any) =>
+    api.patch<RiskAssessment>(`/p1/risk-assessments/${id}`, data).then((r: any) => r.data),
 
   listSafetyActions: (params?: Record<string, any>) =>
     api.get<SafetyAction[]>("/p1/safety-actions", { params }).then((r: any) => r.data),

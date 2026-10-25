@@ -184,8 +184,27 @@ test.describe("Hazards", () => {
   });
 });
 
+test.describe("Risk Assessments", () => {
+  test("loads risk assessments page", async ({ page }) => {
+    await page.goto("/risk-assessments");
+    await expect(page.getByRole("heading", { name: "Risk Assessments" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a risk assessment", async ({ page }) => {
+    await page.goto("/risk-assessments");
+    await page.click("text=New Assessment");
+    await page.waitForSelector('input[placeholder="Assessment title"]');
+    await page.fill('input[placeholder="Assessment title"]', "E2E Test Risk Assessment");
+    await page.fill('textarea[placeholder="Describe the risk scenario"]', "A test risk assessment for E2E validation");
+    await page.click("text=Submit Assessment");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=E2E Test Risk Assessment").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");
