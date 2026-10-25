@@ -33,4 +33,12 @@ export const p2Api = {
     api.post<DGResponsibilityMatrix>("/p1/dg-responsibility-matrix", data).then((r: any) => r.data),
   updateDGMatrix: (id: string, data: any) =>
     api.patch<DGResponsibilityMatrix>(`/p1/dg-responsibility-matrix/${id}`, data).then((r: any) => r.data),
+
+  // Document Distributions (DOC-15)
+  listDistributions: (params?: Record<string, any>) =>
+    api.get<any[]>("/p0/distributions", { params }).then((r: any) => r.data),
+  createDistribution: (data: any) =>
+    api.post<any>("/p0/distributions", data).then((r: any) => r.data),
+  acknowledgeDistribution: (id: string) =>
+    api.post(`/p0/distributions/${id}/acknowledge`).then((r: any) => r.data),
 };

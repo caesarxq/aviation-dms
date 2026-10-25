@@ -18,6 +18,7 @@ import {
   Search,
   CheckCircle,
   ScrollText,
+  MailOpen,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -109,6 +110,7 @@ const sections: SectionProps[] = [
     items: [
       { to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits" },
       { to: "/audit-trail", icon: ScrollText, label: "Audit Trail" },
+      { to: "/distributions", icon: MailOpen, label: "Distributions" },
     ],
   },
   {

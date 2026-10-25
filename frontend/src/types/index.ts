@@ -177,6 +177,21 @@ export interface AuditEvent {
   timestamp: string;
 }
 
+export interface Distribution {
+  distribution_id: string;
+  version_id: string;
+  recipient_id: string;
+  channel: string;
+  status: string;
+  sent_at: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  updated_by: string;
+}
+
 export interface ROCRegister {
   roc_id: string;
   roc_number: string;

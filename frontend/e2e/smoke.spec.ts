@@ -267,8 +267,28 @@ test.describe("Audit Trail", () => {
   });
 });
 
+test.describe("Document Distributions", () => {
+  test("loads distributions page", async ({ page }) => {
+    await page.goto("/distributions");
+    await expect(page.getByRole("heading", { name: "Document Distributions" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a distribution", async ({ page }) => {
+    await page.goto("/distributions");
+    await page.click("text=New Distribution");
+    await page.waitForSelector("#distribution_create_version");
+    await page.fill("#distribution_create_version", "VER-DOC-001");
+    await page.fill("#distribution_create_recipient", "u-chief-pilot");
+    await page.selectOption("#distribution_create_channel", "email");
+    await page.click("#create_distribution_submit");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=VER-DOC-001").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");
