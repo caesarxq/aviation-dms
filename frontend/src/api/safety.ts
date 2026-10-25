@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -40,6 +40,9 @@ export const safetyApi = {
     api.post<SafetyAction>("/p1/safety-actions", data).then((r: any) => r.data),
   updateSafetyAction: (id: string, data: any) =>
     api.patch<SafetyAction>(`/p1/safety-actions/${id}`, data).then((r: any) => r.data),
+
+  listAuditEvents: (params?: Record<string, any>) =>
+    api.get<AuditEvent[]>("/p0/audit-events", { params }).then((r: any) => r.data),
 
   getTrends: () =>
     api.get("/p1/safety/trends").then((r: any) => r.data),

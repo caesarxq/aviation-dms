@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Search,
   CheckCircle,
+  ScrollText,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -105,7 +106,10 @@ const sections: SectionProps[] = [
   {
     label: "Quality & Compliance",
     icon: ClipboardCheck,
-    items: [{ to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits" }],
+    items: [
+      { to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits" },
+      { to: "/audit-trail", icon: ScrollText, label: "Audit Trail" },
+    ],
   },
   {
     label: "Personnel & Aircraft",

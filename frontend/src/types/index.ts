@@ -167,6 +167,16 @@ export interface SafetyAction {
   updated_at: string;
 }
 
+export interface AuditEvent {
+  event_id: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  actor_id: string;
+  details: string | null;
+  timestamp: string;
+}
+
 export interface ROCRegister {
   roc_id: string;
   roc_number: string;

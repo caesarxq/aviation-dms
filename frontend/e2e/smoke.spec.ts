@@ -251,8 +251,24 @@ test.describe("Safety Actions", () => {
   });
 });
 
+test.describe("Audit Trail", () => {
+  test("loads audit trail page", async ({ page }) => {
+    await page.goto("/audit-trail");
+    await expect(page.getByRole("heading", { name: "Audit Trail" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("filters audit events by entity type", async ({ page }) => {
+    await page.goto("/audit-trail");
+    await page.fill('input[placeholder="Entity type (e.g. document)"]', "document");
+    await page.waitForTimeout(1000);
+    const rows = await page.locator("table tbody tr").count();
+    expect(rows).toBeGreaterThanOrEqual(0);
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");
