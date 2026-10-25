@@ -231,8 +231,28 @@ test.describe("Investigations", () => {
   });
 });
 
+test.describe("Safety Actions", () => {
+  test("loads safety actions page", async ({ page }) => {
+    await page.goto("/safety-actions");
+    await expect(page.getByRole("heading", { name: "Safety Actions" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a safety action", async ({ page }) => {
+    await page.goto("/safety-actions");
+    await page.click("text=New Action");
+    await page.waitForSelector('input[placeholder="Action title"]');
+    await page.fill('input[placeholder="Action title"]', "E2E Test Safety Action");
+    await page.fill('textarea[placeholder="Describe the action"]', "A test safety action for E2E validation");
+    await page.fill('input[placeholder="e.g. u-safety"]', "u-safety");
+    await page.click("text=Create Action");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=E2E Test Safety Action").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

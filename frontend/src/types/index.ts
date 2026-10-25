@@ -147,6 +147,26 @@ export interface Investigation {
   updated_at: string;
 }
 
+export interface SafetyAction {
+  action_id: string;
+  occurrence_id: string | null;
+  hazard_id: string | null;
+  investigation_id: string | null;
+  title: string;
+  description: string;
+  action_type: string;
+  owner_id: string;
+  due_date: string | null;
+  status: string;
+  evidence: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  effectiveness_check: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ROCRegister {
   roc_id: string;
   roc_number: string;

@@ -16,6 +16,7 @@ import {
   Upload,
   ChevronDown,
   Search,
+  CheckCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -95,6 +96,7 @@ const sections: SectionProps[] = [
       { to: "/hazards", icon: AlertTriangle, label: "Hazard Register" },
       { to: "/risk-assessments", icon: ShieldCheck, label: "Risk Assessments" },
       { to: "/investigations", icon: Search, label: "Investigations" },
+      { to: "/safety-actions", icon: CheckCircle, label: "Safety Actions" },
       { to: "/missions", icon: ClipboardList, label: "Missions" },
       { to: "/dangerous-goods", icon: AlertOctagon, label: "Dangerous Goods" },
       { to: "/security", icon: ShieldAlert, label: "Security" },
