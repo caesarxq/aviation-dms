@@ -658,6 +658,25 @@ CREATE TABLE IF NOT EXISTS outsourced_functions (
     updated_by TEXT NOT NULL
 );
 
+-- Maintenance Management (MAINT-01)
+CREATE TABLE IF NOT EXISTS maintenance_records (
+    record_id TEXT PRIMARY KEY,
+    aircraft_registration TEXT NOT NULL,
+    maintenance_type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    performed_by TEXT NOT NULL,
+    performed_at TEXT NOT NULL,
+    next_due TEXT,
+    status TEXT NOT NULL DEFAULT 'completed',
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_aircraft ON maintenance_records(aircraft_registration);
+CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_records(status);
+
 -- Safety KPIs / Objectives (P2 - SAF-08)
 CREATE TABLE IF NOT EXISTS safety_kpis (
     kpi_id TEXT PRIMARY KEY,

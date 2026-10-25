@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -71,4 +71,13 @@ export const safetyApi = {
     api.patch<TrainingRecord>(`/p1/training-records/${id}`, data).then((r: any) => r.data),
   deleteTrainingRecord: (id: string) =>
     api.delete(`/p1/training-records/${id}`).then((r: any) => r.data),
+
+  listMaintenanceRecords: (params?: Record<string, any>) =>
+    api.get<MaintenanceRecord[]>("/p1/maintenance-records", { params }).then((r: any) => r.data),
+  createMaintenanceRecord: (data: any) =>
+    api.post<MaintenanceRecord>("/p1/maintenance-records", data).then((r: any) => r.data),
+  updateMaintenanceRecord: (id: string, data: any) =>
+    api.patch<MaintenanceRecord>(`/p1/maintenance-records/${id}`, data).then((r: any) => r.data),
+  deleteMaintenanceRecord: (id: string) =>
+    api.delete(`/p1/maintenance-records/${id}`).then((r: any) => r.data),
 };

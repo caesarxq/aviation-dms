@@ -310,8 +310,30 @@ test.describe("Training Management", () => {
   });
 });
 
+test.describe("Maintenance Management", () => {
+  test("loads maintenance page", async ({ page }) => {
+    await page.goto("/maintenance");
+    await expect(page.getByRole("heading", { name: "Maintenance Management" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a maintenance record", async ({ page }) => {
+    await page.goto("/maintenance");
+    await page.click("text=New Record");
+    await page.waitForSelector("#maintenance_aircraft");
+    await page.fill("#maintenance_aircraft", "5Y-1353A");
+    await page.fill("#maintenance_type", "A-Check");
+    await page.fill("#maintenance_description", "Routine inspection");
+    await page.fill("#maintenance_performed_by", "Mech-1");
+    await page.fill("#maintenance_performed_at", "2026-01-10");
+    await page.click("#maintenance_submit");
+    await page.waitForTimeout(1500);
+    await expect(page.getByText("A-Check").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

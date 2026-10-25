@@ -20,6 +20,7 @@ import {
   ScrollText,
   MailOpen,
   GraduationCap,
+  Wrench,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -120,6 +121,7 @@ const sections: SectionProps[] = [
     items: [
       { to: "/personnel-licenses", icon: KeyRound, label: "Personnel Licenses" },
       { to: "/training", icon: GraduationCap, label: "Training Management" },
+      { to: "/maintenance", icon: Wrench, label: "Maintenance Management" },
       { to: "/aircraft-insurance", icon: Shield, label: "Aircraft Insurance" },
       { to: "/self-service-upload", icon: Upload, label: "Self-Service Upload" },
     ],

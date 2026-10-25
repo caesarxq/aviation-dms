@@ -191,6 +191,20 @@ export interface TrainingRecord {
   updated_at: string;
 }
 
+export interface MaintenanceRecord {
+  record_id: string;
+  aircraft_registration: string;
+  maintenance_type: string;
+  description: string;
+  performed_by: string;
+  performed_at: string;
+  next_due: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Distribution {
   distribution_id: string;
   version_id: string;

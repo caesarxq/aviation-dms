@@ -781,6 +781,30 @@ class TrainingRecordResponse(BaseModel):
     updated_at: str
 
 
+class MaintenanceRecordCreate(BaseModel):
+    aircraft_registration: str
+    maintenance_type: str
+    description: str
+    performed_by: str
+    performed_at: str
+    next_due: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class MaintenanceRecordResponse(BaseModel):
+    record_id: str
+    aircraft_registration: str
+    maintenance_type: str
+    description: str
+    performed_by: str
+    performed_at: str
+    next_due: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 # --- P2 Models ---
 class OutsourcedFunctionCreate(BaseModel):
     provider_name: str
