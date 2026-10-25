@@ -21,6 +21,8 @@ import {
   MailOpen,
   GraduationCap,
   Wrench,
+  Clock,
+  Award,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -120,6 +122,9 @@ const sections: SectionProps[] = [
     icon: Users,
     items: [
       { to: "/personnel-licenses", icon: KeyRound, label: "Personnel Licenses" },
+      { to: "/crew", icon: Users, label: "Crew Management" },
+      { to: "/duties", icon: Clock, label: "Duty Time Tracking" },
+      { to: "/crew-qualifications", icon: Award, label: "Crew Qualifications" },
       { to: "/training", icon: GraduationCap, label: "Training Management" },
       { to: "/maintenance", icon: Wrench, label: "Maintenance Management" },
       { to: "/aircraft-insurance", icon: Shield, label: "Aircraft Insurance" },

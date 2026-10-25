@@ -980,6 +980,63 @@ CREATE INDEX IF NOT EXISTS idx_aircraft_documents_status ON aircraft_documents(s
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient);
 CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+
+-- App Settings (configurable FDTL defaults)
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Crew Management
+CREATE TABLE IF NOT EXISTS crew_members (
+    crew_id TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    base TEXT NOT NULL DEFAULT 'Nairobi',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_crew_role ON crew_members(role);
+CREATE INDEX IF NOT EXISTS idx_crew_status ON crew_members(status);
+
+CREATE TABLE IF NOT EXISTS duty_records (
+    duty_id TEXT PRIMARY KEY,
+    crew_id TEXT NOT NULL,
+    duty_start TEXT NOT NULL,
+    duty_end TEXT NOT NULL,
+    aircraft_reg TEXT,
+    role TEXT NOT NULL,
+    location TEXT,
+    block_hours REAL,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_duty_crew ON duty_records(crew_id);
+CREATE INDEX IF NOT EXISTS idx_duty_start ON duty_records(duty_start);
+
+CREATE TABLE IF NOT EXISTS crew_qualifications (
+    qual_id TEXT PRIMARY KEY,
+    crew_id TEXT NOT NULL,
+    qual_type TEXT NOT NULL,
+    rating TEXT,
+    issue_date TEXT NOT NULL,
+    expiry_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'valid',
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qual_crew ON crew_qualifications(crew_id);
+CREATE INDEX IF NOT EXISTS idx_qual_expiry ON crew_qualifications(expiry_date);
 """
 
 async def get_db():
@@ -1340,6 +1397,28 @@ async def seed_db():
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 ac,
             )
+
+        # App settings (configurable FDTL defaults)
+        await db.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?,?,?)""",
+            ("fdtl_max_duty_hours", "14", now),
+        )
+        await db.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?,?,?)""",
+            ("fdtl_max_block_hours", "12", now),
+        )
+        await db.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?,?,?)""",
+            ("fdtl_min_rest_hours", "10", now),
+        )
+        await db.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?,?,?)""",
+            ("crew_currency_warning_days", "30", now),
+        )
 
         await db.commit()
     finally:

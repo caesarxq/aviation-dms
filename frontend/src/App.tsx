@@ -20,6 +20,9 @@ const AuditTrail = lazy(() => import("./pages/AuditTrail").then((module) => ({ d
 const DocumentDistributions = lazy(() => import("./pages/DocumentDistributions").then((module) => ({ default: module.DocumentDistributions })));
 const TrainingManagement = lazy(() => import("./pages/TrainingManagement").then((module) => ({ default: module.TrainingManagement })));
 const MaintenanceManagement = lazy(() => import("./pages/MaintenanceManagement").then((module) => ({ default: module.MaintenanceManagement })));
+const CrewManagement = lazy(() => import("./pages/CrewManagement").then((module) => ({ default: module.CrewManagement })));
+const DutyTimeTracking = lazy(() => import("./pages/DutyTimeTracking").then((module) => ({ default: module.DutyTimeTracking })));
+const CrewQualifications = lazy(() => import("./pages/CrewQualifications").then((module) => ({ default: module.CrewQualifications })));
 const SecurityManagement = lazy(() => import("./pages/SecurityManagement").then((module) => ({ default: module.SecurityManagement })));
 const OutsourcedFunctions = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.OutsourcedFunctions })));
 const SafetyKPIs = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.SafetyKPIs })));
@@ -63,6 +66,9 @@ export default function App() {
             <Route path="/distributions" element={<DocumentDistributions />} />
             <Route path="/training" element={<TrainingManagement />} />
             <Route path="/maintenance" element={<MaintenanceManagement />} />
+            <Route path="/crew" element={<CrewManagement />} />
+            <Route path="/duties" element={<DutyTimeTracking />} />
+            <Route path="/crew-qualifications" element={<CrewQualifications />} />
             <Route path="/security" element={<SecurityManagement />} />
             <Route path="/outsourced-functions" element={<OutsourcedFunctions />} />
             <Route path="/safety-kpis" element={<SafetyKPIs />} />

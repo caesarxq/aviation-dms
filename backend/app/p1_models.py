@@ -805,6 +805,70 @@ class MaintenanceRecordResponse(BaseModel):
     updated_at: str
 
 
+class CrewMemberCreate(BaseModel):
+    full_name: str
+    role: str
+    base: str = "Nairobi"
+    status: str = "active"
+
+
+class CrewMemberResponse(BaseModel):
+    crew_id: str
+    full_name: str
+    role: str
+    base: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class DutyRecordCreate(BaseModel):
+    crew_id: str
+    duty_start: str
+    duty_end: str
+    aircraft_reg: Optional[str] = None
+    role: str
+    location: Optional[str] = None
+    block_hours: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class DutyRecordResponse(BaseModel):
+    duty_id: str
+    crew_id: str
+    duty_start: str
+    duty_end: str
+    aircraft_reg: Optional[str] = None
+    role: str
+    location: Optional[str] = None
+    block_hours: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class CrewQualificationCreate(BaseModel):
+    crew_id: str
+    qual_type: str
+    rating: Optional[str] = None
+    issue_date: str
+    expiry_date: str
+    notes: Optional[str] = None
+
+
+class CrewQualificationResponse(BaseModel):
+    qual_id: str
+    crew_id: str
+    qual_type: str
+    rating: Optional[str] = None
+    issue_date: str
+    expiry_date: str
+    status: str
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 # --- P2 Models ---
 class OutsourcedFunctionCreate(BaseModel):
     provider_name: str

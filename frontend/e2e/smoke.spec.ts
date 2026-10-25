@@ -332,8 +332,56 @@ test.describe("Maintenance Management", () => {
   });
 });
 
+test.describe("Crew Management", () => {
+  test("loads crew page", async ({ page }) => {
+    await page.goto("/crew");
+    await expect(page.getByRole("heading", { name: "Crew Management" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a crew member", async ({ page }) => {
+    await page.goto("/crew");
+    await page.click("text=Add Crew");
+    await page.waitForSelector("#crew_full_name");
+    await page.fill("#crew_full_name", "Capt. Test");
+    await page.fill("#crew_role", "PIC");
+    await page.selectOption("#crew_status", "active");
+    await page.click("#crew_submit");
+    await page.waitForTimeout(1500);
+    await expect(page.getByText("Capt. Test").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
+test.describe("Duty Time Tracking", () => {
+  test("loads duties page", async ({ page }) => {
+    await page.goto("/duties");
+    await expect(page.getByRole("heading", { name: "Duty Time Tracking" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can open new duty modal", async ({ page }) => {
+    await page.goto("/duties");
+    await page.click("text=New Duty");
+    await expect(page.locator("#duty_crew_id")).toBeVisible();
+  });
+});
+
+test.describe("Crew Qualifications", () => {
+  test("loads qualifications page", async ({ page }) => {
+    await page.goto("/crew-qualifications");
+    await expect(page.getByRole("heading", { name: "Crew Qualifications" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can open new qualification modal", async ({ page }) => {
+    await page.goto("/crew-qualifications");
+    await page.click("text=Add Qualification");
+    await expect(page.locator("#qual_crew_id")).toBeVisible();
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

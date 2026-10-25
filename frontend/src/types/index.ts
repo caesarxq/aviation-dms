@@ -205,6 +205,43 @@ export interface MaintenanceRecord {
   updated_at: string;
 }
 
+export interface CrewMember {
+  crew_id: string;
+  full_name: string;
+  role: string;
+  base: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DutyRecord {
+  duty_id: string;
+  crew_id: string;
+  duty_start: string;
+  duty_end: string;
+  aircraft_reg: string | null;
+  role: string;
+  location: string | null;
+  block_hours: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrewQualification {
+  qual_id: string;
+  crew_id: string;
+  qual_type: string;
+  rating: string | null;
+  issue_date: string;
+  expiry_date: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Distribution {
   distribution_id: string;
   version_id: string;

@@ -23,6 +23,7 @@ PERMISSIONS = [
     "roc:read", "roc:manage", "aircraft:read", "aircraft:manage",
     "aircraft:view",
     "personnel:read", "personnel:view", "personnel:manage",
+    "settings:read", "settings:manage",
 ]
 
 ROLE_PERMISSIONS = {

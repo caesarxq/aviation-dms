@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -80,4 +80,31 @@ export const safetyApi = {
     api.patch<MaintenanceRecord>(`/p1/maintenance-records/${id}`, data).then((r: any) => r.data),
   deleteMaintenanceRecord: (id: string) =>
     api.delete(`/p1/maintenance-records/${id}`).then((r: any) => r.data),
+
+  listCrewMembers: (params?: Record<string, any>) =>
+    api.get<CrewMember[]>("/p1/crew-members", { params }).then((r: any) => r.data),
+  createCrewMember: (data: any) =>
+    api.post<CrewMember>("/p1/crew-members", data).then((r: any) => r.data),
+  updateCrewMember: (id: string, data: any) =>
+    api.patch<CrewMember>(`/p1/crew-members/${id}`, data).then((r: any) => r.data),
+  deleteCrewMember: (id: string) =>
+    api.delete(`/p1/crew-members/${id}`).then((r: any) => r.data),
+
+  listDutyRecords: (params?: Record<string, any>) =>
+    api.get<DutyRecord[]>("/p1/duty-records", { params }).then((r: any) => r.data),
+  createDutyRecord: (data: any) =>
+    api.post<DutyRecord>("/p1/duty-records", data).then((r: any) => r.data),
+  updateDutyRecord: (id: string, data: any) =>
+    api.patch<DutyRecord>(`/p1/duty-records/${id}`, data).then((r: any) => r.data),
+  deleteDutyRecord: (id: string) =>
+    api.delete(`/p1/duty-records/${id}`).then((r: any) => r.data),
+
+  listCrewQualifications: (params?: Record<string, any>) =>
+    api.get<CrewQualification[]>("/p1/crew-qualifications", { params }).then((r: any) => r.data),
+  createCrewQualification: (data: any) =>
+    api.post<CrewQualification>("/p1/crew-qualifications", data).then((r: any) => r.data),
+  updateCrewQualification: (id: string, data: any) =>
+    api.patch<CrewQualification>(`/p1/crew-qualifications/${id}`, data).then((r: any) => r.data),
+  deleteCrewQualification: (id: string) =>
+    api.delete(`/p1/crew-qualifications/${id}`).then((r: any) => r.data),
 };

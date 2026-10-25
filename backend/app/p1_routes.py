@@ -28,6 +28,48 @@ def _check(request: Request, perm: str):
         raise HTTPException(status_code=403, detail=f"Permission denied: {perm}")
 
 
+def _notify_qualification_expiry(crew_id: str, qual_type: str, expiry_date: str):
+    try:
+        from datetime import datetime, timedelta
+        from .database import get_db
+        from .notifications import persist_notification
+
+        async def _persist():
+            db = await get_db()
+            try:
+                cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'crew_currency_warning_days'")
+                row = await cursor.fetchone()
+                warning_days = int(row["value"]) if row else 30
+                cutoff = datetime.now() + timedelta(days=warning_days)
+                expiry = datetime.fromisoformat(expiry_date)
+                if expiry <= cutoff:
+                    subject = f"Crew Qualification Expiry Warning — {qual_type}"
+                    body = (
+                        f"Crew {crew_id} {qual_type} expires on {expiry_date}. "
+                        f"Renewal is required within {warning_days} days."
+                    )
+                    persist_notification(
+                        recipient="safety",
+                        subject=subject,
+                        body=body,
+                        entity_type="crew_qualification",
+                        entity_id=crew_id,
+                        priority="high",
+                        status="pending",
+                    )
+            finally:
+                await db.close()
+
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_persist())
+        else:
+            loop.run_until_complete(_persist())
+    except Exception:
+        pass
+
+
 def _gen_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
@@ -1648,7 +1690,363 @@ async def delete_maintenance_record(record_id: str, request: Request):
     return Response(status_code=204)
 
 
-# ==================== P2: OUTSOURCED FUNCTIONS (QMS-06) ====================
+# ==================== APP SETTINGS ====================
+@router.get("/app-settings/{key}")
+async def get_app_setting(key: str, request: Request):
+    _check(request, "settings:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        return {"key": key, "value": row["value"]}
+    finally:
+        await db.close()
+
+
+@router.put("/app-settings/{key}")
+async def update_app_setting(key: str, payload: dict, request: Request):
+    _check(request, "settings:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Setting not found")
+        await db.execute(
+            "UPDATE app_settings SET value = ?, updated_at = ? WHERE key = ?",
+            (str(payload.get("value")), now, key),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"key": key, "value": payload.get("value")}
+
+
+# ==================== CREW MANAGEMENT ====================
+@router.post("/crew-members", response_model=CrewMemberResponse, status_code=201)
+async def create_crew_member(crew: CrewMemberCreate, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    crew_id = _gen_id("CREW")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO crew_members (crew_id, full_name, role, base, status, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?)",
+            (crew_id, crew.full_name, crew.role, crew.base, crew.status, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return CrewMemberResponse(crew_id=crew_id, full_name=crew.full_name, role=crew.role, base=crew.base, status=crew.status, created_at=now, updated_at=now)
+
+
+@router.get("/crew-members", response_model=List[CrewMemberResponse])
+async def list_crew_members(request: Request, role: Optional[str] = None, status: Optional[str] = None):
+    _check(request, "personnel:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if role:
+            conditions.append("role = ?")
+            params.append(role)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(f"SELECT * FROM crew_members WHERE {where} ORDER BY full_name", params)
+        rows = await cursor.fetchall()
+        return [CrewMemberResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.patch("/crew-members/{crew_id}", response_model=CrewMemberResponse)
+async def update_crew_member(crew_id: str, payload: dict, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        allowed = {"full_name", "role", "base", "status"}
+        updates = {k: payload[k] for k in payload if k in allowed}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [crew_id]
+        await db.execute(f"UPDATE crew_members SET {set_clause} WHERE crew_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM crew_members WHERE crew_id = ?", (crew_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Crew member not found")
+        return CrewMemberResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.delete("/crew-members/{crew_id}", status_code=204)
+async def delete_crew_member(crew_id: str, request: Request):
+    _check(request, "personnel:manage")
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM crew_members WHERE crew_id = ?", (crew_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return Response(status_code=204)
+
+
+# ==================== DUTY RECORDS ====================
+@router.post("/duty-records", response_model=DutyRecordResponse, status_code=201)
+async def create_duty_record(duty: DutyRecordCreate, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    duty_id = _gen_id("DUTY")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO duty_records (duty_id, crew_id, duty_start, duty_end, aircraft_reg, role, location, block_hours, notes, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (duty_id, duty.crew_id, duty.duty_start, duty.duty_end, duty.aircraft_reg, duty.role, duty.location, duty.block_hours, duty.notes, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return DutyRecordResponse(duty_id=duty_id, crew_id=duty.crew_id, duty_start=duty.duty_start, duty_end=duty.duty_end, aircraft_reg=duty.aircraft_reg, role=duty.role, location=duty.location, block_hours=duty.block_hours, notes=duty.notes, created_at=now, updated_at=now)
+
+
+@router.get("/duty-records", response_model=List[DutyRecordResponse])
+async def list_duty_records(request: Request, crew_id: Optional[str] = None, limit: int = 50, offset: int = 0):
+    _check(request, "personnel:read")
+    db = await get_db()
+    try:
+        where = "crew_id = ?" if crew_id else "1=1"
+        params = [crew_id] if crew_id else []
+        cursor = await db.execute(f"SELECT * FROM duty_records WHERE {where} ORDER BY duty_start DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        rows = await cursor.fetchall()
+        return [DutyRecordResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.patch("/duty-records/{duty_id}", response_model=DutyRecordResponse)
+async def update_duty_record(duty_id: str, payload: dict, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        allowed = {"duty_start", "duty_end", "aircraft_reg", "role", "location", "block_hours", "notes"}
+        updates = {k: payload[k] for k in payload if k in allowed}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [duty_id]
+        await db.execute(f"UPDATE duty_records SET {set_clause} WHERE duty_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM duty_records WHERE duty_id = ?", (duty_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Duty record not found")
+        return DutyRecordResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.delete("/duty-records/{duty_id}", status_code=204)
+async def delete_duty_record(duty_id: str, request: Request):
+    _check(request, "personnel:manage")
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM duty_records WHERE duty_id = ?", (duty_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return Response(status_code=204)
+
+
+@router.get("/duty-records/fdtl-validation")
+async def validate_fdtl(request: Request, crew_id: Optional[str] = None):
+    _check(request, "personnel:read")
+    db = await get_db()
+    try:
+        settings_cursor = await db.execute("SELECT key, value FROM app_settings WHERE key IN ('fdtl_max_duty_hours','fdtl_max_block_hours','fdtl_min_rest_hours')")
+        settings = {row["key"]: float(row["value"]) async for row in settings_cursor}
+        max_duty = settings.get("fdtl_max_duty_hours", 14.0)
+        max_block = settings.get("fdtl_max_block_hours", 12.0)
+        min_rest = settings.get("fdtl_min_rest_hours", 10.0)
+
+        where = "WHERE crew_id = ?" if crew_id else ""
+        params = [crew_id] if crew_id else []
+        cursor = await db.execute(f"SELECT * FROM duty_records {where} ORDER BY duty_start DESC LIMIT 50", params)
+        rows = await cursor.fetchall()
+
+        warnings = []
+        for i, row in enumerate(rows):
+            duty = dict(row)
+            duty_start = datetime.fromisoformat(duty["duty_start"])
+            duty_end = datetime.fromisoformat(duty["duty_end"])
+            duration_hours = (duty_end - duty_start).total_seconds() / 3600.0
+            if duration_hours > max_duty:
+                warnings.append({
+                    "duty_id": duty["duty_id"],
+                    "type": "duty_exceeded",
+                    "message": f"Duty duration {duration_hours:.1f}h exceeds max {max_duty}h",
+                    "duration_hours": duration_hours,
+                })
+            block = duty.get("block_hours")
+            if block is not None and block > max_block:
+                warnings.append({
+                    "duty_id": duty["duty_id"],
+                    "type": "block_exceeded",
+                    "message": f"Block hours {block:.1f}h exceeds max {max_block}h",
+                    "block_hours": block,
+                })
+            if i + 1 < len(rows):
+                next_duty = dict(rows[i + 1])
+                next_end = datetime.fromisoformat(next_duty["duty_end"])
+                rest_hours = (duty_start - next_end).total_seconds() / 3600.0
+                if rest_hours < min_rest:
+                    warnings.append({
+                        "duty_id": duty["duty_id"],
+                        "type": "rest_insufficient",
+                        "message": f"Rest period {rest_hours:.1f}h below min {min_rest}h",
+                        "rest_hours": rest_hours,
+                    })
+        return {"settings": settings, "warnings": warnings}
+    finally:
+        await db.close()
+
+
+# ==================== CREW QUALIFICATIONS ====================
+@router.post("/crew-qualifications", response_model=CrewQualificationResponse, status_code=201)
+async def create_crew_qualification(qual: CrewQualificationCreate, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    qual_id = _gen_id("QUAL")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO crew_qualifications (qual_id, crew_id, qual_type, rating, issue_date, expiry_date, status, notes, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (qual_id, qual.crew_id, qual.qual_type, qual.rating, qual.issue_date, qual.expiry_date, "valid", qual.notes, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # Notify on near-expiry
+    _notify_qualification_expiry(qual.crew_id, qual.qual_type, qual.expiry_date)
+
+    return CrewQualificationResponse(qual_id=qual_id, crew_id=qual.crew_id, qual_type=qual.qual_type, rating=qual.rating, issue_date=qual.issue_date, expiry_date=qual.expiry_date, status="valid", notes=qual.notes, created_at=now, updated_at=now)
+
+
+@router.get("/crew-qualifications", response_model=List[CrewQualificationResponse])
+async def list_crew_qualifications(request: Request, crew_id: Optional[str] = None, status: Optional[str] = None):
+    _check(request, "personnel:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if crew_id:
+            conditions.append("crew_id = ?")
+            params.append(crew_id)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(f"SELECT * FROM crew_qualifications WHERE {where} ORDER BY expiry_date ASC", params)
+        rows = await cursor.fetchall()
+        return [CrewQualificationResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.patch("/crew-qualifications/{qual_id}", response_model=CrewQualificationResponse)
+async def update_crew_qualification(qual_id: str, payload: dict, request: Request):
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        allowed = {"qual_type", "rating", "issue_date", "expiry_date", "status", "notes"}
+        updates = {k: payload[k] for k in payload if k in allowed}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [qual_id]
+        await db.execute(f"UPDATE crew_qualifications SET {set_clause} WHERE qual_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM crew_qualifications WHERE qual_id = ?", (qual_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Qualification not found")
+        result = CrewQualificationResponse(**dict(row))
+        if "expiry_date" in updates:
+            _notify_qualification_expiry(result.crew_id, result.qual_type, result.expiry_date)
+        return result
+    finally:
+        await db.close()
+
+
+@router.delete("/crew-qualifications/{qual_id}", status_code=204)
+async def delete_crew_qualification(qual_id: str, request: Request):
+    _check(request, "personnel:manage")
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM crew_qualifications WHERE qual_id = ?", (qual_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return Response(status_code=204)
+
+
+@router.get("/crew-qualifications/currency-alerts")
+async def crew_currency_alerts(request: Request, days: Optional[int] = None):
+    _check(request, "personnel:read")
+    db = await get_db()
+    try:
+        warning_days = days
+        if warning_days is None:
+            cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'crew_currency_warning_days'")
+            row = await cursor.fetchone()
+            warning_days = int(row["value"]) if row else 30
+
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() + timedelta(days=warning_days)).isoformat()
+        cursor = await db.execute(
+            "SELECT * FROM crew_qualifications WHERE status = 'valid' AND expiry_date <= ? ORDER BY expiry_date ASC",
+            (cutoff,),
+        )
+        rows = await cursor.fetchall()
+        alerts = []
+        for row in rows:
+            q = dict(row)
+            expiry = datetime.fromisoformat(q["expiry_date"])
+            days_left = (expiry - datetime.now()).days
+            alerts.append({
+                "qual_id": q["qual_id"],
+                "crew_id": q["crew_id"],
+                "qual_type": q["qual_type"],
+                "rating": q["rating"],
+                "expiry_date": q["expiry_date"],
+                "days_left": days_left,
+                "message": f"{q['qual_type']} expires in {days_left} day(s)",
+            })
+        return {"warning_days": warning_days, "alerts": alerts}
+    finally:
+        await db.close()
 
 @router.post("/outsourced-functions", response_model=OutsourcedFunctionResponse, status_code=201)
 async def create_outsourced_function(of: OutsourcedFunctionCreate, request: Request):
