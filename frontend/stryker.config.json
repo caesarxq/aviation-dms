@@ -8,10 +8,12 @@
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",
   "mutate": [
-    "src/components/documents/DocumentOutline.tsx:11-68"
+    "src/components/documents/DocumentOutline.tsx:11-68",
+    "src/utils/validation.ts"
   ],
   "testFiles": [
-    "src/components/documents/DocumentOutline.test.tsx"
+    "src/components/documents/DocumentOutline.test.tsx",
+    "src/utils/validation.test.ts"
   ],
   "concurrency": 2,
   "timeoutMS": 5000,
