@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -62,4 +62,13 @@ export const safetyApi = {
     api.put("/p1/notification-preferences", null, { params: data }).then((r: any) => r.data),
   markNotificationRead: (id: string) =>
     api.patch(`/p1/notifications/${id}/read`).then((r: any) => r.data),
+
+  listTrainingRecords: (params?: Record<string, any>) =>
+    api.get<TrainingRecord[]>("/p1/training-records", { params }).then((r: any) => r.data),
+  createTrainingRecord: (data: any) =>
+    api.post<TrainingRecord>("/p1/training-records", data).then((r: any) => r.data),
+  updateTrainingRecord: (id: string, data: any) =>
+    api.patch<TrainingRecord>(`/p1/training-records/${id}`, data).then((r: any) => r.data),
+  deleteTrainingRecord: (id: string) =>
+    api.delete(`/p1/training-records/${id}`).then((r: any) => r.data),
 };

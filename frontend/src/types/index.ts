@@ -177,6 +177,20 @@ export interface AuditEvent {
   timestamp: string;
 }
 
+export interface TrainingRecord {
+  record_id: string;
+  person_id: string;
+  training_category: string;
+  training_type: string;
+  training_date: string;
+  expiry_date: string | null;
+  certificate_number: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Distribution {
   distribution_id: string;
   version_id: string;

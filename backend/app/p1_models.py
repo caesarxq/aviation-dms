@@ -756,6 +756,31 @@ class SecurityTrainingResponse(BaseModel):
     created_at: str
     updated_at: str
 
+
+class TrainingRecordCreate(BaseModel):
+    person_id: str
+    training_category: str
+    training_type: str
+    training_date: str
+    expiry_date: Optional[str] = None
+    certificate_number: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TrainingRecordResponse(BaseModel):
+    record_id: str
+    person_id: str
+    training_category: str
+    training_type: str
+    training_date: str
+    expiry_date: Optional[str] = None
+    certificate_number: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 # --- P2 Models ---
 class OutsourcedFunctionCreate(BaseModel):
     provider_name: str

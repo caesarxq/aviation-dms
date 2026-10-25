@@ -287,8 +287,31 @@ test.describe("Document Distributions", () => {
   });
 });
 
+test.describe("Training Management", () => {
+  test("loads training page", async ({ page }) => {
+    await page.goto("/training");
+    await expect(page.getByRole("heading", { name: "Training Management" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a training record", async ({ page }) => {
+    await page.goto("/training");
+    await page.click("text=New Record");
+    await page.waitForSelector("#training_person_id");
+    await page.fill("#training_person_id", "u-chief-pilot");
+    await page.selectOption("#training_category", "general");
+    await page.fill("#training_type", "Drone Safety");
+    await page.fill("#training_date", "2025-01-01");
+    await page.fill("#training_expiry", "2026-01-01");
+    await page.fill("#training_certificate", "CERT-001");
+    await page.click("#training_submit");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=Drone Safety").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

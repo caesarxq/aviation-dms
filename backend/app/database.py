@@ -618,10 +618,27 @@ CREATE TABLE IF NOT EXISTS security_training (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS training_records (
+    record_id TEXT PRIMARY KEY,
+    person_id TEXT NOT NULL,
+    training_category TEXT NOT NULL,
+    training_type TEXT NOT NULL,
+    training_date TEXT NOT NULL,
+    expiry_date TEXT,
+    certificate_number TEXT,
+    status TEXT NOT NULL DEFAULT 'valid',
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_security_incidents_status ON security_incidents(status);
 CREATE INDEX IF NOT EXISTS idx_security_incidents_type ON security_incidents(incident_type);
 CREATE INDEX IF NOT EXISTS idx_security_assessments_status ON security_assessments(status);
 CREATE INDEX IF NOT EXISTS idx_dg_training_person ON dg_training_records(person_id);
+CREATE INDEX IF NOT EXISTS idx_training_person ON training_records(person_id);
 
 -- Outsourced Functions (P2 - QMS-06)
 CREATE TABLE IF NOT EXISTS outsourced_functions (

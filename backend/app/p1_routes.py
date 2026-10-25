@@ -1,5 +1,5 @@
 """P1 API routes - Safety, ROC, Aircraft."""
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from typing import Optional, List
 from datetime import datetime, timedelta
 import uuid
@@ -1488,6 +1488,86 @@ async def list_security_training(request: Request, person_id: Optional[str] = No
         return [SecurityTrainingResponse(**dict(r)) for r in rows]
     finally:
         await db.close()
+
+
+# ==================== TRAINING MANAGEMENT ====================
+
+@router.post("/training-records", response_model=TrainingRecordResponse, status_code=201)
+async def create_training_record(record: TrainingRecordCreate, request: Request):
+    _check(request, "safety:create")
+    actor = _actor(request)
+    record_id = _gen_id("TRN")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO training_records (record_id, person_id, training_category, training_type, training_date, expiry_date, certificate_number, status, notes, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (record_id, record.person_id, record.training_category, record.training_type, record.training_date, record.expiry_date, record.certificate_number, "valid", record.notes, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return TrainingRecordResponse(record_id=record_id, person_id=record.person_id, training_category=record.training_category, training_type=record.training_type, training_date=record.training_date, expiry_date=record.expiry_date, certificate_number=record.certificate_number, status="valid", notes=record.notes, created_at=now, updated_at=now)
+
+
+@router.get("/training-records", response_model=List[TrainingRecordResponse])
+async def list_training_records(request: Request, category: Optional[str] = None, person_id: Optional[str] = None, limit: int = 50, offset: int = 0):
+    _check(request, "safety:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if category:
+            conditions.append("training_category = ?")
+            params.append(category)
+        if person_id:
+            conditions.append("person_id = ?")
+            params.append(person_id)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(f"SELECT * FROM training_records WHERE {where} ORDER BY training_date DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        rows = await cursor.fetchall()
+        return [TrainingRecordResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.patch("/training-records/{record_id}", response_model=TrainingRecordResponse)
+async def update_training_record(record_id: str, payload: dict, request: Request):
+    _check(request, "safety:create")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        allowed = {"training_category", "training_type", "training_date", "expiry_date", "certificate_number", "status", "notes"}
+        updates = {k: payload[k] for k in payload if k in allowed}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [record_id]
+        await db.execute(f"UPDATE training_records SET {set_clause} WHERE record_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM training_records WHERE record_id = ?", (record_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Training record not found")
+        return TrainingRecordResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.delete("/training-records/{record_id}", status_code=204)
+async def delete_training_record(record_id: str, request: Request):
+    _check(request, "safety:create")
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM training_records WHERE record_id = ?", (record_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return Response(status_code=204)
+
 
 # ==================== P2: OUTSOURCED FUNCTIONS (QMS-06) ====================
 
