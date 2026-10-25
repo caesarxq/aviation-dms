@@ -12,6 +12,7 @@ const Missions = lazy(() => import("./pages/Missions").then((module) => ({ defau
 const QualityAudits = lazy(() => import("./pages/QualityAudits").then((module) => ({ default: module.QualityAudits })));
 const CorrectiveActions = lazy(() => import("./pages/QualityAudits").then((module) => ({ default: module.CorrectiveActions })));
 const DangerousGoods = lazy(() => import("./pages/DangerousGoods").then((module) => ({ default: module.DangerousGoods })));
+const Hazards = lazy(() => import("./pages/Hazards").then((module) => ({ default: module.Hazards })));
 const SecurityManagement = lazy(() => import("./pages/SecurityManagement").then((module) => ({ default: module.SecurityManagement })));
 const OutsourcedFunctions = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.OutsourcedFunctions })));
 const SafetyKPIs = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.SafetyKPIs })));
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="/quality-audits" element={<QualityAudits />} />
             <Route path="/corrective-actions" element={<CorrectiveActions />} />
             <Route path="/dangerous-goods" element={<DangerousGoods />} />
+            <Route path="/hazards" element={<Hazards />} />
             <Route path="/security" element={<SecurityManagement />} />
             <Route path="/outsourced-functions" element={<OutsourcedFunctions />} />
             <Route path="/safety-kpis" element={<SafetyKPIs />} />

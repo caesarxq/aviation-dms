@@ -90,6 +90,7 @@ const sections: SectionProps[] = [
     icon: AlertTriangle,
     items: [
       { to: "/occurrences", icon: AlertTriangle, label: "Safety Occurrences" },
+      { to: "/hazards", icon: AlertTriangle, label: "Hazard Register" },
       { to: "/missions", icon: ClipboardList, label: "Missions" },
       { to: "/dangerous-goods", icon: AlertOctagon, label: "Dangerous Goods" },
       { to: "/security", icon: ShieldAlert, label: "Security" },

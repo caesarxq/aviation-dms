@@ -165,8 +165,27 @@ test.describe("Occurrences", () => {
   });
 });
 
+test.describe("Hazards", () => {
+  test("loads hazards page", async ({ page }) => {
+    await page.goto("/hazards");
+    await expect(page.getByRole("heading", { name: "Hazard Register" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can create a hazard", async ({ page }) => {
+    await page.goto("/hazards");
+    await page.click("text=New Hazard");
+    await page.waitForSelector('input[placeholder="Hazard title"]');
+    await page.fill('input[placeholder="Hazard title"]', "E2E Test Hazard");
+    await page.fill('textarea[placeholder="Describe the hazard"]', "A test hazard for E2E validation");
+    await page.click("text=Submit Hazard");
+    await page.waitForTimeout(1500);
+    await expect(page.locator("table").locator("text=E2E Test Hazard").first()).toBeVisible({ timeout: 8000 });
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");
