@@ -1005,3 +1005,57 @@ class DGResponsibilityMatrixResponse(BaseModel):
     updated_at: str
     created_by: str
     updated_by: str
+
+
+# --- Change Requests ---
+
+class ChangeRequestCreate(BaseModel):
+    document_id: str
+    version_id: Optional[str] = None
+    title: str
+    description: str
+    change_type: str = "minor"
+
+
+class ChangeRequestUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    change_type: Optional[str] = None
+
+
+class ChangeRequestResponse(BaseModel):
+    cr_id: str
+    document_id: str
+    version_id: Optional[str] = None
+    title: str
+    description: str
+    change_type: str
+    status: str
+    requester_id: str
+    reviewer_id: Optional[str] = None
+    approver_id: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    approved_at: Optional[str] = None
+    rejected_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    created_at: str
+    updated_at: str
+    created_by: str
+    updated_by: str
+
+
+class ChangeRequestReview(BaseModel):
+    action: Optional[str] = None  # implied by endpoint path
+    rejection_reason: Optional[str] = None
+
+
+class ReviewCommentCreate(BaseModel):
+    content: str
+
+
+class ReviewCommentResponse(BaseModel):
+    comment_id: str
+    cr_id: str
+    author_id: str
+    content: str
+    created_at: str

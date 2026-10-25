@@ -380,8 +380,22 @@ test.describe("Crew Qualifications", () => {
   });
 });
 
+test.describe("Change Requests", () => {
+  test("loads change requests page", async ({ page }) => {
+    await page.goto("/change-requests");
+    await expect(page.getByRole("heading", { name: "Change Requests" })).toBeVisible();
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("can open new change request modal", async ({ page }) => {
+    await page.goto("/change-requests");
+    await page.click("text=New Change Request");
+    await expect(page.locator("#cr_document_id")).toBeVisible();
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
       await page.goto(route);
       await page.waitForLoadState("networkidle");

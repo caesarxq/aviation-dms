@@ -2048,6 +2048,250 @@ async def crew_currency_alerts(request: Request, days: Optional[int] = None):
     finally:
         await db.close()
 
+
+# ==================== CHANGE REQUESTS ====================
+
+@router.post("/change-requests", response_model=ChangeRequestResponse, status_code=201)
+async def create_change_request(cr: ChangeRequestCreate, request: Request):
+    _check(request, "change_request:create")
+    actor = _actor(request)
+    cr_id = _gen_id("CR")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO change_requests (cr_id, document_id, version_id, title, description, change_type, status, requester_id, reviewer_id, approver_id, reviewed_at, approved_at, rejected_at, rejection_reason, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (cr_id, cr.document_id, cr.version_id, cr.title, cr.description, cr.change_type, "open", actor, None, None, None, None, None, None, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return ChangeRequestResponse(cr_id=cr_id, document_id=cr.document_id, version_id=cr.version_id, title=cr.title, description=cr.description, change_type=cr.change_type, status="open", requester_id=actor, reviewer_id=None, approver_id=None, reviewed_at=None, approved_at=None, rejected_at=None, rejection_reason=None, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
+
+
+@router.get("/change-requests", response_model=List[ChangeRequestResponse])
+async def list_change_requests(request: Request, document_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50, offset: int = 0):
+    _check(request, "change_request:review")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if document_id:
+            conditions.append("document_id = ?")
+            params.append(document_id)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(f"SELECT * FROM change_requests WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        rows = await cursor.fetchall()
+        return [ChangeRequestResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/change-requests/{cr_id}", response_model=ChangeRequestResponse)
+async def get_change_request(cr_id: str, request: Request):
+    _check(request, "change_request:review")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        return ChangeRequestResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.patch("/change-requests/{cr_id}", response_model=ChangeRequestResponse)
+async def update_change_request(cr_id: str, payload: ChangeRequestUpdate, request: Request):
+    _check(request, "change_request:create")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] not in ("open",):
+            raise HTTPException(status_code=400, detail="Cannot modify a change request that is no longer open")
+        if cr["requester_id"] != actor and not has_permission(_role(request), "system_admin"):
+            raise HTTPException(status_code=403, detail="Only the requester may modify an open change request")
+        allowed = {"title", "description", "change_type"}
+        updates = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if k in allowed and v is not None}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [cr_id]
+        await db.execute(f"UPDATE change_requests SET {set_clause} WHERE cr_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        return ChangeRequestResponse(**dict(await cursor.fetchone()))
+    finally:
+        await db.close()
+
+
+@router.delete("/change-requests/{cr_id}", status_code=204)
+async def delete_change_request(cr_id: str, request: Request):
+    _check(request, "change_request:create")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "open":
+            raise HTTPException(status_code=400, detail="Only open change requests can be deleted")
+        if cr["requester_id"] != actor and not has_permission(_role(request), "system_admin"):
+            raise HTTPException(status_code=403, detail="Only the requester may delete an open change request")
+        await db.execute("DELETE FROM change_requests WHERE cr_id = ?", (cr_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return Response(status_code=204)
+
+
+@router.post("/change-requests/{cr_id}/submit")
+async def submit_change_request(cr_id: str, request: Request):
+    _check(request, "change_request:create")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "open":
+            raise HTTPException(status_code=400, detail="Only open change requests can be submitted")
+        if cr["requester_id"] != actor:
+            raise HTTPException(status_code=403, detail="Only the requester may submit a change request")
+        await db.execute("UPDATE change_requests SET status = 'submitted', updated_at = ?, updated_by = ? WHERE cr_id = ?", (now, actor, cr_id))
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "submitted"}
+
+
+@router.post("/change-requests/{cr_id}/review")
+async def review_change_request(cr_id: str, request: Request, payload: Optional[ChangeRequestReview] = None):
+    _check(request, "change_request:review")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "submitted":
+            raise HTTPException(status_code=400, detail="Only submitted change requests can be reviewed")
+        if cr["requester_id"] == actor:
+            raise HTTPException(status_code=403, detail="The requester cannot review their own change request (separation of duties)")
+        await db.execute(
+            "UPDATE change_requests SET status = 'under_review', reviewer_id = ?, reviewed_at = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (actor, now, now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "under_review", "reviewer_id": actor}
+
+
+@router.post("/change-requests/{cr_id}/approve")
+async def approve_change_request(cr_id: str, request: Request, payload: Optional[ChangeRequestReview] = None):
+    _check(request, "change_request:approve")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "under_review":
+            raise HTTPException(status_code=400, detail="Only change requests under review can be approved")
+        if cr["requester_id"] == actor:
+            raise HTTPException(status_code=403, detail="The requester cannot approve their own change request (separation of duties)")
+        await db.execute(
+            "UPDATE change_requests SET status = 'approved', approver_id = ?, approved_at = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (actor, now, now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "approved", "approver_id": actor}
+
+
+@router.post("/change-requests/{cr_id}/reject")
+async def reject_change_request(cr_id: str, request: Request, payload: Optional[ChangeRequestReview] = None):
+    _check(request, "change_request:approve")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "under_review":
+            raise HTTPException(status_code=400, detail="Only change requests under review can be rejected")
+        if cr["requester_id"] == actor:
+            raise HTTPException(status_code=403, detail="The requester cannot reject their own change request (separation of duties)")
+        await db.execute(
+            "UPDATE change_requests SET status = 'rejected', approver_id = ?, rejected_at = ?, rejection_reason = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (actor, now, payload.rejection_reason if payload else None, now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "rejected", "rejection_reason": payload.rejection_reason}
+
+
+@router.post("/change-requests/{cr_id}/comments", response_model=ReviewCommentResponse, status_code=201)
+async def add_review_comment(cr_id: str, comment: ReviewCommentCreate, request: Request):
+    _check(request, "change_request:review")
+    actor = _actor(request)
+    comment_id = _gen_id("CMT")
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT cr_id FROM change_requests WHERE cr_id = ?", (cr_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Change request not found")
+        await db.execute(
+            "INSERT INTO review_comments (comment_id, cr_id, author_id, content, created_at) VALUES (?,?,?,?,?)",
+            (comment_id, cr_id, actor, comment.content, now),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return ReviewCommentResponse(comment_id=comment_id, cr_id=cr_id, author_id=actor, content=comment.content, created_at=now)
+
+
+@router.get("/change-requests/{cr_id}/comments", response_model=List[ReviewCommentResponse])
+async def list_review_comments(cr_id: str, request: Request):
+    _check(request, "change_request:review")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM review_comments WHERE cr_id = ? ORDER BY created_at ASC", (cr_id,))
+        rows = await cursor.fetchall()
+        return [ReviewCommentResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
 @router.post("/outsourced-functions", response_model=OutsourcedFunctionResponse, status_code=201)
 async def create_outsourced_function(of: OutsourcedFunctionCreate, request: Request):
     _check(request, "safety:create")

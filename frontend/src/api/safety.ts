@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification, ChangeRequest, ReviewComment } from "../types";
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -107,4 +107,27 @@ export const safetyApi = {
     api.patch<CrewQualification>(`/p1/crew-qualifications/${id}`, data).then((r: any) => r.data),
   deleteCrewQualification: (id: string) =>
     api.delete(`/p1/crew-qualifications/${id}`).then((r: any) => r.data),
+
+  listChangeRequests: (params?: Record<string, any>) =>
+    api.get<ChangeRequest[]>("/p1/change-requests", { params }).then((r: any) => r.data),
+  getChangeRequest: (id: string) =>
+    api.get<ChangeRequest>(`/p1/change-requests/${id}`).then((r: any) => r.data),
+  createChangeRequest: (data: any) =>
+    api.post<ChangeRequest>("/p1/change-requests", data).then((r: any) => r.data),
+  updateChangeRequest: (id: string, data: any) =>
+    api.patch<ChangeRequest>(`/p1/change-requests/${id}`, data).then((r: any) => r.data),
+  deleteChangeRequest: (id: string) =>
+    api.delete(`/p1/change-requests/${id}`).then((r: any) => r.data),
+  submitChangeRequest: (id: string) =>
+    api.post(`/p1/change-requests/${id}/submit`).then((r: any) => r.data),
+  reviewChangeRequest: (id: string, data: any) =>
+    api.post(`/p1/change-requests/${id}/review`, data).then((r: any) => r.data),
+  approveChangeRequest: (id: string, data: any) =>
+    api.post(`/p1/change-requests/${id}/approve`, data).then((r: any) => r.data),
+  rejectChangeRequest: (id: string, data: any) =>
+    api.post(`/p1/change-requests/${id}/reject`, data).then((r: any) => r.data),
+  listReviewComments: (crId: string) =>
+    api.get<ReviewComment[]>(`/p1/change-requests/${crId}/comments`).then((r: any) => r.data),
+  addReviewComment: (crId: string, data: any) =>
+    api.post<ReviewComment>(`/p1/change-requests/${crId}/comments`, data).then((r: any) => r.data),
 };

@@ -136,6 +136,7 @@ const sections: SectionProps[] = [
     icon: FileText,
     items: [
       { to: "/documents", icon: FileText, label: "Documents" },
+      { to: "/change-requests", icon: FileText, label: "Change Requests" },
       { to: "/document-proposals", icon: KeyRound, label: "Document Proposals" },
       { to: "/version-diff", icon: Activity, label: "Version Diff" },
     ],

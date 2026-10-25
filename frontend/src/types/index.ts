@@ -430,6 +430,35 @@ export interface DGResponsibilityMatrix {
   updated_by: string;
 }
 
+export interface ChangeRequest {
+  cr_id: string;
+  document_id: string;
+  version_id: string | null;
+  title: string;
+  description: string;
+  change_type: string;
+  status: string;
+  requester_id: string;
+  reviewer_id: string | null;
+  approver_id: string | null;
+  reviewed_at: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  updated_by: string;
+}
+
+export interface ReviewComment {
+  comment_id: string;
+  cr_id: string;
+  author_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface Aircraft {
   manufacturer: string | null;
   serial_number: string | null;
