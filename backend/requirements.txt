@@ -9,3 +9,4 @@ pypdf==6.21.2
 pypdfium2==5.14.0
 python-jose==3.5.0
 uvicorn==0.54.0
+bcrypt==5.0.0

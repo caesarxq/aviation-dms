@@ -21,7 +21,7 @@ PERMISSIONS = [
     "safety:read", "safety:create", "safety:update", "safety:close",
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
     "roc:read", "roc:manage", "aircraft:read", "aircraft:manage",
-    "aircraft:view",
+    "aircraft:view", "flight:release", "security:read_sensitive", "security:manage",
     "personnel:read", "personnel:view", "personnel:manage",
     "settings:read", "settings:manage",
 ]
@@ -33,6 +33,7 @@ ROLE_PERMISSIONS = {
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
+        "flight:release", "security:read_sensitive", "security:manage",
     },
     "librarian": {
         "document:create", "document:read", "document:update", "document:propose", "document:annotate",
@@ -42,25 +43,26 @@ ROLE_PERMISSIONS = {
     "head_quality": {
         "document:read", "document:approve", "document:publish", "document:propose", "document:annotate",
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
-        "audit:read", "safety:read", "safety:close", "roc:read", "aircraft:read",
-        "personnel:read", "personnel:view",
+        "audit:read", "audit:manage", "safety:read", "safety:create", "safety:update", "safety:close",
+        "roc:read", "aircraft:read", "personnel:read", "personnel:view",
     },
     "head_safety": {
         "document:read", "document:propose", "document:annotate", "safety:read", "safety:create",
         "safety:update", "safety:close", "occurrence:acknowledge", "occurrence:investigate",
         "roc:read", "aircraft:read", "audit:read", "personnel:read", "personnel:view",
+        "security:read_sensitive",
     },
     "head_security": {
-        "document:read", "safety:read", "safety:create", "audit:read", "roc:read", "aircraft:read",
-        "personnel:read", "personnel:view",
+        "document:read", "safety:read", "safety:create", "safety:update", "audit:read", "roc:read", "aircraft:read",
+        "personnel:read", "personnel:view", "security:read_sensitive", "security:manage",
     },
     "head_operations": {
-        "document:read", "safety:read", "safety:create", "roc:read", "roc:manage", "aircraft:read",
+        "document:read", "safety:read", "safety:create", "safety:update", "flight:release", "roc:read", "roc:manage", "aircraft:read",
         "aircraft:manage", "aircraft:view", "compliance:read", "audit:read", "personnel:read",
         "personnel:view", "personnel:manage",
     },
     "chief_pilot": {
-        "document:read", "safety:read", "safety:create", "roc:read", "aircraft:read", "audit:read",
+        "document:read", "safety:read", "safety:create", "flight:release", "roc:read", "aircraft:read", "audit:read",
         "personnel:read", "personnel:view",
     },
     "flight_ops_officer": {
@@ -80,15 +82,15 @@ ROLE_PERMISSIONS = {
         "personnel:read", "personnel:view",
     },
     "occurrence_reporter": {
-        "safety:read", "safety:create", "occurrence:report", "roc:read", "aircraft:read",
+        "document:read", "safety:read", "safety:create", "occurrence:report", "roc:read", "aircraft:read",
     },
     "records_custodian": {
         "document:read", "retention:manage", "legal_hold:manage", "compliance:read", "audit:read",
         "roc:read", "aircraft:read", "personnel:read", "personnel:view",
     },
     "independent_auditor": {
-        "document:read", "audit:read", "audit:manage", "compliance:read", "safety:read",
-        "roc:read", "aircraft:read", "personnel:read", "personnel:view",
+        "document:read", "audit:read", "audit:manage", "compliance:read",
+        "safety:read", "roc:read", "aircraft:read", "personnel:read", "personnel:view",
     },
     "as_contracted": {"document:read", "safety:read", "roc:read", "aircraft:read"},
 }
@@ -108,7 +110,7 @@ ROLE_DESCRIPTIONS = {
     "dg_coordinator": "Dangerous-goods coordination and operational safety reporting.",
     "occurrence_reporter": "Restricted occurrence and safety reporting only.",
     "records_custodian": "Records retention, legal holds, and controlled records access.",
-    "independent_auditor": "Independent audit and compliance review access without operational write authority.",
+    "independent_auditor": "Independent audit and compliance review access. Read-only on safety and operational records; no operational write authority (SMS-KFL §2.6).",
     "as_contracted": "Read-only access limited to assigned operational and safety information.",
 }
 
@@ -136,6 +138,15 @@ SOD_RULES = {
     "version": {"proposer_cannot": ["approve", "publish"]},
 }
 
+# Separation-of-duties basis:
+# - change_request: ICAO Annex 19 SMS §2.6 / KCAA SMS regulations require that the
+#   person who proposes a change cannot independently approve or publish it,
+#   ensuring independent review before a controlled document change takes effect.
+# - version: Same principle — a document version proposer cannot approve or publish
+#   their own version, preventing unilateral changes to controlled documentation.
+# These rules are enforced at the application layer in p1_routes.py change request
+# and document version endpoints.
+
 
 def has_permission(role: str, permission: str) -> bool:
     """Return True only when the explicit role allow-list grants permission."""
@@ -157,9 +168,16 @@ def all_role_profiles() -> list[dict]:
     return [role_profile(role) for role in ROLES]
 
 
-def check_sod(entity_type: str, action: str, actor_id: str, owner_id: str) -> bool:
+def check_sod(
+    entity_type: str,
+    action: str,
+    actor_id: str,
+    owner_id: str,
+    actor_ids: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    """Compare canonical and retained legacy IDs for transaction-level SoD."""
     if entity_type in SOD_RULES:
         rule = SOD_RULES[entity_type]
         if action in rule.get("proposer_cannot", []):
-            return actor_id != owner_id
+            return owner_id not in (set(actor_ids) if actor_ids else {actor_id})
     return True

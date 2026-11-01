@@ -114,7 +114,7 @@ export interface SafetyAction {
 
 export interface RiskAssessment {
   assessment_id: string;
-  hazard_id: string | null;
+  hazard_ids: string[];
   occurrence_id: string | null;
   mission_id: string | null;
   title: string;

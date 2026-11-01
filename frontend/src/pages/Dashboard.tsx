@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUpRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck } from "lucide-react";
 import { safetyApi } from "../api/safety";
 import { SafetyKPIsModal } from "../components/ui/modals/SafetyKPIsModal";
+import { useAuth } from "../auth/AuthContext";
 
 function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
@@ -35,6 +36,7 @@ function priorityClass(priority: string) {
 }
 
 export function Dashboard() {
+  const { profile } = useAuth();
   const { data: trends, isLoading: trendsLoading } = useQuery({
     queryKey: ["trends"],
     queryFn: () => safetyApi.getTrends(),
@@ -54,7 +56,7 @@ export function Dashboard() {
         <div>
           <div className="app-eyebrow">Operations control centre</div>
           <h1 className="app-title">Dashboard</h1>
-          <p className="app-subtitle">Good morning, Mohamed. A clear view of safety, compliance, and operational commitments.</p>
+          <p className="app-subtitle">{profile?.user.full_name ? `Welcome, ${profile.user.full_name}. ` : ""}A clear view of safety, compliance, and operational commitments.</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="app-status app-status-healthy">System healthy</span>

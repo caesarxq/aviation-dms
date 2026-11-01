@@ -36,7 +36,7 @@ class TestDocumentProposals:
         assert isinstance(resp.json(), list)
         assert len(resp.json()) > 0
 
-    def test_proposal_workflow_submit_approve(self, client, librarian_headers, quality_headers):
+    def test_proposal_workflow_submit_approve(self, client, librarian_headers, admin_headers):
         resp = client.post("/api/p2/documents/DOC-001/proposals", json={
             "proposal_type": "section", "target_ref": "section 1",
             "proposed_text": "new section content",
@@ -48,8 +48,8 @@ class TestDocumentProposals:
         assert resp.status_code == 200
         assert resp.json()["status"] == "submitted"
 
-        # Approve (quality can approve)
-        resp = client.patch(f"/api/p2/proposals/{pid}", json={"status": "approved"}, headers=quality_headers)
+        # The seeded librarian and quality roles share one canonical actor; use another assigned reviewer.
+        resp = client.patch(f"/api/p2/proposals/{pid}", json={"status": "approved"}, headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["status"] == "approved"
 
@@ -71,19 +71,19 @@ class TestDocumentProposals:
         }, headers=librarian_headers)
         pid = resp.json()["proposal_id"]
         client.patch(f"/api/p2/proposals/{pid}", json={"status": "submitted"}, headers=librarian_headers)
-        client.patch(f"/api/p2/proposals/{pid}", json={"status": "approved"}, headers=quality_headers)
+        client.patch(f"/api/p2/proposals/{pid}", json={"status": "approved"}, headers=admin_headers)
         resp = client.post(f"/api/p2/proposals/{pid}/apply", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["status"] == "applied"
 
-    def test_proposal_reject(self, client, librarian_headers, quality_headers):
+    def test_proposal_reject(self, client, librarian_headers, admin_headers):
         resp = client.post("/api/p2/documents/DOC-001/proposals", json={
             "proposal_type": "line", "target_ref": "line 5",
             "proposed_text": "rejected text",
         }, headers=librarian_headers)
         pid = resp.json()["proposal_id"]
         client.patch(f"/api/p2/proposals/{pid}", json={"status": "submitted"}, headers=librarian_headers)
-        resp = client.patch(f"/api/p2/proposals/{pid}", json={"status": "rejected"}, headers=quality_headers)
+        resp = client.patch(f"/api/p2/proposals/{pid}", json={"status": "rejected"}, headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["status"] == "rejected"
 

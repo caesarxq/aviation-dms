@@ -8,7 +8,7 @@ class TestInvestigations:
             "title": "Investigation test occurrence",
             "description": "For investigation test",
             "occurrence_type": "incident",
-            "occurrence_date": "2026-10-23"
+            "occurred_at": "2026-10-23T10:00:00+03:00"
         }, headers=safety_headers).json()
         occ_id = occ["occurrence_id"]
 
@@ -36,7 +36,7 @@ class TestInvestigations:
             "title": "Update test occurrence",
             "description": "For investigation update test",
             "occurrence_type": "incident",
-            "occurrence_date": "2026-10-23"
+            "occurred_at": "2026-10-23T10:00:00+03:00"
         }, headers=safety_headers).json()
         occ_id = occ["occurrence_id"]
 
@@ -66,7 +66,7 @@ class TestInvestigations:
             "title": "Status update test",
             "description": "Test occurrence status update",
             "occurrence_type": "incident",
-            "occurrence_date": "2026-10-23"
+            "occurred_at": "2026-10-23T10:00:00+03:00"
         }, headers=safety_headers).json()
         occ_id = occ["occurrence_id"]
 

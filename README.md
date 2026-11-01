@@ -237,7 +237,8 @@ PATCH  /api/p2/personnel/uploads/{id}/verify       # Verify/reject upload
 ## Database
 
 SQLite at `backend/data/dms.db`. Schema includes:
-- `users` / `user_roles` — 16 seeded profiles
+- `users` / `user_roles` / `user_id_aliases` — 15 seeded role profiles consolidate to 8 canonical active accounts with 15 assigned roles; legacy IDs and audit references are retained
+- `auth_sessions` — opaque, revocable sessions with a server-stored active role
 - `documents` / `document_versions` — controlled documents with KCAA gates
 - `document_proposals` — atomic change proposals
 - `change_requests` — formal change requests with SoD
@@ -245,6 +246,14 @@ SQLite at `backend/data/dms.db`. Schema includes:
 - `personnel_licenses` / `license_renewal_history` — license expiry tracking
 - `aircraft_insurance` / `insurance_renewal_history` — insurance expiry tracking
 - `notifications` — deadline/expiry notifications
+
+## Multi-role identity and session roles
+
+- One verified individual maps to one canonical `user_id`; all assigned roles are stored in `user_roles`.
+- Each browser session stores an `active_role`. The profile and API permissions are scoped to that role; users can switch only among roles assigned to their canonical account.
+- Administrators can inspect canonical users at `GET /api/p0/auth/users` and replace role assignments with `PUT /api/p0/auth/users/{user_id}/roles`. Role changes are audited and revoke the target account's active sessions.
+- Historical account IDs and former usernames map through `user_id_aliases` for audit and SoD resolution; merged usernames cannot authenticate. Duplicate user rows remain inactive with `merged_into_user_id`; business and audit records are not rewritten.
+- Startup consolidation is keyed by owner-verified immutable IDs, not names. It refuses to merge accounts with conflicting password hashes rather than choosing a credential.
 
 ## Testing
 

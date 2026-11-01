@@ -1,24 +1,11 @@
-export type Identity = { role: string; actor: string };
+const LEGACY_IDENTITY_KEY = "kfl-dms-identity";
 
-const STORAGE_KEY = "kfl-dms-identity";
-const DEFAULT_IDENTITY: Identity = { role: "system_admin", actor: "admin" };
-
-export function getIdentity(): Identity {
+/** Remove pre-session role/actor data written by the former localStorage identity flow. */
+export function clearLegacyIdentity(): void {
   try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
-    if (!value) return DEFAULT_IDENTITY;
-    const parsed = JSON.parse(value) as Partial<Identity>;
-    if (typeof parsed.role !== "string" || typeof parsed.actor !== "string") return DEFAULT_IDENTITY;
-    return { role: parsed.role, actor: parsed.actor };
+    window.localStorage.removeItem(LEGACY_IDENTITY_KEY);
   } catch {
-    return DEFAULT_IDENTITY;
+    // Storage may be unavailable in hardened browser contexts; server sessions remain authoritative.
   }
 }
 
-export function setIdentity(identity: Identity): void {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
-}
-
-export function clearIdentity(): void {
-  window.localStorage.removeItem(STORAGE_KEY);
-}

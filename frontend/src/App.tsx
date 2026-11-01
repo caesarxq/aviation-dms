@@ -1,7 +1,17 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { ToastProvider } from "./components/ui/Toast";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { getPostLoginPath } from "./auth/permissions";
+import { RequireAccess, RequireAuth } from "./auth/RequireAccess";
+import { LoginPage } from "./pages/Login";
+import { PasswordSetupPage } from "./pages/PasswordSetup";
+import ChangePasswordPage from "./pages/ChangePassword";
+import { ForgotPasswordPage } from "./pages/ForgotPassword";
+import { ResetPasswordPage } from "./pages/ResetPassword";
+import { WelcomePage } from "./pages/Welcome";
+import { ProfileSettingsPage } from "./pages/ProfileSettings";
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
 const DocumentCatalogue = lazy(() => import("./pages/DocumentCatalogue").then((module) => ({ default: module.DocumentCatalogue })));
@@ -44,52 +54,81 @@ function RouteLoading() {
   return <div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading page…</div>;
 }
 
+function AuthenticatedRouteFallback() {
+  const { profile } = useAuth();
+  return <Navigate to={getPostLoginPath(profile)} replace />;
+}
+
+function OnboardingGate({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth();
+  const location = useLocation();
+  // Allow access to /welcome when onboarding is incomplete; redirect away when complete.
+  if (location.pathname === "/welcome") {
+    if (profile?.onboarding_completed) {
+      return <Navigate to={getPostLoginPath(profile)} replace />;
+    }
+    return children;
+  }
+  if (!profile || profile.onboarding_completed) return children;
+  return <Navigate to="/welcome" replace />;
+}
+
 export default function App() {
   return (
     <ToastProvider>
-      <Suspense fallback={<RouteLoading />}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/documents" element={<DocumentCatalogue />} />
-            <Route path="/occurrences" element={<Occurrences />} />
-            <Route path="/occurrences/:occurrenceId" element={<OccurrenceDetail />} />
-            <Route path="/roc" element={<ROCRegister />} />
-            <Route path="/missions" element={<Missions />} />
-            <Route path="/quality-audits" element={<QualityAudits />} />
-            <Route path="/corrective-actions" element={<CorrectiveActions />} />
-            <Route path="/dangerous-goods" element={<DangerousGoods />} />
-            <Route path="/hazards" element={<Hazards />} />
-            <Route path="/risk-assessments" element={<RiskAssessments />} />
-            <Route path="/investigations" element={<Investigations />} />
-            <Route path="/safety-actions" element={<SafetyActions />} />
-            <Route path="/audit-trail" element={<AuditTrail />} />
-            <Route path="/distributions" element={<DocumentDistributions />} />
-            <Route path="/training" element={<TrainingManagement />} />
-            <Route path="/maintenance" element={<MaintenanceManagement />} />
-            <Route path="/crew" element={<CrewManagement />} />
-            <Route path="/duties" element={<DutyTimeTracking />} />
-            <Route path="/crew-qualifications" element={<CrewQualifications />} />
-            <Route path="/change-requests" element={<ChangeRequests />} />
-            <Route path="/security" element={<SecurityManagement />} />
-            <Route path="/outsourced-functions" element={<OutsourcedFunctions />} />
-            <Route path="/safety-kpis" element={<SafetyKPIs />} />
-            <Route path="/security-reviews" element={<SecurityReviews />} />
-            <Route path="/dg-responsibility-matrix" element={<DGResponsibilityMatrix />} />
-            <Route path="/documents/:docId/edit" element={<DocumentEditor />} />
-            <Route path="/documents/:docId/view" element={<DocumentViewer />} />
-            <Route path="/personnel-licenses" element={<PersonnelLicenses />} />
-            <Route path="/self-service-upload" element={<SelfServiceUpload />} />
-            <Route path="/document-proposals" element={<DocumentProposals />} />
-            <Route path="/renewal-progress" element={<RenewalProgress />} />
-            <Route path="/version-diff" element={<VersionDiff />} />
-            <Route path="/aircraft-insurance" element={<AircraftInsurance />} />
-            <Route path="/admin/observability" element={<AdminObservability />} />
-            <Route path="/notifications" element={<Notifications />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </Suspense>
+      <AuthProvider>
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/setup" element={<PasswordSetupPage />} />
+            <Route path="/setup/invite/:code" element={<PasswordSetupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+            <Route element={<RequireAuth><OnboardingGate><AppShell /></OnboardingGate></RequireAuth>}>
+              <Route path="/welcome" element={<WelcomePage />} />
+              <Route path="/" element={<RequireAccess permission="safety:read"><Dashboard /></RequireAccess>} />
+              <Route path="/documents" element={<RequireAccess permission="document:read"><DocumentCatalogue /></RequireAccess>} />
+              <Route path="/occurrences" element={<RequireAccess permission="safety:read"><Occurrences /></RequireAccess>} />
+              <Route path="/occurrences/:occurrenceId" element={<RequireAccess permission="safety:read"><OccurrenceDetail /></RequireAccess>} />
+              <Route path="/roc" element={<RequireAccess permission="roc:read"><ROCRegister /></RequireAccess>} />
+              <Route path="/missions" element={<RequireAccess permission="safety:read"><Missions /></RequireAccess>} />
+              <Route path="/quality-audits" element={<RequireAccess permission="safety:read"><QualityAudits /></RequireAccess>} />
+              <Route path="/corrective-actions" element={<RequireAccess permission="safety:read"><CorrectiveActions /></RequireAccess>} />
+              <Route path="/dangerous-goods" element={<RequireAccess permission="safety:read"><DangerousGoods /></RequireAccess>} />
+              <Route path="/hazards" element={<RequireAccess permission="safety:read"><Hazards /></RequireAccess>} />
+              <Route path="/risk-assessments" element={<RequireAccess permission="safety:read"><RiskAssessments /></RequireAccess>} />
+              <Route path="/investigations" element={<RequireAccess permission="safety:read"><Investigations /></RequireAccess>} />
+              <Route path="/safety-actions" element={<RequireAccess permission="safety:read"><SafetyActions /></RequireAccess>} />
+              <Route path="/audit-trail" element={<RequireAccess permission="audit:read"><AuditTrail /></RequireAccess>} />
+              <Route path="/distributions" element={<RequireAccess permission="document:read"><DocumentDistributions /></RequireAccess>} />
+              <Route path="/training" element={<RequireAccess permission="personnel:read"><TrainingManagement /></RequireAccess>} />
+              <Route path="/maintenance" element={<RequireAccess permission="aircraft:read"><MaintenanceManagement /></RequireAccess>} />
+              <Route path="/crew" element={<RequireAccess permission="personnel:read"><CrewManagement /></RequireAccess>} />
+              <Route path="/duties" element={<RequireAccess permission="personnel:read"><DutyTimeTracking /></RequireAccess>} />
+              <Route path="/crew-qualifications" element={<RequireAccess permission="personnel:read"><CrewQualifications /></RequireAccess>} />
+              <Route path="/change-requests" element={<RequireAccess permission="document:read"><ChangeRequests /></RequireAccess>} />
+              <Route path="/security" element={<RequireAccess permission="security:read_sensitive"><SecurityManagement /></RequireAccess>} />
+              <Route path="/outsourced-functions" element={<RequireAccess permission="compliance:read"><OutsourcedFunctions /></RequireAccess>} />
+              <Route path="/safety-kpis" element={<RequireAccess permission="safety:read"><SafetyKPIs /></RequireAccess>} />
+              <Route path="/security-reviews" element={<RequireAccess permission="security:read_sensitive"><SecurityReviews /></RequireAccess>} />
+              <Route path="/dg-responsibility-matrix" element={<RequireAccess permission="safety:read"><DGResponsibilityMatrix /></RequireAccess>} />
+              <Route path="/documents/:docId/edit" element={<RequireAccess permission="document:read"><DocumentEditor /></RequireAccess>} />
+              <Route path="/documents/:docId/view" element={<RequireAccess permission="document:read"><DocumentViewer /></RequireAccess>} />
+              <Route path="/personnel-licenses" element={<RequireAccess permission="personnel:read"><PersonnelLicenses /></RequireAccess>} />
+              <Route path="/self-service-upload" element={<RequireAccess permission="personnel:view"><SelfServiceUpload /></RequireAccess>} />
+              <Route path="/document-proposals" element={<RequireAccess permission="document:read"><DocumentProposals /></RequireAccess>} />
+              <Route path="/renewal-progress" element={<RequireAccess permission="personnel:read"><RenewalProgress /></RequireAccess>} />
+              <Route path="/version-diff" element={<RequireAccess permission="document:read"><VersionDiff /></RequireAccess>} />
+              <Route path="/aircraft-insurance" element={<RequireAccess permission="aircraft:read"><AircraftInsurance /></RequireAccess>} />
+              <Route path="/admin/observability" element={<RequireAccess role="system_admin"><AdminObservability /></RequireAccess>} />
+              <Route path="/notifications" element={<RequireAccess permission="safety:read"><Notifications /></RequireAccess>} />
+              <Route path="/account/security" element={<ChangePasswordPage />} />
+              <Route path="/account/profile" element={<ProfileSettingsPage />} />
+              <Route path="*" element={<AuthenticatedRouteFallback />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </AuthProvider>
     </ToastProvider>
   );
 }

@@ -36,7 +36,8 @@ export function RiskAssessments() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [hazardId, setHazardId] = useState("");
+  const [hazardIds, setHazardIds] = useState<string[]>([]);
+  const [newHazardId, setNewHazardId] = useState("");
   const [occurrenceId, setOccurrenceId] = useState("");
   const [missionId, setMissionId] = useState("");
   const [likelihood, setLikelihood] = useState("possible");
@@ -45,6 +46,19 @@ export function RiskAssessments() {
   const [mitigationMeasures, setMitigationMeasures] = useState("");
   const [residualRisk, setResidualRisk] = useState("");
   const [dirty, setDirty] = useState(false);
+
+  const addHazard = () => {
+    const hid = newHazardId.trim();
+    if (!hid || hazardIds.includes(hid)) return;
+    setHazardIds([...hazardIds, hid]);
+    setNewHazardId("");
+    setDirty(true);
+  };
+
+  const removeHazard = (idToRemove: string) => {
+    setHazardIds(hazardIds.filter((id) => id !== idToRemove));
+    setDirty(true);
+  };
 
   const { errors: raErrors, isValid: raIsValid } = useValidation(
     { title, description, likelihood, severity, risk_level: riskLevel },
@@ -67,7 +81,8 @@ export function RiskAssessments() {
       setDirty(false);
       setTitle("");
       setDescription("");
-      setHazardId("");
+      setHazardIds([]);
+      setNewHazardId("");
       setOccurrenceId("");
       setMissionId("");
       setLikelihood("possible");
@@ -140,9 +155,52 @@ export function RiskAssessments() {
             </FormField>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <FormField htmlFor="ra_hazard" label="Hazard ID" hint="Link to an existing hazard record.">
-              <input id="ra_hazard" name="hazard_id" className="app-input" placeholder="e.g. HAZ-..." value={hazardId} onChange={(e) => { setHazardId(e.target.value); setDirty(true); }} />
-            </FormField>
+            <div className="space-y-2">
+              <FormField htmlFor="ra_hazard" label="Hazard IDs" hint="Add one or more existing hazard records.">
+                <div className="flex gap-2">
+                  <input
+                    id="ra_hazard"
+                    name="hazard_id"
+                    className="app-input flex-1"
+                    placeholder="e.g. HAZ-001"
+                    value={newHazardId}
+                    onChange={(e) => setNewHazardId(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addHazard()}
+                  />
+                  <button
+                    type="button"
+                    onClick={addHazard}
+                    className="app-btn-secondary px-3"
+                    disabled={!newHazardId.trim() || hazardIds.includes(newHazardId.trim())}
+                  >
+                    Add
+                  </button>
+                </div>
+                {hazardIds.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {hazardIds.map((hid) => (
+                      <span
+                        key={hid}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-kfl-border bg-kfl-surface-subtle px-2.5 py-1.5 text-xs text-kfl-text"
+                      >
+                        <span className="font-mono">{hid}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeHazard(hid)}
+                          className="rounded-md p-1 text-kfl-muted hover:text-rose-600 hover:bg-rose-50"
+                          aria-label={`Remove hazard ${hid}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-kfl-muted mt-1">
+                  {hazardIds.length === 0 ? "No hazards linked" : `${hazardIds.length} hazard${hazardIds.length === 1 ? "" : "s"} linked`}
+                </p>
+              </FormField>
+            </div>
             <FormField htmlFor="ra_occurrence" label="Occurrence ID" hint="Link to an existing occurrence.">
               <input id="ra_occurrence" name="occurrence_id" className="app-input" placeholder="e.g. OCC-..." value={occurrenceId} onChange={(e) => { setOccurrenceId(e.target.value); setDirty(true); }} />
             </FormField>
@@ -193,7 +251,20 @@ export function RiskAssessments() {
           </div>
           <button
             disabled={!raIsValid || createMutation.isPending}
-            onClick={() => createMutation.mutate({ title, description, hazard_id: hazardId || null, occurrence_id: occurrenceId || null, mission_id: missionId || null, likelihood, severity, risk_level: riskLevel, mitigation_measures: mitigationMeasures || null, residual_risk: residualRisk || null })}
+            onClick={() =>
+              createMutation.mutate({
+                title,
+                description,
+                hazard_ids: hazardIds,
+                occurrence_id: occurrenceId || null,
+                mission_id: missionId || null,
+                likelihood,
+                severity,
+                risk_level: riskLevel,
+                mitigation_measures: mitigationMeasures || null,
+                residual_risk: residualRisk || null,
+              })
+            }
             className="app-btn-primary w-full"
           >
             {createMutation.isPending ? "Submitting…" : "Submit Assessment"}
@@ -259,7 +330,15 @@ export function RiskAssessments() {
                       <div className="mt-1 text-xs text-kfl-muted line-clamp-1">{r.description}</div>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">
-                      {r.hazard_id ? `Hazard ${r.hazard_id}` : r.occurrence_id ? `Occurrence ${r.occurrence_id}` : r.mission_id ? `Mission ${r.mission_id}` : "—"}
+                      {r.hazard_ids?.length
+                        ? r.hazard_ids.map((h: string) => `Hazard ${h}`).join(", ")
+                        : r.hazard_id
+                          ? `Hazard ${r.hazard_id}`
+                          : r.occurrence_id
+                            ? `Occurrence ${r.occurrence_id}`
+                            : r.mission_id
+                              ? `Mission ${r.mission_id}`
+                              : "—"}
                     </td>
                     <td className="px-4 py-4">
                       <span className={riskClass(r.risk_level)}>{r.risk_level}</span>

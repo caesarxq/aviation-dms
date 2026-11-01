@@ -28,8 +28,6 @@ class OccurrenceCreate(BaseModel):
     reporter_confidential: bool = False
     location: Optional[str] = None
     occurred_at: Optional[str] = None
-    mor_required: bool = False
-    mor_deadline: Optional[str] = None
 
 
 class OccurrenceUpdate(BaseModel):
@@ -43,6 +41,19 @@ class OccurrenceUpdate(BaseModel):
     mor_required: Optional[bool] = None
     mor_deadline: Optional[str] = None
     mor_submitted_at: Optional[str] = None
+
+
+class OccurrenceMORAssessmentRequest(BaseModel):
+    mor_required: bool
+    rationale: str
+    occurred_at: Optional[str] = None
+
+
+class OccurrenceCloseRequest(BaseModel):
+    effectiveness_confirmed: bool
+    no_new_hazards: bool
+    followup_notes: str
+    authority_notified: Optional[bool] = None
 
 
 class OccurrenceResponse(BaseModel):
@@ -63,6 +74,14 @@ class OccurrenceResponse(BaseModel):
     mor_required: bool = False
     mor_deadline: Optional[str] = None
     mor_submitted_at: Optional[str] = None
+    mor_assessed_by: Optional[str] = None
+    mor_assessed_at: Optional[str] = None
+    mor_assessment_reason: Optional[str] = None
+    followup_notes: Optional[str] = None
+    effectiveness_confirmed: bool = False
+    no_new_hazards: bool = False
+    closed_by: Optional[str] = None
+    closed_at: Optional[str] = None
     investigation_id: Optional[str] = None
     created_at: str
     updated_at: str
@@ -115,12 +134,15 @@ class HazardResponse(BaseModel):
 class RiskAssessmentCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    hazard_id: Optional[str] = None
+    hazard_ids: Optional[list[str]] = None
     occurrence_id: Optional[str] = None
     mission_id: Optional[str] = None
     likelihood: str = "possible"
     severity: str = "minor"
     risk_level: str = "medium"
+    risk_model: str = "sms_5x5"
+    exposure: Optional[str] = None
+    risk_score: Optional[int] = None
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
 
@@ -131,15 +153,19 @@ class RiskAssessmentUpdate(BaseModel):
     likelihood: Optional[str] = None
     severity: Optional[str] = None
     risk_level: Optional[str] = None
+    risk_model: Optional[str] = None
+    exposure: Optional[str] = None
+    risk_score: Optional[int] = None
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
     status: Optional[str] = None
     reviewed_by: Optional[str] = None
+    hazard_ids: Optional[list[str]] = None
 
 
 class RiskAssessmentResponse(BaseModel):
     assessment_id: str
-    hazard_id: Optional[str] = None
+    hazard_ids: list[str] = []
     occurrence_id: Optional[str] = None
     mission_id: Optional[str] = None
     title: str
@@ -147,6 +173,11 @@ class RiskAssessmentResponse(BaseModel):
     likelihood: str
     severity: str
     risk_level: str
+    risk_model: str = "sms_5x5"
+    exposure: Optional[str] = None
+    risk_score: Optional[int] = None
+    scrutiny_required: bool = False
+    flight_cancelled: bool = False
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
     assessor_id: str
@@ -253,6 +284,7 @@ class ROCRegisterCreate(BaseModel):
     max_altitude_agl: Optional[int] = None
     evlos_authorized: bool = False
     dg_category: Optional[str] = None
+    authorized_registrations: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -286,6 +318,7 @@ class ROCRegisterResponse(BaseModel):
     max_altitude_agl: Optional[int] = None
     evlos_authorized: bool = False
     dg_category: Optional[str] = None
+    authorized_registrations: Optional[str] = None
     notes: Optional[str] = None
     created_at: str
     updated_at: str
@@ -332,6 +365,7 @@ class AircraftResponse(BaseModel):
     weight_class: Optional[str] = None
     max_takeoff_weight_kg: Optional[float] = None
     acquired_date: Optional[str] = None
+    opspec_authorized: bool = False
     notes: Optional[str] = None
     created_at: str
     updated_at: str
@@ -541,6 +575,7 @@ class CorrectiveActionCreate(BaseModel):
     description: str
     finding_id: Optional[str] = None
     audit_id: Optional[str] = None
+    finding_level: str = "level_2"
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
@@ -550,6 +585,7 @@ class CorrectiveActionCreate(BaseModel):
 class CorrectiveActionUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    finding_level: Optional[str] = None
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
@@ -567,6 +603,7 @@ class CorrectiveActionResponse(BaseModel):
     audit_id: Optional[str] = None
     title: str
     description: str
+    finding_level: str = "level_2"
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
@@ -634,6 +671,11 @@ class DGAcceptanceCheckCreate(BaseModel):
     labeling_ok: bool = False
     documentation_ok: bool = False
     compatibility_ok: bool = False
+    triple_packaging_ok: bool = True
+    no_leakage_visual_ok: bool = True
+    pic_weather_confirmed: bool = True
+    crew_layers_unopened_confirmed: bool = True
+    weight_within_limit_ok: bool = True
     notes: Optional[str] = None
 
 class DGAcceptanceCheckResponse(BaseModel):
@@ -646,6 +688,11 @@ class DGAcceptanceCheckResponse(BaseModel):
     labeling_ok: bool
     documentation_ok: bool
     compatibility_ok: bool
+    triple_packaging_ok: bool = True
+    no_leakage_visual_ok: bool = True
+    pic_weather_confirmed: bool = True
+    crew_layers_unopened_confirmed: bool = True
+    weight_within_limit_ok: bool = True
     result: str
     notes: Optional[str] = None
     created_at: str

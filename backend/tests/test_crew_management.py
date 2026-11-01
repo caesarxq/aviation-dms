@@ -158,3 +158,19 @@ class TestAppSettings:
         r = client.put("/api/p1/app-settings/fdtl_max_duty_hours", json={"value": "16"}, headers=admin_headers)
         assert r.status_code == 200
         assert r.json()["value"] == "16"
+        # Restore default 14h after test
+        client.put("/api/p1/app-settings/fdtl_max_duty_hours", json={"value": "14"}, headers=admin_headers)
+
+    def test_fdtl_defaults_flagged_as_provisional_pending_regulatory_validation(self, client, admin_headers):
+        status_setting = client.get("/api/p1/app-settings/fdtl_validation_status", headers=admin_headers)
+        assert status_setting.status_code == 200
+        assert status_setting.json()["value"] == "configurable_application_defaults_pending_regulatory_clause_validation"
+
+        val = client.get("/api/p1/duty-records/fdtl-validation", headers=admin_headers)
+        assert val.status_code == 200
+        data = val.json()
+        assert data["validation_status"] == "configurable_application_defaults_pending_regulatory_clause_validation"
+        assert data["binding_gate_active"] is False
+        assert data["settings"]["fdtl_max_duty_hours"] == 14.0
+        assert data["settings"]["fdtl_max_block_hours"] == 12.0
+        assert data["settings"]["fdtl_min_rest_hours"] == 10.0

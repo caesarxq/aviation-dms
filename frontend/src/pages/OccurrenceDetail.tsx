@@ -94,7 +94,7 @@ export function OccurrenceDetail() {
           <dt className="font-medium text-kfl-muted">Reporter</dt>
           <dd className="font-mono text-kfl-text">
             {occ.reporter_id === "CONFIDENTIAL" ? (
-              <span className="app-status app-status-info">🔒 Confidential Reporter</span>
+              <span className="app-status app-status-info">Confidential Reporter</span>
             ) : (
               occ.reporter_id || "—"
             )}

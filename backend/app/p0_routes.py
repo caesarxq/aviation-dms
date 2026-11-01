@@ -1,25 +1,33 @@
 """P0 API routes."""
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import uuid
 import json
+import re
+import bcrypt
+import hashlib
+import hmac
+import os
+import secrets
+from collections import Counter
 
 from .database import get_db
 from .audit import log_audit_event
 from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
-from .p0_auth import P0AuthMiddleware
+from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
 
 router = APIRouter()
 
 
 def _actor(request: Request) -> str:
-    return getattr(request.state, "actor", "admin")
+    return getattr(request.state, "actor", "")
 
 
 def _role(request: Request) -> str:
-    return getattr(request.state, "role", "system_admin")
+    return getattr(request.state, "role", "")
 
 
 def _check(request: Request, perm: str):
@@ -35,11 +43,99 @@ def now_iso() -> str:
     return datetime.now().isoformat()
 
 
+def _auth_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _auth_now_iso() -> str:
+    return _auth_now().isoformat()
+
+
+def _token_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _validate_new_password(password: str) -> None:
+    encoded = password.encode("utf-8")
+    if len(password) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
+    if len(encoded) > 72:
+        raise HTTPException(status_code=400, detail="Password must not exceed 72 UTF-8 bytes")
+
+
+def _safe_user(row, roles: list[str] | None = None, active_role: str | None = None) -> dict:
+    return {
+        "user_id": row["user_id"],
+        "username": row["username"],
+        "email": row["email"],
+        "full_name": row["full_name"],
+        "role": active_role or row["role"],
+        "roles": roles or [],
+        "department": row["department"],
+    }
+
+
+async def _create_session(db, user_id: str, active_role: str) -> tuple[str, str]:
+    session_id = str(uuid.uuid4())
+    token = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    now = _auth_now()
+    await db.execute(
+        """INSERT INTO auth_sessions
+           (session_id, user_id, active_role, token_hash, csrf_token_hash, created_at, expires_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            session_id, user_id, active_role, _token_hash(token), _token_hash(csrf_token),
+            now.isoformat(), (now + timedelta(seconds=SESSION_TTL_SECONDS)).isoformat(), now.isoformat(),
+        ),
+    )
+    return token, csrf_token
+
+
+def _session_response(payload: dict, token: str, csrf_token: str) -> JSONResponse:
+    response = JSONResponse(payload, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=SESSION_TTL_SECONDS, httponly=True,
+        secure=SESSION_COOKIE_SECURE, samesite="strict", path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE, csrf_token, max_age=SESSION_TTL_SECONDS, httponly=False,
+        secure=SESSION_COOKIE_SECURE, samesite="strict", path="/",
+    )
+    return response
+
+
+def _clear_session_cookies(response: JSONResponse) -> JSONResponse:
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=SESSION_COOKIE_SECURE, httponly=True, samesite="strict")
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=SESSION_COOKIE_SECURE, httponly=False, samesite="strict")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _request_is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    try:
+        import ipaddress
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _dummy_password_hash() -> bytes:
+    return bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12))
+
+
+_DUMMY_PASSWORD_HASH = _dummy_password_hash()
+
+
 @router.get("/auth/profile")
 async def current_auth_profile(request: Request):
-    """Return the authenticated user's effective role and permission profile."""
+    """Return the canonical identity, assigned roles, active role, and scoped permissions."""
     actor = _actor(request)
     role = _role(request)
+    roles = getattr(request.state, "roles", [])
+    if not actor or role not in ROLE_PERMISSIONS or role not in roles:
+        raise HTTPException(status_code=401, detail="Authentication required")
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -47,14 +143,637 @@ async def current_auth_profile(request: Request):
             (actor,),
         )
         row = await cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=401, detail="Authenticated user profile not found")
+        if not row or not row["is_active"]:
+            raise HTTPException(status_code=401, detail="Authenticated user profile not found or disabled")
         profile = dict(row)
-        if profile["role"] != role:
-            raise HTTPException(status_code=401, detail="Authenticated role does not match user profile")
-        return {"user": profile, "role": role, "authenticated_via": getattr(request.state, "authenticated_via", "unknown"), "permissions": sorted(ROLE_PERMISSIONS[role])}
+        return {
+            "user": _safe_user(profile, roles, role),
+            "role": role,
+            "active_role": role,
+            "roles": roles,
+            "authenticated_via": getattr(request.state, "authenticated_via", "unknown"),
+            "permissions": sorted(ROLE_PERMISSIONS[role]),
+        }
     finally:
         await db.close()
+
+
+@router.post("/auth/active-role")
+async def switch_active_role(body: AuthActiveRoleRequest, request: Request):
+    """Switch the current browser session to one of the user's assigned roles."""
+    if getattr(request.state, "authenticated_via", "") != "session_cookie":
+        raise HTTPException(status_code=401, detail="An authenticated browser session is required")
+    actor = _actor(request)
+    session_id = getattr(request.state, "session_id", None)
+    current_role = _role(request)
+    assigned_roles = getattr(request.state, "roles", [])
+    if body.active_role not in ROLE_PERMISSIONS:
+        raise HTTPException(status_code=400, detail="Unknown role")
+    if body.active_role not in assigned_roles:
+        raise HTTPException(status_code=403, detail="Role is not assigned to this account")
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "UPDATE auth_sessions SET active_role = ? WHERE session_id = ? AND user_id = ? AND revoked_at IS NULL",
+            (body.active_role, session_id, actor),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=401, detail="Session is no longer active")
+        await db.commit()
+    finally:
+        await db.close()
+
+    request.state.role = body.active_role
+    request.state.active_role = body.active_role
+    await log_audit_event(
+        "auth_session", session_id, "active_role_switched", actor,
+        {"from_role": current_role, "to_role": body.active_role},
+    )
+    return await current_auth_profile(request)
+
+
+@router.get("/auth/users")
+async def list_auth_users(request: Request):
+    """List canonical active accounts and their explicit assigned roles for administrators."""
+    _check(request, "settings:manage")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT user_id, username, email, full_name, role, department, is_active, password_hash
+               FROM users WHERE merged_into_user_id IS NULL ORDER BY full_name, username"""
+        )
+        users = [dict(row) for row in await cursor.fetchall()]
+        for user in users:
+            cursor = await db.execute("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user["user_id"],))
+            user["roles"] = [row["role"] for row in await cursor.fetchall()]
+            user["has_password"] = bool(user["password_hash"])
+            del user["password_hash"]
+        return users
+    finally:
+        await db.close()
+
+
+@router.put("/auth/users/{user_id}/roles")
+async def update_user_roles(user_id: str, body: AuthUserRolesUpdate, request: Request):
+    """Replace a canonical account's role assignments; invalidate sessions after changes."""
+    _check(request, "settings:manage")
+    roles = sorted(set(body.roles))
+    if not roles:
+        raise HTTPException(status_code=400, detail="At least one role must remain assigned")
+    invalid_roles = sorted(set(roles) - set(ROLE_PERMISSIONS))
+    if invalid_roles:
+        raise HTTPException(status_code=400, detail=f"Unknown roles: {', '.join(invalid_roles)}")
+
+    db = await get_db()
+    actor = _actor(request)
+    try:
+        cursor = await db.execute(
+            "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?", (user_id,)
+        )
+        alias = await cursor.fetchone()
+        canonical_id = alias["canonical_user_id"] if alias else user_id
+        cursor = await db.execute(
+            "SELECT user_id, username, email, full_name, role, department, is_active "
+            "FROM users WHERE user_id = ? AND is_active = 1 AND merged_into_user_id IS NULL",
+            (canonical_id,),
+        )
+        user_row = await cursor.fetchone()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="Active canonical user not found")
+        user = dict(user_row)
+        cursor = await db.execute("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (canonical_id,))
+        current_roles = {row["role"] for row in await cursor.fetchall()}
+        if current_roles == set(roles):
+            return {"user_id": canonical_id, "roles": roles, "active_sessions_revoked": False}
+
+        if "system_admin" in current_roles and "system_admin" not in roles:
+            cursor = await db.execute(
+                """SELECT COUNT(DISTINCT u.user_id) FROM users u
+                   JOIN user_roles ur ON ur.user_id = u.user_id
+                   WHERE u.is_active = 1 AND u.merged_into_user_id IS NULL AND ur.role = 'system_admin'"""
+            )
+            if (await cursor.fetchone())[0] <= 1:
+                raise HTTPException(status_code=409, detail="Cannot remove the last active system administrator")
+
+        default_role = user["role"] if user["role"] in roles else roles[0]
+        await db.execute("DELETE FROM user_roles WHERE user_id = ?", (canonical_id,))
+        for role in roles:
+            await db.execute("INSERT INTO user_roles (user_id, role) VALUES (?, ?)", (canonical_id, role))
+        now = _auth_now_iso()
+        await db.execute("UPDATE users SET role = ?, updated_at = ? WHERE user_id = ?", (default_role, now, canonical_id))
+        await db.execute(
+            "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ? AND revoked_at IS NULL",
+            (now, canonical_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event(
+        "user_role_assignments", canonical_id, "roles_replaced", actor,
+        {"previous_roles": sorted(current_roles), "roles": roles},
+    )
+    return {"user_id": canonical_id, "roles": roles, "active_sessions_revoked": True}
+
+
+@router.post("/auth/login")
+async def auth_login(body: AuthLoginRequest, request: Request):
+    """Authenticate credentials and issue a short-lived opaque HttpOnly session cookie."""
+    username = body.username.strip().lower()
+    password = body.password
+    client_host = request.client.host if request.client else "unknown"
+    attempt_key = _token_hash(f"{username}\0{client_host}")
+    now = _auth_now()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT * FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
+        attempt = await cursor.fetchone()
+        if attempt:
+            attempt = dict(attempt)
+            locked_until = datetime.fromisoformat(attempt["locked_until"]) if attempt["locked_until"] else None
+            window_start = datetime.fromisoformat(attempt["window_started_at"])
+            if locked_until and locked_until > now:
+                await db.rollback()
+                raise HTTPException(status_code=429, detail="Login temporarily unavailable; try again later")
+            if (locked_until and locked_until <= now) or now - window_start > timedelta(minutes=15):
+                attempt = None
+
+        cursor = await db.execute(
+            """SELECT user_id, username, email, full_name, role, department, is_active, password_hash
+               FROM users WHERE lower(username) = ?""",
+            (username,),
+        )
+        user_row = await cursor.fetchone()
+        user = dict(user_row) if user_row else None
+        candidate_hash = user["password_hash"].encode() if user and user.get("password_hash") else _DUMMY_PASSWORD_HASH
+        try:
+            password_matches = bcrypt.checkpw(password.encode("utf-8"), candidate_hash)
+        except (ValueError, TypeError):
+            password_matches = False
+        valid = bool(user and user["is_active"] and user["password_hash"] and password_matches)
+        if not valid:
+            failures = (attempt["failure_count"] + 1) if attempt else 1
+            window_started = attempt["window_started_at"] if attempt else now.isoformat()
+            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+            await db.execute(
+                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
+                     window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+                (attempt_key, failures, window_started, locked),
+            )
+            await db.commit()
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
+        cursor = await db.execute("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user["user_id"],))
+        roles = [row["role"] for row in await cursor.fetchall()]
+        if not roles:
+            await db.rollback()
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+        active_role = user["role"] if user["role"] in roles else roles[0]
+        await db.execute("DELETE FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
+        token, csrf_token = await _create_session(db, user["user_id"], active_role)
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", user["user_id"], "login", user["user_id"], {"auth_method": "password", "active_role": active_role})
+    payload = {
+        "user": _safe_user(user, roles, active_role),
+        "role": active_role,
+        "active_role": active_role,
+        "roles": roles,
+        "message": "Login successful",
+    }
+    return _session_response(payload, token, csrf_token)
+
+
+@router.get("/auth/bootstrap-status")
+async def auth_bootstrap_status(request: Request):
+    """Report whether first-admin password enrollment is still available."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT password_hash, is_active FROM users WHERE user_id = 'u-admin'")
+        admin = await cursor.fetchone()
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'auth_bootstrap_completed'")
+        completed = await cursor.fetchone()
+        configured = bool(os.getenv("KFL_BOOTSTRAP_TOKEN")) or (DEV_MODE and _request_is_loopback(request))
+        setup_required = bool(admin and admin["is_active"] and not admin["password_hash"] and not completed)
+        return {
+            "setup_required": setup_required,
+            "bootstrap_configured": configured,
+            "bootstrap_token_required": bool(os.getenv("KFL_BOOTSTRAP_TOKEN")),
+        }
+    finally:
+        await db.close()
+
+
+@router.post("/auth/bootstrap")
+async def auth_bootstrap(body: AuthBootstrapRequest, request: Request):
+    """Set the initial admin password once, using an operator-provided bootstrap token."""
+    _validate_new_password(body.password)
+    configured_token = os.getenv("KFL_BOOTSTRAP_TOKEN")
+    local_dev_bootstrap = DEV_MODE and _request_is_loopback(request) and not configured_token
+    if not local_dev_bootstrap and (not configured_token or not body.bootstrap_token or not hmac.compare_digest(body.bootstrap_token, configured_token)):
+        raise HTTPException(status_code=403, detail="Invalid bootstrap authorization")
+
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'auth_bootstrap_completed'")
+        if await cursor.fetchone():
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Initial administrator setup has already been completed")
+        cursor = await db.execute(
+            "SELECT user_id, username, email, full_name, role, department, is_active, password_hash FROM users WHERE user_id = 'u-admin'"
+        )
+        user_row = await cursor.fetchone()
+        if not user_row or not user_row["is_active"] or user_row["password_hash"]:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Initial administrator account is not eligible for setup")
+        user = dict(user_row)
+        now = _auth_now_iso()
+        password_hash = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode()
+        await db.execute("UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = 'u-admin'", (password_hash, now))
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('auth_bootstrap_completed', 'true', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = 'true', updated_at = excluded.updated_at",
+            (now,),
+        )
+        cursor = await db.execute("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user["user_id"],))
+        roles = [row["role"] for row in await cursor.fetchall()]
+        active_role = user["role"] if user["role"] in roles else "system_admin"
+        token, csrf_token = await _create_session(db, user["user_id"], active_role)
+        await db.commit()
+        user["password_hash"] = password_hash
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", user["user_id"], "initial_admin_password_set", user["user_id"], {"active_role": active_role})
+    return _session_response(
+        {
+            "user": _safe_user(user, roles, active_role),
+            "role": active_role,
+            "active_role": active_role,
+            "roles": roles,
+            "message": "Initial administrator password set",
+        },
+        token,
+        csrf_token,
+    )
+
+
+@router.post("/auth/users/{user_id}/setup-token")
+async def issue_password_setup_token(user_id: str, request: Request):
+    _check(request, "settings:manage")
+    actor = _actor(request)
+    raw_token = secrets.token_urlsafe(32)
+    now = _auth_now()
+    expires = now + timedelta(hours=24)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT user_id, password_hash, is_active FROM users WHERE user_id = ?", (user_id,))
+        user = await cursor.fetchone()
+        if not user or not user["is_active"]:
+            raise HTTPException(status_code=404, detail="Active user not found")
+        if user["password_hash"]:
+            raise HTTPException(status_code=409, detail="User already has a password; use the password-change workflow")
+        await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL", (now.isoformat(), user_id))
+        await db.execute(
+            "INSERT INTO auth_setup_tokens (setup_id, user_id, token_hash, issued_by, created_at, expires_at) VALUES (?,?,?,?,?,?)",
+            (str(uuid.uuid4()), user_id, _token_hash(raw_token), actor, now.isoformat(), expires.isoformat()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("user_auth", user_id, "password_setup_token_issued", actor, {"expires_at": expires.isoformat()})
+    return {"setup_token": raw_token, "expires_at": expires.isoformat(), "use_once": True}
+
+
+@router.post("/auth/password-setup")
+async def complete_password_setup(body: AuthPasswordSetupRequest, request: Request):
+    _validate_new_password(body.password)
+    now = _auth_now()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        # Support both setup_token (username + token) and invite_code (token-only, username pre-filled)
+        if body.invite_code:
+            cursor = await db.execute(
+                """SELECT t.setup_id, t.user_id, t.expires_at, t.used_at, u.password_hash, u.is_active, u.username
+                   FROM auth_setup_tokens t JOIN users u ON u.user_id = t.user_id
+                   WHERE t.invite_code = ? AND t.purpose = 'invite'""",
+                (body.invite_code,),
+            )
+        else:
+            username = body.username.strip().lower()
+            cursor = await db.execute(
+                """SELECT t.setup_id, t.user_id, t.expires_at, t.used_at, u.password_hash, u.is_active, u.username
+                   FROM auth_setup_tokens t JOIN users u ON u.user_id = t.user_id
+                   WHERE t.token_hash = ? AND lower(u.username) = ?""",
+                (_token_hash(body.setup_token), username),
+            )
+        row = await cursor.fetchone()
+        if not row or row["used_at"] or not row["is_active"] or row["password_hash"] or datetime.fromisoformat(row["expires_at"]) <= now:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Invalid or expired setup token")
+        password_hash = bcrypt.hashpw(body.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode()
+        await db.execute("UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?", (password_hash, now.isoformat(), row["user_id"]))
+        await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE setup_id = ?", (now.isoformat(), row["setup_id"]))
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("user_auth", row["user_id"], "password_setup_completed", row["user_id"])
+    return JSONResponse({"message": "Password set. Sign in to continue."}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/auth/change-password")
+async def change_password(body: AuthPasswordChangeRequest, request: Request):
+    if getattr(request.state, "authenticated_via", "") != "session_cookie":
+        raise HTTPException(status_code=401, detail="An authenticated browser session is required")
+    _validate_new_password(body.new_password)
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT password_hash FROM users WHERE user_id = ? AND is_active = 1", (actor,))
+        row = await cursor.fetchone()
+        if not row or not row["password_hash"] or not bcrypt.checkpw(body.current_password.encode(), row["password_hash"].encode()):
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+        password_hash = bcrypt.hashpw(body.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode()
+        now = _auth_now_iso()
+        await db.execute("UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?", (password_hash, now, actor))
+        await db.execute(
+            "UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND session_id != ? AND revoked_at IS NULL",
+            (now, actor, request.state.session_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", actor, "password_changed_and_sessions_revoked", actor)
+    return JSONResponse({"message": "Password changed; other sessions were signed out"}, headers={"Cache-Control": "no-store"})
+
+
+# --- Invite, forgot-password, reset-password ---
+
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+def _validate_email(email: str) -> None:
+    if not _EMAIL_RE.match(email.strip()):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+def _generate_invite_code() -> str:
+    """Generate a short, human-readable invite code like KFL-ABCD-1234."""
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    part1 = "".join(secrets.choice(alphabet) for _ in range(4))
+    part2 = "".join(secrets.choice("0123456789") for _ in range(4))
+    return f"KFL-{part1}-{part2}"
+
+
+@router.post("/auth/invites", response_model=AuthInviteResponse)
+async def issue_invite(body: AuthInviteRequest, request: Request):
+    """Issue a one-time invite code for an account to set their password."""
+    _check(request, "settings:manage")
+    actor = _actor(request)
+    client_host = request.client.host if request.client else "unknown"
+
+    # Rate limit: max 5 invite requests per actor per 15 minutes
+    attempt_key = _token_hash(f"invite\0{actor}\0{client_host}")
+    now = _auth_now()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
+        attempt = await cursor.fetchone()
+        if attempt:
+            attempt = dict(attempt)
+            locked_until = datetime.fromisoformat(attempt["locked_until"]) if attempt["locked_until"] else None
+            window_start = datetime.fromisoformat(attempt["window_started_at"])
+            if locked_until and locked_until > now:
+                await db.rollback()
+                raise HTTPException(status_code=429, detail="Invite requests temporarily unavailable; try again later")
+            if (locked_until and locked_until <= now) or now - window_start > timedelta(minutes=15):
+                attempt = None
+        if attempt and attempt["failure_count"] >= 5:
+            locked = (now + timedelta(minutes=15)).isoformat()
+            await db.execute(
+                "UPDATE auth_login_attempts SET locked_until = ? WHERE attempt_key = ?",
+                (locked, attempt_key),
+            )
+            await db.commit()
+            await db.close()
+            raise HTTPException(status_code=429, detail="Invite requests temporarily unavailable; try again later")
+
+        # Validate email format if provided
+        if body.email is not None:
+            _validate_email(body.email)
+
+        cursor = await db.execute("SELECT user_id, username, email, full_name, is_active FROM users WHERE lower(username) = ?", (body.username.strip().lower(),))
+        user = await cursor.fetchone()
+        if not user or not user["is_active"]:
+            # Record failed attempt for rate limiting
+            failures = (attempt["failure_count"] + 1) if attempt else 1
+            window_started = attempt["window_started_at"] if attempt else now.isoformat()
+            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+            await db.execute(
+                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
+                   window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+                (attempt_key, failures, window_started, locked),
+            )
+            await db.commit()
+            await db.close()
+            raise HTTPException(status_code=404, detail="Active user not found")
+
+        # Record successful invite (reset failure count)
+        await db.execute(
+            """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+               VALUES (?, 0, ?, NULL)
+               ON CONFLICT(attempt_key) DO UPDATE SET failure_count = 0,
+               window_started_at = excluded.window_started_at, locked_until = NULL""",
+            (attempt_key, now.isoformat()),
+        )
+
+        raw_code = _generate_invite_code()
+        raw_token = secrets.token_urlsafe(32)
+        expires = now + timedelta(hours=24)
+        try:
+            # Mark any existing unused invite tokens for this user as used
+            await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND purpose = 'invite' AND used_at IS NULL", (now.isoformat(), user["user_id"]))
+            await db.execute(
+                """INSERT INTO auth_setup_tokens
+                   (setup_id, user_id, token_hash, invite_code, purpose, issued_by, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user["user_id"], _token_hash(raw_token), raw_code, "invite", actor, now.isoformat(), expires.isoformat()),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+    except HTTPException:
+        raise
+    except Exception:
+        await db.rollback()
+        await db.close()
+        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+    await log_audit_event("user_auth", user["user_id"], "invite_issued", actor, {"expires_at": expires.isoformat()})
+    return AuthInviteResponse(
+        invite_code=raw_code,
+        setup_url=f"/setup/invite/{raw_code}",
+        expires_at=expires.isoformat(),
+    )
+
+
+@router.post("/auth/forgot-password")
+async def forgot_password(body: AuthForgotPasswordRequest, request: Request):
+    """Request a password reset token. Always returns success to prevent account enumeration."""
+    username = body.username.strip().lower()
+    client_host = request.client.host if request.client else "unknown"
+    attempt_key = _token_hash(f"forgot\\0{username}\\0{client_host}")
+    now = _auth_now()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
+        attempt = await cursor.fetchone()
+        if attempt:
+            attempt = dict(attempt)
+            locked_until = datetime.fromisoformat(attempt["locked_until"]) if attempt["locked_until"] else None
+            window_start = datetime.fromisoformat(attempt["window_started_at"])
+            if locked_until and locked_until > now:
+                await db.rollback()
+                raise HTTPException(status_code=429, detail="Request temporarily unavailable; try again later")
+            if (locked_until and locked_until <= now) or now - window_start > timedelta(minutes=15):
+                attempt = None
+
+        cursor = await db.execute("SELECT user_id, username, password_hash, is_active FROM users WHERE lower(username) = ?", (username,))
+        user = await cursor.fetchone()
+
+        if user and user["is_active"] and user["password_hash"]:
+            failures = (attempt["failure_count"] + 1) if attempt else 1
+            window_started = attempt["window_started_at"] if attempt else now.isoformat()
+            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+            await db.execute(
+                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
+                     window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+                (attempt_key, failures, window_started, locked),
+            )
+            raw_token = secrets.token_urlsafe(32)
+            expires = now + timedelta(hours=1)
+            await db.execute(
+                """INSERT INTO auth_setup_tokens
+                   (setup_id, user_id, token_hash, purpose, issued_by, created_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user["user_id"], _token_hash(raw_token), "reset", "system", now.isoformat(), expires.isoformat()),
+            )
+            await db.commit()
+        else:
+            failures = (attempt["failure_count"] + 1) if attempt else 1
+            window_started = attempt["window_started_at"] if attempt else now.isoformat()
+            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+            await db.execute(
+                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
+                     window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+                (attempt_key, failures, window_started, locked),
+            )
+            await db.commit()
+    finally:
+        await db.close()
+    return JSONResponse({"message": "If an active account with a password exists, a reset token has been issued."}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/auth/reset-password")
+async def reset_password(body: AuthResetPasswordRequest, request: Request):
+    """Reset password using a one-time reset token."""
+    _validate_new_password(body.new_password)
+    now = _auth_now()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            """SELECT t.setup_id, t.user_id, t.expires_at, t.used_at, u.password_hash, u.is_active
+               FROM auth_setup_tokens t JOIN users u ON u.user_id = t.user_id
+               WHERE t.token_hash = ? AND t.purpose = 'reset'""",
+            (_token_hash(body.reset_token),),
+        )
+        row = await cursor.fetchone()
+        if not row or row["used_at"] or not row["is_active"] or datetime.fromisoformat(row["expires_at"]) <= now:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+        password_hash = bcrypt.hashpw(body.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode()
+        await db.execute("UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?", (password_hash, now.isoformat(), row["user_id"]))
+        await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE setup_id = ?", (now.isoformat(), row["setup_id"]))
+        # Revoke all other sessions for this user
+        await db.execute("UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ? AND revoked_at IS NULL", (now.isoformat(), row["user_id"]))
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", row["user_id"], "password_reset_completed", row["user_id"])
+    return JSONResponse({"message": "Password reset. Sign in with your new password."}, headers={"Cache-Control": "no-store"})
+
+
+# --- Onboarding ---
+
+@router.get("/auth/me/onboarding", response_model=AuthOnboardingResponse)
+async def get_onboarding_status(request: Request):
+    """Return the onboarding status for the authenticated user."""
+    actor = _actor(request)
+    roles = getattr(request.state, "roles", [])
+    role = _role(request)
+    if not actor or role not in ROLE_PERMISSIONS or role not in roles:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT user_id, full_name, onboarding_completed FROM users WHERE user_id = ?", (actor,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=401, detail="Authenticated user profile not found")
+        return AuthOnboardingResponse(
+            onboarding_completed=bool(row["onboarding_completed"]),
+            assigned_roles=roles,
+            active_role=role,
+            canonical_user_id=row["user_id"],
+            full_name=row["full_name"],
+        )
+    finally:
+        await db.close()
+
+
+@router.post("/auth/me/onboarding/complete")
+async def complete_onboarding(request: Request):
+    """Mark the authenticated user's onboarding as complete."""
+    actor = _actor(request)
+    roles = getattr(request.state, "roles", [])
+    role = _role(request)
+    if not actor or role not in ROLE_PERMISSIONS or role not in roles:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db = await get_db()
+    try:
+        await db.execute("UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE user_id = ?", (_auth_now_iso(), actor))
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", actor, "onboarding_completed", actor)
+    return JSONResponse({"message": "Onboarding complete."}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/auth/logout")
+async def auth_logout(request: Request):
+    """Revoke the authenticated server-side session and expire both browser cookies."""
+    actor = _actor(request)
+    session_id = getattr(request.state, "session_id", None)
+    if session_id:
+        db = await get_db()
+        try:
+            await db.execute(
+                "UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL",
+                (_auth_now_iso(), session_id),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+        await log_audit_event("auth_session", session_id, "logout", actor)
+    return _clear_session_cookies(JSONResponse({"message": "Logout successful"}))
 
 
 # --- Documents ---
@@ -214,13 +933,16 @@ async def transition_version_state(version_id: str, request: Request, state: str
         if state in ("draft", "in_review", "rejected"):
             if not has_permission(role, "document:update"):
                 raise HTTPException(status_code=403, detail="Update permission required")
+        if state in ("approved", "kcaa_approved"):
+            if not check_sod("version", "approve", actor, row["created_by"], getattr(request.state, "actor_aliases", None)):
+                raise HTTPException(status_code=403, detail="Cannot approve own version (SoD)")
         # Check if parent document requires KCAA approval
         cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (row["document_id"],))
         doc_row = await cursor.fetchone()
         kcaa_required = doc_row["kcaa_approval_required"] if doc_row else 0
         # KCAA gate and separation-of-duties checks for publication.
         if state == "published":
-            if not check_sod("version", "publish", actor, row["created_by"]):
+            if not check_sod("version", "publish", actor, row["created_by"], getattr(request.state, "actor_aliases", None)):
                 raise HTTPException(status_code=403, detail="Cannot publish own version (SoD)")
             if kcaa_required and row["kcaa_approved"] != 1:
                 raise HTTPException(status_code=403, detail="KCAA approval required before publishing")
@@ -242,6 +964,16 @@ async def transition_version_state(version_id: str, request: Request, state: str
             params.append(now_iso())
         params.append(version_id)
         await db.execute(f"UPDATE document_versions SET {', '.join(updates)} WHERE version_id = ?", params)
+        if state == "published":
+            now_val = now_iso()
+            await db.execute(
+                "UPDATE document_versions SET state = 'obsolete', updated_at = ?, updated_by = ? WHERE document_id = ? AND version_id != ? AND state = 'published'",
+                (now_val, actor, row["document_id"], version_id),
+            )
+            await db.execute(
+                "UPDATE documents SET current_version_id = ?, status = 'published', updated_at = ?, updated_by = ? WHERE document_id = ?",
+                (version_id, now_val, actor, row["document_id"]),
+            )
         await db.commit()
         await log_audit_event(
             "document_version",
@@ -259,17 +991,32 @@ async def transition_version_state(version_id: str, request: Request, state: str
 
 # --- Document Content ---
 @router.get("/documents/{doc_id}/content", response_model=DocumentContentResponse)
-async def get_document_content(doc_id: str, request: Request):
-    """Get the latest version content of a document."""
+async def get_document_content(doc_id: str, request: Request, include_draft: bool = False):
+    """Get the effective (current published) version content of a document."""
     _check(request, "document:read")
     db = await get_db()
     try:
-        # Get latest version by created_at
-        cursor = await db.execute(
-            "SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
-            (doc_id,),
-        )
-        row = await cursor.fetchone()
+        row = None
+        if not include_draft:
+            cursor = await db.execute(
+                """SELECT v.* FROM documents d
+                   JOIN document_versions v ON v.version_id = d.current_version_id
+                   WHERE d.document_id = ?""",
+                (doc_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                cursor = await db.execute(
+                    "SELECT * FROM document_versions WHERE document_id = ? AND state = 'published' ORDER BY created_at DESC LIMIT 1",
+                    (doc_id,),
+                )
+                row = await cursor.fetchone()
+        if not row:
+            cursor = await db.execute(
+                "SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
+                (doc_id,),
+            )
+            row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Document version not found")
         row = dict(row)
@@ -407,10 +1154,25 @@ async def update_change_request(cr_id: str, request: Request, status: Optional[s
         updates = []
         params = []
         if status:
+            allowed_cr_transitions = {
+                "open": {"submitted", "in_review", "under_review", "rejected"},
+                "submitted": {"in_review", "under_review", "rejected"},
+                "in_review": {"approved", "rejected"},
+                "under_review": {"approved", "rejected"},
+                "approved": {"implemented", "closed"},
+                "rejected": {"open"},
+                "implemented": {"closed"},
+                "closed": set(),
+            }
+            if status not in allowed_cr_transitions.get(row["status"], set()):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid change-request transition: {row['status']} -> {status} (review required before approval per QMS §3.1)",
+                )
             if status == "approved":
                 if not has_permission(role, "change_request:approve"):
                     raise HTTPException(status_code=403, detail="Approve permission required")
-                if not check_sod("change_request", "approve", actor, row["requester_id"]):
+                if not check_sod("change_request", "approve", actor, row["requester_id"], getattr(request.state, "actor_aliases", None)):
                     raise HTTPException(status_code=403, detail="Cannot approve own change request (SoD)")
                 updates.append("approved_at = ?")
                 params.append(now_iso())
@@ -419,7 +1181,7 @@ async def update_change_request(cr_id: str, request: Request, status: Optional[s
             if status == "rejected":
                 if not has_permission(role, "change_request:approve"):
                     raise HTTPException(status_code=403, detail="Approve permission required")
-                if not check_sod("change_request", "reject", actor, row["requester_id"]):
+                if not check_sod("change_request", "reject", actor, row["requester_id"], getattr(request.state, "actor_aliases", None)):
                     raise HTTPException(status_code=403, detail="Cannot reject own change request (SoD)")
                 updates.append("rejected_at = ?")
                 params.append(now_iso())
@@ -438,10 +1200,12 @@ async def update_change_request(cr_id: str, request: Request, status: Optional[s
         await db.execute(f"UPDATE change_requests SET {', '.join(updates)} WHERE cr_id = ?", params)
         await db.commit()
         cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
-        row = await cursor.fetchone()
-        return ChangeRequestResponse(**dict(row))
+        updated_row = dict(await cursor.fetchone())
     finally:
         await db.close()
+    if status:
+        await log_audit_event("change_request", cr_id, f"status_{status}", actor, {"from_status": row["status"], "to_status": status})
+    return ChangeRequestResponse(**updated_row)
 
 
 # --- Distributions ---
@@ -488,13 +1252,25 @@ async def create_distribution(dist: DistributionCreate, request: Request):
 async def acknowledge_distribution(dist_id: str, request: Request):
     _check(request, "document:read")
     actor = _actor(request)
+    role = _role(request)
     now = now_iso()
     db = await get_db()
     try:
+        cursor = await db.execute("SELECT * FROM distributions WHERE distribution_id = ?", (dist_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Distribution not found")
+        dist = dict(row)
+        if not same_principal(request, dist["recipient_id"]) and not has_permission(role, "distribution:manage") and role != "system_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Only the named recipient or an authorized distribution custodian may acknowledge this distribution (QMS §3.11)",
+            )
         await db.execute("UPDATE distributions SET status = 'acknowledged', acknowledged_at = ?, acknowledged_by = ?, updated_at = ?, updated_by = ? WHERE distribution_id = ?", (now, actor, now, actor, dist_id))
         await db.commit()
     finally:
         await db.close()
+    await log_audit_event("distribution", dist_id, "acknowledged", actor, {"recipient_id": dist["recipient_id"]})
     return {"status": "acknowledged"}
 
 
@@ -619,9 +1395,12 @@ async def system_admin_observability(request: Request):
             table_counts[table] = (await cursor.fetchone())["count"]
 
         user_cursor = await db.execute(
-            "SELECT user_id, username, full_name, role, department, is_active, updated_at FROM users ORDER BY full_name"
+            "SELECT user_id, username, email, full_name, role, department, is_active, merged_into_user_id, updated_at FROM users ORDER BY full_name"
         )
         users = [dict(row) for row in await user_cursor.fetchall()]
+        for user in users:
+            role_cursor = await db.execute("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user["user_id"],))
+            user["roles"] = [row["role"] for row in await role_cursor.fetchall()]
         audit_cursor = await db.execute(
             "SELECT COUNT(*) AS count FROM audit_events WHERE timestamp >= datetime('now', '-24 hours')"
         )

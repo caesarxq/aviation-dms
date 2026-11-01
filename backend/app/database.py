@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL,
     department TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
+    password_hash TEXT,
+    merged_into_user_id TEXT,
+    onboarding_completed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -25,6 +28,52 @@ CREATE TABLE IF NOT EXISTS user_roles (
     role TEXT NOT NULL,
     PRIMARY KEY (user_id, role),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- Stable aliases preserve historical actor IDs after verified account consolidation.
+CREATE TABLE IF NOT EXISTS user_id_aliases (
+    legacy_user_id TEXT PRIMARY KEY,
+    canonical_user_id TEXT NOT NULL,
+    merged_at TEXT NOT NULL,
+    FOREIGN KEY (canonical_user_id) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_id_aliases_canonical ON user_id_aliases(canonical_user_id);
+
+-- Opaque, revocable browser sessions and one-time password setup tokens
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    active_role TEXT,
+    token_hash TEXT NOT NULL UNIQUE,
+    csrf_token_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS auth_setup_tokens (
+    setup_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    invite_code TEXT,
+    purpose TEXT NOT NULL DEFAULT 'setup',
+    issued_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_auth_setup_user ON auth_setup_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS auth_login_attempts (
+    attempt_key TEXT PRIMARY KEY,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    window_started_at TEXT NOT NULL,
+    locked_until TEXT
 );
 
 -- Documents
@@ -40,6 +89,13 @@ CREATE TABLE IF NOT EXISTS documents (
     current_version_id TEXT,
     kcaa_approval_required INTEGER NOT NULL DEFAULT 0,
     review_due_date TEXT,
+    source_pdf_filename TEXT,
+    source_sha256 TEXT,
+    source_issue_revision TEXT,
+    source_issued_date TEXT,
+    approval_evidence_status TEXT,
+    parent_document_id TEXT,
+    parent_section_ref TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -208,6 +264,14 @@ CREATE TABLE IF NOT EXISTS occurrences (
     mor_required INTEGER NOT NULL DEFAULT 0,
     mor_deadline TEXT,
     mor_submitted_at TEXT,
+    mor_assessed_by TEXT,
+    mor_assessed_at TEXT,
+    mor_assessment_reason TEXT,
+    followup_notes TEXT,
+    effectiveness_confirmed INTEGER NOT NULL DEFAULT 0,
+    no_new_hazards INTEGER NOT NULL DEFAULT 0,
+    closed_by TEXT,
+    closed_at TEXT,
     investigation_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -246,6 +310,11 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     likelihood TEXT NOT NULL DEFAULT 'possible',
     severity TEXT NOT NULL DEFAULT 'minor',
     risk_level TEXT NOT NULL DEFAULT 'medium',
+    risk_model TEXT NOT NULL DEFAULT 'sms_5x5',
+    exposure TEXT,
+    risk_score INTEGER,
+    scrutiny_required INTEGER NOT NULL DEFAULT 0,
+    flight_cancelled INTEGER NOT NULL DEFAULT 0,
     mitigation_measures TEXT,
     residual_risk TEXT,
     assessor_id TEXT NOT NULL,
@@ -256,6 +325,17 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- Many-to-many link between risk assessments and hazards (supports multiple hazards per assessment)
+CREATE TABLE IF NOT EXISTS risk_assessment_hazards (
+    assessment_id TEXT NOT NULL,
+    hazard_id TEXT NOT NULL,
+    PRIMARY KEY (assessment_id, hazard_id),
+    FOREIGN KEY (assessment_id) REFERENCES risk_assessments(assessment_id),
+    FOREIGN KEY (hazard_id) REFERENCES hazards(hazard_id)
+);
+CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_assessment ON risk_assessment_hazards(assessment_id);
+CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id);
 
 -- Investigations
 CREATE TABLE IF NOT EXISTS investigations (
@@ -321,6 +401,7 @@ CREATE TABLE IF NOT EXISTS roc_register (
     max_altitude_agl INTEGER,
     evlos_authorized INTEGER NOT NULL DEFAULT 0,
     dg_category TEXT,
+    authorized_registrations TEXT,
     notes TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -341,6 +422,7 @@ CREATE TABLE IF NOT EXISTS aircraft (
     weight_class TEXT,
     max_takeoff_weight_kg REAL,
     acquired_date TEXT,
+    opspec_authorized INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -496,6 +578,7 @@ CREATE TABLE IF NOT EXISTS corrective_actions (
     audit_id TEXT,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
+    finding_level TEXT NOT NULL DEFAULT 'level_2',
     root_cause TEXT,
     corrective_action TEXT,
     preventive_action TEXT,
@@ -550,6 +633,11 @@ CREATE TABLE IF NOT EXISTS dg_acceptance_checks (
     labeling_ok INTEGER NOT NULL DEFAULT 0,
     documentation_ok INTEGER NOT NULL DEFAULT 0,
     compatibility_ok INTEGER NOT NULL DEFAULT 0,
+    triple_packaging_ok INTEGER NOT NULL DEFAULT 1,
+    no_leakage_visual_ok INTEGER NOT NULL DEFAULT 1,
+    pic_weather_confirmed INTEGER NOT NULL DEFAULT 1,
+    crew_layers_unopened_confirmed INTEGER NOT NULL DEFAULT 1,
+    weight_within_limit_ok INTEGER NOT NULL DEFAULT 1,
     result TEXT NOT NULL DEFAULT 'pending',
     notes TEXT,
     created_at TEXT NOT NULL,
@@ -1045,11 +1133,161 @@ async def get_db():
     await db.execute("PRAGMA foreign_keys = ON")
     return db
 
+
+async def remove_shared_seed_passwords():
+    """Invalidate identical shared seed hashes from older installations once."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'auth_shared_seed_hash_migration'")
+        if await cursor.fetchone():
+            return
+        cursor = await db.execute(
+            """SELECT password_hash FROM users
+               WHERE password_hash IS NOT NULL
+               GROUP BY password_hash HAVING COUNT(*) > 1"""
+        )
+        shared_hashes = [row["password_hash"] for row in await cursor.fetchall()]
+        for shared_hash in shared_hashes:
+            await db.execute("UPDATE users SET password_hash = NULL, updated_at = ? WHERE password_hash = ?", (datetime.now().isoformat(), shared_hash))
+        await db.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("auth_shared_seed_hash_migration", "complete", datetime.now().isoformat()),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+# Owner-confirmed identity groups are keyed by immutable account IDs, never display names.
+# The first ID in each tuple remains the canonical user_id; all other IDs are retained as aliases.
+VERIFIED_IDENTITY_GROUPS = {
+    "u-admin": ("u-admin", "u-maintenance"),
+    "u-lib": ("u-lib", "u-quality", "u-records"),
+    "u-safety": ("u-safety", "u-security"),
+    "u-ops": ("u-ops", "u-chief-pilot", "u-training"),
+    "u-flight-ops": ("u-flight-ops", "u-dg"),
+}
+
+
+async def migrate_verified_identity_groups():
+    """Merge owner-verified seeded accounts without rewriting historical actor references."""
+    db = await get_db()
+    now = datetime.now().isoformat()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'auth_canonical_identity_migration'")
+        if await cursor.fetchone():
+            await db.rollback()
+            return
+
+        cursor = await db.execute("SELECT user_id, username, role, is_active FROM users")
+        all_users = [dict(row) for row in await cursor.fetchall()]
+        for user in all_users:
+            await db.execute("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)", (user["user_id"], user["role"]))
+            for historical_id in {user["user_id"], user["username"]}:
+                alias_cursor = await db.execute(
+                    "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?", (historical_id,)
+                )
+                existing_alias = await alias_cursor.fetchone()
+                if existing_alias and existing_alias["canonical_user_id"] not in (historical_id, user["user_id"]):
+                    raise RuntimeError(f"Historical identity {historical_id} maps to multiple accounts")
+                await db.execute(
+                    "INSERT INTO user_id_aliases (legacy_user_id, canonical_user_id, merged_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(legacy_user_id) DO UPDATE SET canonical_user_id = excluded.canonical_user_id",
+                    (historical_id, user["user_id"], now),
+                )
+
+        for canonical_id, member_ids in VERIFIED_IDENTITY_GROUPS.items():
+            placeholders = ",".join("?" for _ in member_ids)
+            cursor = await db.execute(f"SELECT * FROM users WHERE user_id IN ({placeholders})", member_ids)
+            members = [dict(row) for row in await cursor.fetchall()]
+            if not members:
+                continue
+            canonical = next((member for member in members if member["user_id"] == canonical_id), None)
+            if canonical is None:
+                raise RuntimeError(f"Cannot consolidate verified identity group; canonical account {canonical_id} is missing")
+            if not canonical["is_active"] and any(member["is_active"] for member in members if member["user_id"] != canonical_id):
+                raise RuntimeError(f"Cannot consolidate verified identity group into inactive account {canonical_id}")
+
+            hashes = {member["password_hash"] for member in members if member["password_hash"]}
+            if len(hashes) > 1:
+                raise RuntimeError(f"Cannot consolidate {canonical_id}: member accounts have different passwords; resolve credentials first")
+            password_hash = next(iter(hashes), None)
+
+            cursor = await db.execute(f"SELECT user_id, role FROM user_roles WHERE user_id IN ({placeholders})", member_ids)
+            roles = {row["role"] for row in await cursor.fetchall()}
+            roles.update(member["role"] for member in members)
+            if not roles:
+                raise RuntimeError(f"Cannot consolidate {canonical_id}: no authorized role assignments exist")
+
+            existing_roles = await db.execute_fetchall(
+                "SELECT role FROM user_roles WHERE user_id = ?", (canonical_id,)
+            )
+            if canonical["role"] not in {row["role"] for row in existing_roles}:
+                await db.execute("UPDATE users SET role = ? WHERE user_id = ?", (sorted(roles)[0], canonical_id))
+            await db.execute(
+                "UPDATE users SET password_hash = COALESCE(password_hash, ?), updated_at = ? WHERE user_id = ?",
+                (password_hash, now, canonical_id),
+            )
+            for role in roles:
+                await db.execute("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)", (canonical_id, role))
+
+            for member in members:
+                legacy_id = member["user_id"]
+                for historical_id in {legacy_id, member["username"]}:
+                    alias_cursor = await db.execute(
+                        "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?", (historical_id,)
+                    )
+                    existing_alias = await alias_cursor.fetchone()
+                    if existing_alias and existing_alias["canonical_user_id"] not in (historical_id, legacy_id, canonical_id):
+                        raise RuntimeError(f"Identity alias {historical_id} is already assigned to another canonical user")
+                    await db.execute(
+                        "INSERT INTO user_id_aliases (legacy_user_id, canonical_user_id, merged_at) VALUES (?, ?, ?) "
+                        "ON CONFLICT(legacy_user_id) DO UPDATE SET canonical_user_id = excluded.canonical_user_id",
+                        (historical_id, canonical_id, now),
+                    )
+                if legacy_id != canonical_id:
+                    await db.execute(
+                        "UPDATE users SET is_active = 0, merged_into_user_id = ?, updated_at = ? WHERE user_id = ?",
+                        (canonical_id, now, legacy_id),
+                    )
+                    await db.execute(
+                        "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?",
+                        (now, legacy_id),
+                    )
+                    await db.execute(
+                        "UPDATE auth_setup_tokens SET used_at = COALESCE(used_at, ?) WHERE user_id = ?",
+                        (now, legacy_id),
+                    )
+
+        await db.execute(
+            "UPDATE auth_sessions SET active_role = (SELECT role FROM users WHERE users.user_id = auth_sessions.user_id) "
+            "WHERE active_role IS NULL AND revoked_at IS NULL"
+        )
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('auth_canonical_identity_migration', 'complete', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = 'complete', updated_at = excluded.updated_at",
+            (now,),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
+        user_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
+        if "merged_into_user_id" not in user_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN merged_into_user_id TEXT")
+        session_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(auth_sessions)")).fetchall()}
+        if "active_role" not in session_columns:
+            await db.execute("ALTER TABLE auth_sessions ADD COLUMN active_role TEXT")
         await db.commit()
     finally:
         await db.close()
@@ -1102,17 +1340,119 @@ async def init_db():
                 await db.execute(f"ALTER TABLE document_proposals ADD COLUMN {column} {column_type}")
             except Exception:
                 pass
+        occurrence_columns = {
+            "mor_assessed_by": "TEXT",
+            "mor_assessed_at": "TEXT",
+            "mor_assessment_reason": "TEXT",
+            "followup_notes": "TEXT",
+            "effectiveness_confirmed": "INTEGER NOT NULL DEFAULT 0",
+            "no_new_hazards": "INTEGER NOT NULL DEFAULT 0",
+            "closed_by": "TEXT",
+            "closed_at": "TEXT",
+        }
+        for column, column_type in occurrence_columns.items():
+            try:
+                await db.execute(f"ALTER TABLE occurrences ADD COLUMN {column} {column_type}")
+            except Exception:
+                pass
+        doc_source_columns = {
+            "source_pdf_filename": "TEXT",
+            "source_sha256": "TEXT",
+            "source_issue_revision": "TEXT",
+            "source_issued_date": "TEXT",
+            "approval_evidence_status": "TEXT",
+            "parent_document_id": "TEXT",
+            "parent_section_ref": "TEXT",
+        }
+        for column, column_type in doc_source_columns.items():
+            try:
+                await db.execute(f"ALTER TABLE documents ADD COLUMN {column} {column_type}")
+            except Exception:
+                pass
+        try:
+            await db.execute("ALTER TABLE roc_register ADD COLUMN authorized_registrations TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE aircraft ADD COLUMN opspec_authorized INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        ra_columns = {
+            "risk_model": "TEXT NOT NULL DEFAULT 'sms_5x5'",
+            "exposure": "TEXT",
+            "risk_score": "INTEGER",
+            "scrutiny_required": "INTEGER NOT NULL DEFAULT 0",
+            "flight_cancelled": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, column_type in ra_columns.items():
+            try:
+                await db.execute(f"ALTER TABLE risk_assessments ADD COLUMN {column} {column_type}")
+            except Exception:
+                pass
+        # Migration: create risk_assessment_hazards junction table for existing databases
+        try:
+            await db.execute(
+                """CREATE TABLE IF NOT EXISTS risk_assessment_hazards (
+                    assessment_id TEXT NOT NULL,
+                    hazard_id TEXT NOT NULL,
+                    PRIMARY KEY (assessment_id, hazard_id),
+                    FOREIGN KEY (assessment_id) REFERENCES risk_assessments(assessment_id),
+                    FOREIGN KEY (hazard_id) REFERENCES hazards(hazard_id)
+                )"""
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_assessment ON risk_assessment_hazards(assessment_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id)"
+            )
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE corrective_actions ADD COLUMN finding_level TEXT NOT NULL DEFAULT 'level_2'")
+        except Exception:
+            pass
+        for col in (
+            "triple_packaging_ok",
+            "no_leakage_visual_ok",
+            "pic_weather_confirmed",
+            "crew_layers_unopened_confirmed",
+            "weight_within_limit_ok",
+        ):
+            try:
+                await db.execute(f"ALTER TABLE dg_acceptance_checks ADD COLUMN {col} INTEGER NOT NULL DEFAULT 1")
+            except Exception:
+                pass
+        # Onboarding columns
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE auth_setup_tokens ADD COLUMN purpose TEXT NOT NULL DEFAULT 'setup'")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE auth_setup_tokens ADD COLUMN invite_code TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_auth_setup_invite ON auth_setup_tokens(invite_code)")
+        except Exception:
+            pass
         await db.commit()
     finally:
         await db.close()
 
     # Seed data
     await seed_db()
+    await remove_shared_seed_passwords()
+    await migrate_verified_identity_groups()
     await apply_catalogue_corrections()
     await repair_manual_content_assignment()
 
 async def apply_catalogue_corrections():
-    """Keep controlled-document catalogue metadata aligned with the approved manual names."""
+    """Keep controlled-document catalogue metadata, source hashes, and OpSpec scope aligned with the approved manuals."""
     db = await get_db()
     try:
         now = datetime.now().isoformat()
@@ -1129,6 +1469,89 @@ async def apply_catalogue_corrections():
                    WHERE document_id = ?""",
                 (title, doc_class, description, now, "system", document_id),
             )
+        # Reconcile supplied approved PDFs and embedded OM sections (Phase 0)
+        source_manifest = [
+            (
+                "DOC-001", "published", "KFL 2021 COMPANY ABCD.pdf",
+                "92a2509879ca39aafd88e69a5a7cbfdfb536715753da674e27689b2929af07b3",
+                "Issue 1 Rev 0", "2021-01-01", "verified_certificate_2021_07_23", None, None,
+            ),
+            (
+                "DOC-002", "published", "KFL 2021 SAFETY.pdf",
+                "46b8d26ee14e952899a03d287fceee1a4fe0be9c193cb47047fca37ea5d01f8f",
+                "Issue 1 Rev 0", "2021-01-01", "verified_certificate_2021_07_23", None, None,
+            ),
+            (
+                "DOC-006", "published", "KFL REVISED SECURITY MANUAL.pdf",
+                "20efd7c392f8ffa0ab007b3f84a645709211bd9e62d252a71afb1dd11ba2bd03",
+                "Issue 1 Rev 0", "2021-01-01", "verified_certificate_2021_07_23", None, None,
+            ),
+            (
+                "DOC-012", "published", "KFL QUALITY.pdf",
+                "82dc4d547aa0ac1d2f27c693aa91e7c81dfd3a27994c5069e6524c4fc0e6463e",
+                "Issue 1 Rev 0", "2021-01-01", "verified_certificate_2021_07_23", None, None,
+            ),
+            (
+                "DOC-007", "published", "DANGEROUS GOODS MANUAL KFL 01 may 2025.pdf",
+                "90e06fac387de092a1144fdf598e93368068b6de5e978fa0bab315a89766b823",
+                "Issue 01 Rev 00", "2024-05-01", "pending_letter", None, None,
+            ),
+            (
+                "DOC-003", "published", None, None,
+                "Manufacturer / OpSpec referenced", None, "oem_and_opspec_referenced", "DOC-001", "OM + OEM specifications",
+            ),
+            (
+                "DOC-004", "published", "KFL 2021 COMPANY ABCD.pdf",
+                "92a2509879ca39aafd88e69a5a7cbfdfb536715753da674e27689b2929af07b3",
+                "Issue 1 Rev 0", "2021-01-01", "embedded_in_om_part_d", "DOC-001", "Part D",
+            ),
+            (
+                "DOC-005", "published", "KFL 2021 COMPANY ABCD.pdf",
+                "92a2509879ca39aafd88e69a5a7cbfdfb536715753da674e27689b2929af07b3",
+                "Issue 1 Rev 0", "2021-01-01", "embedded_in_om_part_b", "DOC-001", "Part B",
+            ),
+        ]
+        for (
+            doc_id, status_val, pdf_name, sha256_val, issue_rev,
+            issued_date, evidence_status, parent_doc, parent_sec,
+        ) in source_manifest:
+            await db.execute(
+                """UPDATE documents
+                   SET status = ?, source_pdf_filename = ?, source_sha256 = ?,
+                       source_issue_revision = ?, source_issued_date = ?,
+                       approval_evidence_status = ?, parent_document_id = ?,
+                       parent_section_ref = ?, updated_at = ?, updated_by = ?
+                   WHERE document_id = ?""",
+                (
+                    status_val, pdf_name, sha256_val, issue_rev, issued_date,
+                    evidence_status, parent_doc, parent_sec, now, "system", doc_id,
+                ),
+            )
+        # Synchronize signed 2021 KCAA certificate metadata on the 4 verified baseline versions
+        for ver_id in ("VER-DOC-001", "VER-DOC-002", "VER-DOC-006", "VER-DOC-012"):
+            await db.execute(
+                """UPDATE document_versions
+                   SET kcaa_approved = 1, kcaa_approved_by = 'KCAA',
+                       kcaa_approved_at = '2021-07-23',
+                       kcaa_reference = COALESCE(kcaa_reference, 'KCAA-CERT-2021-07-23')
+                   WHERE version_id = ?""",
+                (ver_id,),
+            )
+        # Reconcile ROC-001 7 OpSpec-listed registrations while preserving the 20-aircraft master fleet
+        opspec_regs = ("5Y-0029A", "5Y-0030A", "5Y-0042A", "5Y-0164A", "5Y-0600A", "5Y-0601A", "5Y-0602A")
+        await db.execute(
+            "UPDATE roc_register SET authorized_registrations = ? WHERE roc_id = 'ROC-001'",
+            (",".join(opspec_regs),),
+        )
+        await db.execute("UPDATE aircraft SET opspec_authorized = 0")
+        await db.execute(
+            f"UPDATE aircraft SET opspec_authorized = 1 WHERE registration IN ({','.join('?' for _ in opspec_regs)})",
+            opspec_regs,
+        )
+        await db.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("fdtl_validation_status", "configurable_application_defaults_pending_regulatory_clause_validation", now),
+        )
         await db.commit()
     finally:
         await db.close()
@@ -1190,27 +1613,28 @@ async def seed_db():
         now = now_dt.isoformat()
         two_years = (now_dt + timedelta(days=730)).strftime('%Y-%m-%d')
         six_months = (now_dt + timedelta(days=180)).strftime('%Y-%m-%d')
+        pw = None
         users = [
-            ("u-admin", "admin", "admin@kfl.aero", "Mohamed Alsayed", "system_admin", "IT", now, now),
-            ("u-lib", "librarian", "librarian@kfl.aero", "Eric Otieno", "librarian", "Quality", now, now),
-            ("u-quality", "quality", "quality@kfl.aero", "Eric Otieno", "head_quality", "Quality", now, now),
-            ("u-safety", "safety", "safety@kfl.aero", "Brian Swanya", "head_safety", "Safety", now, now),
-            ("u-security", "security", "security@kfl.aero", "Brian Swanya", "head_security", "Security", now, now),
-            ("u-ops", "ops", "ops@kfl.aero", "Utana Kinuthia", "head_operations", "Operations", now, now),
-            ("u-chief-pilot", "chief_pilot", "chiefpilot@kfl.aero", "Utana Kinuthia", "chief_pilot", "Operations", now, now),
-            ("u-flight-ops", "flight_ops", "flightops@kfl.aero", "Emmanuel Koome", "flight_ops_officer", "Operations", now, now),
-            ("u-training", "training", "training@kfl.aero", "Utana Kinuthia", "head_training", "Training", now, now),
-            ("u-maintenance", "maintenance", "maintenance@kfl.aero", "Mohamed Alsayed", "head_maintenance", "Maintenance", now, now),
-            ("u-dg", "dg_coordinator", "dg@kfl.aero", "Emmanuel Koome", "dg_coordinator", "Operations", now, now),
-            ("u-reporter", "reporter", "reporter@kfl.aero", "Occurrence Reporter", "occurrence_reporter", "Safety", now, now),
-            ("u-auditor", "auditor", "auditor@kfl.aero", "Independent Auditor", "independent_auditor", "Quality", now, now),
-            ("u-records", "records_custodian", "records@kfl.aero", "Eric Otieno", "records_custodian", "Quality", now, now),
-            ("u-accountable", "accountable", "accountable@kfl.aero", "Cleopa Otieno", "accountable_manager", "Executive", now, now),
+            ("u-admin", "admin", "admin@kfl.aero", "Mohamed Alsayed", "system_admin", "IT", now, now, pw),
+            ("u-lib", "librarian", "librarian@kfl.aero", "Eric Otieno", "librarian", "Quality", now, now, pw),
+            ("u-quality", "quality", "quality@kfl.aero", "Eric Otieno", "head_quality", "Quality", now, now, pw),
+            ("u-safety", "safety", "safety@kfl.aero", "Brian Swanya", "head_safety", "Safety", now, now, pw),
+            ("u-security", "security", "security@kfl.aero", "Brian Swanya", "head_security", "Security", now, now, pw),
+            ("u-ops", "ops", "ops@kfl.aero", "Utana Kinuthia", "head_operations", "Operations", now, now, pw),
+            ("u-chief-pilot", "chief_pilot", "chiefpilot@kfl.aero", "Utana Kinuthia", "chief_pilot", "Operations", now, now, pw),
+            ("u-flight-ops", "flight_ops", "flightops@kfl.aero", "Emmanuel Koome", "flight_ops_officer", "Operations", now, now, pw),
+            ("u-training", "training", "training@kfl.aero", "Utana Kinuthia", "head_training", "Training", now, now, pw),
+            ("u-maintenance", "maintenance", "maintenance@kfl.aero", "Mohamed Alsayed", "head_maintenance", "Maintenance", now, now, pw),
+            ("u-dg", "dg_coordinator", "dg@kfl.aero", "Emmanuel Koome", "dg_coordinator", "Operations", now, now, pw),
+            ("u-reporter", "reporter", "reporter@kfl.aero", "Occurrence Reporter", "occurrence_reporter", "Safety", now, now, pw),
+            ("u-auditor", "auditor", "auditor@kfl.aero", "Independent Auditor", "independent_auditor", "Quality", now, now, pw),
+            ("u-records", "records_custodian", "records@kfl.aero", "Eric Otieno", "records_custodian", "Quality", now, now, pw),
+            ("u-accountable", "accountable", "accountable@kfl.aero", "Cleopa Otieno", "accountable_manager", "Executive", now, now, pw),
         ]
         for u in users:
             await db.execute(
-                "INSERT INTO users (user_id, username, email, full_name, role, department, is_active, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?)",
-                (u[0], u[1], u[2], u[3], u[4], u[5], now, now),
+                "INSERT INTO users (user_id, username, email, full_name, role, department, is_active, password_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,1,?,?,?)",
+                (u[0], u[1], u[2], u[3], u[4], u[5], u[8], now, now),
             )
             await db.execute(
                 "INSERT INTO user_roles (user_id, role) VALUES (?, ?)",

@@ -1,6 +1,37 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+const TEST_USER = "safety";
+const TEST_PASSWORD = "TestPass1234!";
+
+async function login(page: any) {
+  await page.goto("/login");
+  await page.waitForLoadState("networkidle");
+  await page.fill('input[id="login-username"]', TEST_USER);
+  await page.fill('input[id="login-password"]', TEST_PASSWORD);
+  await page.click('button[type="submit"]:has-text("Sign in")');
+  // Wait for redirect away from login page
+  await page.waitForURL(url => url.pathname !== "/login");
+  // Wait for dashboard to load
+  await page.waitForURL("**/");
+}
+
+async function loginAsAdmin(page: any) {
+  // Clear existing session (beforeEach logs in as u-safety)
+  await page.context().clearCookies();
+  await page.goto("/login");
+  await page.waitForLoadState("networkidle");
+  await page.fill('input[id="login-username"]', "admin");
+  await page.fill('input[id="login-password"]', TEST_PASSWORD);
+  await page.click('button[type="submit"]:has-text("Sign in")');
+  await page.waitForURL(url => url.pathname !== "/login");
+  await page.waitForURL("**/");
+}
+
+test.beforeEach(async ({ page }) => {
+  await login(page);
+});
+
 test.describe("Dashboard", () => {
   test("loads dashboard with KPI cards", async ({ page }) => {
     await page.goto("/");
@@ -33,8 +64,8 @@ test.describe("Document Catalogue", () => {
 test.describe("Navigation", () => {
   test("sidebar navigation works", async ({ page }) => {
     await page.goto("/");
-    // Safety & Flight section is collapsed by default; expand it first
-    await page.getByRole("button", { name: "Safety & Flight" }).click();
+    // Flight section is collapsed by default; expand it first
+    await page.getByRole("button", { name: "Flight" }).click();
     await page.getByRole("link", { name: "Missions" }).click();
     await expect(page).toHaveURL(/\/missions/);
     await expect(page.getByRole("heading", { name: "Missions" })).toBeVisible();
@@ -58,10 +89,39 @@ test.describe("Navigation", () => {
   });
 
   test("system administrator observability page loads", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/admin/observability");
     await expect(page.getByRole("heading", { name: "System Observability" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Role matrix" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "system_admin" }).first()).toBeVisible();
+  });
+
+  test("canonical role editor preserves IDs and submits only assigned roles", async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto("/admin/observability");
+    await expect(page.getByRole("heading", { name: "System Observability" })).toBeVisible();
+
+    const roleSelect = page.locator("#roles-u-lib");
+    await expect(roleSelect).toBeVisible();
+    const selectedRoles = await roleSelect.evaluate((select: HTMLSelectElement) =>
+      Array.from(select.selectedOptions, (option) => option.value).sort(),
+    );
+    expect(selectedRoles).toEqual(["head_quality", "librarian", "records_custodian"]);
+
+    const results = await new AxeBuilder({ page })
+      .exclude("iframe")
+      .disableRules(["color-contrast"])
+      .analyze();
+    const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
+    expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
+
+    const updateResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/p0/auth/users/u-lib/roles") && response.request().method() === "PUT",
+    );
+    await page.getByRole("button", { name: "Save roles for Eric Otieno" }).click();
+    const response = await updateResponse;
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toMatchObject({ user_id: "u-lib", active_sessions_revoked: false });
   });
 
   test("document editor exposes a draggable toolbar", async ({ page }) => {
@@ -121,6 +181,7 @@ test.describe("Navigation", () => {
   });
 
   test("submitting a proposal clears pending editor suggestions", async ({ page }) => {
+    await loginAsAdmin(page);
     const marker = `proposal-submit-${Date.now()}`;
     await page.goto("/documents/DOC-012/edit");
     const editor = page.locator('[contenteditable="true"]');
@@ -191,15 +252,24 @@ test.describe("Risk Assessments", () => {
     await expect(page.locator("body")).toBeVisible();
   });
 
-  test("can create a risk assessment", async ({ page }) => {
+  test("can create a risk assessment with multiple hazards", async ({ page }) => {
     await page.goto("/risk-assessments");
     await page.click("text=New Assessment");
     await page.waitForSelector('input[placeholder="Assessment title"]');
-    await page.fill('input[placeholder="Assessment title"]', "E2E Test Risk Assessment");
-    await page.fill('textarea[placeholder="Describe the risk scenario"]', "A test risk assessment for E2E validation");
+    await page.fill('input[placeholder="Assessment title"]', "E2E Multi-Hazard Risk Assessment");
+    await page.fill('textarea[placeholder="Describe the risk scenario"]', "A test risk assessment with multiple hazards");
+
+    // Add multiple hazards (using seeded hazard IDs)
+    await page.fill('input[placeholder="e.g. HAZ-001"]', "HAZ-SEED-001");
+    await page.click("text=Add");
+    await page.fill('input[placeholder="e.g. HAZ-001"]', "HAZ-SEED-002");
+    await page.press('input[placeholder="e.g. HAZ-001"]', "Enter");
+
     await page.click("text=Submit Assessment");
-    await page.waitForTimeout(1500);
-    await expect(page.locator("table").locator("text=E2E Test Risk Assessment").first()).toBeVisible({ timeout: 8000 });
+    // Wait for the new assessment to appear in the table
+    await expect(page.locator("table").locator("text=E2E Multi-Hazard Risk Assessment").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("text=HAZ-SEED-001").first()).toBeVisible();
+    await expect(page.locator("text=HAZ-SEED-002").first()).toBeVisible();
   });
 });
 
@@ -408,4 +478,33 @@ test.describe("Accessibility", () => {
       expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
     });
   }
+});
+
+test.describe("Profile & Role Switching", () => {
+  test("profile settings page loads for any user", async ({ page }) => {
+    await page.goto("/account/profile");
+    await expect(page.getByRole("heading", { name: "Profile Settings" })).toBeVisible();
+    await expect(page.locator("text=Canonical ID")).toBeVisible();
+    await expect(page.locator("text=Active Role").first()).toBeVisible();
+  });
+
+  test("sidebar shows separate Safety and Flight sections", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "Safety" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Flight" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Safety & Flight" })).toHaveCount(0);
+  });
+
+  test("sidebar shows Personnel and Aircraft as separate sections", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "Personnel" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Aircraft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Personnel & Aircraft" })).toHaveCount(0);
+  });
+
+  test("system observability is a direct nav link, not a collapsed menu", async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto("/admin/observability");
+    await expect(page.getByRole("heading", { name: "System Observability" })).toBeVisible();
+  });
 });

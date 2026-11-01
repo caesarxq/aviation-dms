@@ -12,6 +12,7 @@ import hashlib
 from .database import get_db
 from .audit import log_audit_event
 from .rbac import has_permission
+from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
 
 router = APIRouter()
@@ -22,11 +23,11 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _actor(request: Request) -> str:
-    return getattr(request.state, "actor", "admin")
+    return getattr(request.state, "actor", "")
 
 
 def _role(request: Request) -> str:
-    return getattr(request.state, "role", "system_admin")
+    return getattr(request.state, "role", "")
 
 
 def _check(request: Request, perm: str):
@@ -227,7 +228,7 @@ async def update_proposal(proposal_id: str, request: Request):
         actor = _actor(request)
         # SoD: proposer cannot approve/reject/defer their own proposal
         if "status" in body and body["status"] in ("approved", "rejected", "deferred"):
-            if dict(row)["proposer_id"] == actor:
+            if same_principal(request, dict(row)["proposer_id"]):
                 raise HTTPException(status_code=403, detail="SoD: proposer cannot review own proposal")
         now = now_iso()
         updates = []

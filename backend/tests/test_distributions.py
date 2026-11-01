@@ -33,6 +33,21 @@ class TestDistributions:
         assert resp.status_code == 200
         assert resp.json()["status"] == "acknowledged"
 
+    def test_non_recipient_cannot_acknowledge_other_holders_distribution(self, client, admin_headers):
+        payload = {"version_id": "VER-DOC-001", "recipient_id": "u-chief-pilot", "channel": "email"}
+        create = client.post("/api/p0/distributions", json=payload, headers=admin_headers)
+        dist_id = create.json()["distribution_id"]
+        wrong_actor = client.post(
+            f"/api/p0/distributions/{dist_id}/acknowledge",
+            headers={"X-Role": "flight_ops_officer", "X-Actor": "u-flight-ops"},
+        )
+        assert wrong_actor.status_code == 403
+        holder = client.post(
+            f"/api/p0/distributions/{dist_id}/acknowledge",
+            headers={"X-Role": "chief_pilot", "X-Actor": "u-chief-pilot"},
+        )
+        assert holder.status_code == 200
+
     def test_unauthorized_access_denied(self, client):
         resp = client.get("/api/p0/distributions", headers={"X-Role": "system_admin", "X-Actor": "nonexistent"})
         assert resp.status_code in (401, 403)

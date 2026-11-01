@@ -45,6 +45,36 @@ class Classification(str, Enum):
     S4 = "S4"
 
 
+class AuthLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthBootstrapRequest(BaseModel):
+    bootstrap_token: Optional[str] = None
+    password: str
+
+
+class AuthPasswordSetupRequest(BaseModel):
+    username: Optional[str] = None
+    setup_token: Optional[str] = None
+    invite_code: Optional[str] = None
+    password: str
+
+
+class AuthPasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AuthActiveRoleRequest(BaseModel):
+    active_role: str
+
+
+class AuthUserRolesUpdate(BaseModel):
+    roles: List[str]
+
+
 class DocumentCreate(BaseModel):
     title: str
     doc_class: str
@@ -79,6 +109,13 @@ class DocumentResponse(BaseModel):
     current_version_id: Optional[str] = None
     kcaa_approval_required: bool = False
     review_due_date: Optional[str] = None
+    source_pdf_filename: Optional[str] = None
+    source_sha256: Optional[str] = None
+    source_issue_revision: Optional[str] = None
+    source_issued_date: Optional[str] = None
+    approval_evidence_status: Optional[str] = None
+    parent_document_id: Optional[str] = None
+    parent_section_ref: Optional[str] = None
     created_at: str
     updated_at: str
     created_by: str
@@ -251,3 +288,38 @@ class DocumentContentResponse(BaseModel):
     kcaa_approved: int = 0
     created_at: str
     updated_at: str
+
+
+# --- Onboarding ---
+
+class AuthInviteRequest(BaseModel):
+    username: str
+    email: Optional[str] = None
+    roles: Optional[List[str]] = None
+
+
+class AuthInviteResponse(BaseModel):
+    invite_code: str
+    setup_url: str
+    expires_at: str
+
+
+class AuthForgotPasswordRequest(BaseModel):
+    username: str
+
+
+class AuthResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+
+class AuthOnboardingResponse(BaseModel):
+    onboarding_completed: bool
+    assigned_roles: List[str]
+    active_role: str
+    canonical_user_id: str
+    full_name: str
+
+
+class AuthOnboardingCompleteRequest(BaseModel):
+    pass

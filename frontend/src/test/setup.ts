@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, expect as vitestExpect } from 'vitest';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -22,3 +22,20 @@ if (typeof window !== 'undefined' && typeof window.localStorage?.clear !== 'func
 afterEach(() => {
   cleanup();
 });
+
+if (typeof (globalThis as any).expect === 'undefined') {
+  Object.defineProperty(globalThis, 'expect', { value: vitestExpect, writable: true, configurable: true });
+}
+
+if (typeof (globalThis as any).jest === 'undefined') {
+  Object.defineProperty(globalThis, 'jest', {
+    value: {
+      mock: () => {},
+      spyOn: () => ({ mockImplementation: () => ({}) }),
+      fn: () => ({ mockImplementation: () => ({}) }),
+      restoreAllMocks: () => {},
+    },
+    writable: true,
+    configurable: true,
+  });
+}
