@@ -92,6 +92,15 @@ describe("AppShell authentication screens", () => {
     expect(switchRole).toHaveBeenCalledWith("head_quality");
   });
 
+  it("keeps account and session controls in a labeled mobile utility panel", () => {
+    renderShell(async () => {});
+    const utilities = screen.getByRole("region", { name: "Account and session controls" });
+    expect(utilities).toHaveClass("mobile-session-controls");
+    expect(utilities).toContainElement(screen.getByRole("link", { name: "Account security" }));
+    expect(utilities).toContainElement(screen.getByRole("link", { name: "Profile settings" }));
+    expect(utilities).toContainElement(screen.getByRole("button", { name: "Sign out" }));
+  });
+
   it("shows only screens and utility links allowed to records custodians", async () => {
     renderShell(async () => {});
 

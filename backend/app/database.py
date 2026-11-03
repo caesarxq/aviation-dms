@@ -117,12 +117,31 @@ CREATE TABLE IF NOT EXISTS document_versions (
     kcaa_approved_at TEXT,
     published_at TEXT,
     kcaa_reference TEXT,
+    kcaa_evidence_sha256 TEXT,
+    kcaa_evidence_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL,
     updated_by TEXT NOT NULL,
     FOREIGN KEY (document_id) REFERENCES documents(document_id)
 );
+
+CREATE TABLE IF NOT EXISTS kcaa_approval_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    version_id TEXT NOT NULL,
+    reference TEXT NOT NULL,
+    stored_filename TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL CHECK (length(file_sha256) = 64),
+    file_size INTEGER NOT NULL CHECK (file_size > 0),
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified')),
+    verified_by TEXT,
+    verified_at TEXT,
+    FOREIGN KEY (version_id) REFERENCES document_versions(version_id)
+);
+CREATE INDEX IF NOT EXISTS idx_kcaa_evidence_version ON kcaa_approval_evidence(version_id, status);
 
 -- Change requests
 CREATE TABLE IF NOT EXISTS change_requests (
@@ -352,6 +371,47 @@ CREATE TABLE IF NOT EXISTS investigations (
     updated_at TEXT NOT NULL
 );
 
+-- Audit engagements (external/internal audits, e.g. SS-KFL-SEP 2026)
+CREATE TABLE IF NOT EXISTS audit_reports (
+    audit_id TEXT PRIMARY KEY,
+    audit_number TEXT UNIQUE NOT NULL,
+    audit_date TEXT NOT NULL,
+    auditor_id TEXT NOT NULL,
+    auditee_id TEXT NOT NULL,
+    scope TEXT,
+    regulatory_basis TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    evidence_file TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (auditor_id) REFERENCES users(user_id),
+    FOREIGN KEY (auditee_id) REFERENCES users(user_id)
+);
+
+-- Individual findings from an audit engagement
+CREATE TABLE IF NOT EXISTS audit_findings (
+    finding_id TEXT PRIMARY KEY,
+    audit_id TEXT NOT NULL,
+    finding_number TEXT NOT NULL,
+    area TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    regulatory_reference TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    corrective_action_id TEXT,
+    due_date TEXT,
+    closed_at TEXT,
+    closed_by TEXT,
+    closure_evidence TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (audit_id) REFERENCES audit_reports(audit_id),
+    FOREIGN KEY (corrective_action_id) REFERENCES corrective_actions(car_id)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_findings_audit ON audit_findings(audit_id);
+CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status);
+
 -- Safety actions
 CREATE TABLE IF NOT EXISTS safety_actions (
     action_id TEXT PRIMARY KEY,
@@ -556,8 +616,8 @@ CREATE TABLE IF NOT EXISTS quality_audits (
     updated_by TEXT NOT NULL
 );
 
--- Audit Findings
-CREATE TABLE IF NOT EXISTS audit_findings (
+-- Findings from the internal quality-audit programme (P1)
+CREATE TABLE IF NOT EXISTS quality_audit_findings (
     finding_id TEXT PRIMARY KEY,
     audit_id TEXT NOT NULL,
     finding_type TEXT NOT NULL DEFAULT 'observation',
@@ -568,6 +628,8 @@ CREATE TABLE IF NOT EXISTS audit_findings (
     status TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'system',
+    updated_by TEXT NOT NULL DEFAULT 'system',
     FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
 );
 
@@ -593,12 +655,12 @@ CREATE TABLE IF NOT EXISTS corrective_actions (
     updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL,
     updated_by TEXT NOT NULL,
-    FOREIGN KEY (finding_id) REFERENCES audit_findings(finding_id),
+    FOREIGN KEY (finding_id) REFERENCES quality_audit_findings(finding_id),
     FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_audits_status ON quality_audits(status);
-CREATE INDEX IF NOT EXISTS idx_findings_audit ON audit_findings(audit_id);
+CREATE INDEX IF NOT EXISTS idx_quality_findings_audit ON quality_audit_findings(audit_id);
 CREATE INDEX IF NOT EXISTS idx_cars_status ON corrective_actions(status);
 -- Dangerous Goods (P1 Phase 5)
 CREATE TABLE IF NOT EXISTS dg_shipments (
@@ -1134,6 +1196,66 @@ async def get_db():
     return db
 
 
+async def _install_mutation_audit_triggers(db: aiosqlite.Connection) -> None:
+    """Record persisted table changes atomically without requiring custom SQLite functions."""
+    stale_cursor = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'audit_mutation_%'"
+    )
+    for row in await stale_cursor.fetchall():
+        trigger_name = row["name"].replace('"', '""')
+        await db.execute(f'DROP TRIGGER IF EXISTS "{trigger_name}"')
+    tables_cursor = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('audit_events', 'auth_sessions')"
+    )
+    table_names = [row["name"] for row in await tables_cursor.fetchall()]
+    insert_actor_columns = (
+        "created_by", "actor_id", "reported_by", "reporter_id", "assessor_id", "reviewed_by",
+        "approved_by", "verified_by", "closed_by", "submitted_by", "resolved_by", "acknowledged_by",
+        "identified_by", "imposed_by", "released_by", "uploaded_by", "requested_by", "assigned_by",
+        "published_by", "accepted_by",
+    )
+    for table_name in table_names:
+        escaped_table = table_name.replace('"', '""')
+        info_cursor = await db.execute(f'PRAGMA table_info("{escaped_table}")')
+        columns = await info_cursor.fetchall()
+        column_names = {row["name"] for row in columns}
+        primary_keys = sorted((row for row in columns if row["pk"]), key=lambda row: row["pk"])
+        if not primary_keys:
+            continue
+        if len(primary_keys) == 1:
+            key_expr = f'CAST(NEW."{primary_keys[0]["name"]}" AS TEXT)'
+            old_key_expr = f'CAST(OLD."{primary_keys[0]["name"]}" AS TEXT)'
+        else:
+            key_expr = " || ':' || ".join(f'CAST(NEW."{row["name"]}" AS TEXT)' for row in primary_keys)
+            old_key_expr = " || ':' || ".join(f'CAST(OLD."{row["name"]}" AS TEXT)' for row in primary_keys)
+        available_insert_actors = [column for column in insert_actor_columns if column in column_names]
+        new_actor = "COALESCE(" + ", ".join(f'NEW."{column}"' for column in available_insert_actors) + ", 'system')" if available_insert_actors else "'system'"
+        updated_actor_column = "updated_by" if "updated_by" in column_names else ("actor_id" if "actor_id" in column_names else None)
+        update_actor = f'COALESCE(NEW."{updated_actor_column}", \'system\')' if updated_actor_column else "'system'"
+        deleted_actor_column = "deleted_by" if "deleted_by" in column_names else None
+        old_actor = f'COALESCE(OLD."{deleted_actor_column}", \'system\')' if deleted_actor_column else "'system'"
+        escaped_name = table_name.replace('"', '""')
+        for operation, action in (("INSERT", "row_inserted"), ("UPDATE", "row_updated"), ("DELETE", "row_deleted")):
+            trigger_name = f"audit_mutation_{table_name}_{operation.lower()}".replace('"', '""')
+            entity_key_expr = old_key_expr if operation == "DELETE" else key_expr
+            actor_expr = old_actor if operation == "DELETE" else (update_actor if operation == "UPDATE" else new_actor)
+            sql = f'''CREATE TRIGGER IF NOT EXISTS "{trigger_name}"
+                AFTER {operation} ON "{escaped_name}"
+                BEGIN
+                    INSERT INTO audit_events
+                        (event_id, entity_type, entity_id, action, actor_id, details, timestamp)
+                    VALUES
+                        ('EVT-DB-' || lower(hex(randomblob(12))),
+                         '{table_name.replace("'", "''")}',
+                         {entity_key_expr},
+                         '{action}',
+                         {actor_expr},
+                         '{{"source":"database_trigger","operation":"{operation.lower()}"}}',
+                         strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+                END'''
+            await db.execute(sql)
+
+
 async def remove_shared_seed_passwords():
     """Invalidate identical shared seed hashes from older installations once."""
     db = await get_db()
@@ -1277,11 +1399,336 @@ async def migrate_verified_identity_groups():
         await db.close()
 
 
+
+
+async def _table_columns(db, table_name):
+    rows = await (await db.execute(f"PRAGMA table_info({table_name})")).fetchall()
+    return {row["name"] for row in rows}
+
+
+async def _audit_parent_exists(db, table, audit_id):
+    cursor = await db.execute(f"SELECT 1 FROM {table} WHERE audit_id = ?", (audit_id,))
+    return await cursor.fetchone() is not None
+
+
+async def _create_external_audit_findings(db):
+    await db.execute(
+        """CREATE TABLE audit_findings (
+            finding_id TEXT PRIMARY KEY,
+            audit_id TEXT NOT NULL,
+            finding_number TEXT NOT NULL,
+            area TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            regulatory_reference TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            corrective_action_id TEXT,
+            due_date TEXT,
+            closed_at TEXT,
+            closed_by TEXT,
+            closure_evidence TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (audit_id) REFERENCES audit_reports(audit_id),
+            FOREIGN KEY (corrective_action_id) REFERENCES corrective_actions(car_id)
+        )"""
+    )
+    await db.execute("CREATE INDEX idx_audit_findings_audit ON audit_findings(audit_id)")
+    await db.execute("CREATE INDEX idx_audit_findings_status ON audit_findings(status)")
+
+
+async def _preserve_quality_finding(db, item):
+    finding_id = item["finding_id"]
+    audit_id = item["audit_id"]
+    if not await _audit_parent_exists(db, "quality_audits", audit_id):
+        raise RuntimeError(f"cannot classify legacy audit finding {finding_id}: no matching quality audit {audit_id}")
+    if await _audit_parent_exists(db, "audit_reports", audit_id):
+        raise RuntimeError(f"cannot classify legacy audit finding {finding_id}: audit_id exists in both audit systems")
+    columns = ("finding_id", "audit_id", "finding_type", "description", "severity", "root_cause", "evidence", "status", "created_at", "updated_at")
+    expected = tuple(item.get(column) for column in columns)
+    existing = await (await db.execute(
+        "SELECT finding_id, audit_id, finding_type, description, severity, root_cause, evidence, status, created_at, updated_at FROM quality_audit_findings WHERE finding_id = ?",
+        (finding_id,),
+    )).fetchone()
+    if existing and tuple(existing) != expected:
+        raise RuntimeError(f"cannot preserve legacy audit finding {finding_id}: conflicting quality finding id")
+    if not existing:
+        await db.execute(
+            """INSERT INTO quality_audit_findings
+               (finding_id, audit_id, finding_type, description, severity, root_cause, evidence, status, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""", expected,
+        )
+
+
+def _has_external_finding_shape(item) -> bool:
+    return (
+        all(item.get(column) not in (None, "") for column in ("finding_number", "area", "title"))
+        and item.get("level") is not None
+    )
+
+
+def _is_defaulted_external_finding(item) -> bool:
+    """Recognize P3 rows in a widened legacy table when P1 columns only hold defaults."""
+    return (
+        _has_external_finding_shape(item)
+        and item.get("finding_type") == "observation"
+        and item.get("severity") == "minor"
+        and item.get("root_cause") is None
+        and item.get("evidence") is None
+    )
+
+
+async def _migrate_legacy_quality_findings(db):
+    columns = await _table_columns(db, "audit_findings")
+    records = await (await db.execute("SELECT * FROM audit_findings ORDER BY finding_id")).fetchall()
+    internal_columns = {"finding_id", "audit_id", "finding_type", "description", "severity", "status", "created_at", "updated_at"}
+    if "finding_number" not in columns:
+        if not internal_columns <= columns:
+            if records:
+                raise RuntimeError(f"cannot safely interpret legacy audit_findings rows: legacy columns are incomplete ({', '.join(sorted(columns))})")
+            return True
+        unexpected = columns - internal_columns - {"root_cause", "evidence"}
+        for row in records:
+            item = dict(row)
+            if any(item.get(column) is not None for column in unexpected):
+                raise RuntimeError(f"cannot safely migrate legacy audit finding {item['finding_id']}: unrecognized populated fields")
+            await _preserve_quality_finding(db, item)
+        return True
+
+    # Some transitional installations widened the shared table and accepted both shapes.
+    # Move quality rows first; external rows remain in audit_findings and are rebuilt below.
+    if internal_columns <= columns:
+        for row in records:
+            item = dict(row)
+            if item.get("finding_type") is None:
+                continue
+            quality_parent = await _audit_parent_exists(db, "quality_audits", item["audit_id"])
+            external_parent = await _audit_parent_exists(db, "audit_reports", item["audit_id"])
+            if _has_external_finding_shape(item):
+                if external_parent and _is_defaulted_external_finding(item):
+                    # External seed rows omitted P1-only columns, so table defaults must not
+                    # reclassify them as internal quality findings during the split.
+                    continue
+                if not external_parent:
+                    raise RuntimeError(
+                        f"cannot classify legacy audit finding {item['finding_id']}: external finding shape has no audit report"
+                    )
+                raise RuntimeError(
+                    f"cannot classify legacy audit finding {item['finding_id']}: external finding has non-defaulted P1 fields"
+                )
+            if quality_parent:
+                await _preserve_quality_finding(db, item)
+                await db.execute("DELETE FROM audit_findings WHERE finding_id = ?", (item["finding_id"],))
+            elif not external_parent:
+                raise RuntimeError(f"cannot classify legacy audit finding {item['finding_id']}: no matching audit parent")
+            else:
+                raise RuntimeError(f"cannot classify legacy audit finding {item['finding_id']}: internal fields conflict with external audit parent")
+    return False
+
+
+async def _rebuild_corrective_actions_finding_fk(db):
+    fks = await (await db.execute("PRAGMA foreign_key_list(corrective_actions)")).fetchall()
+    if any(row["table"] == "quality_audit_findings" and row["from"] == "finding_id" and row["to"] == "finding_id" for row in fks):
+        return
+
+    columns = await _table_columns(db, "corrective_actions")
+    records = await (await db.execute("SELECT * FROM corrective_actions ORDER BY car_id")).fetchall()
+    required = ("car_id", "title", "description", "owner_id", "created_at", "updated_at", "created_by", "updated_by")
+    for row in records:
+        item = dict(row)
+        if any(item.get(column) is None for column in required):
+            raise RuntimeError(f"cannot safely migrate corrective action {item.get('car_id')}: required field is missing")
+        finding_id = item.get("finding_id")
+        if finding_id and not await (await db.execute(
+            "SELECT 1 FROM quality_audit_findings WHERE finding_id = ?", (finding_id,)
+        )).fetchone():
+            raise RuntimeError(
+                f"cannot safely migrate corrective action {item['car_id']}: quality finding {finding_id} does not exist"
+            )
+        audit_id = item.get("audit_id")
+        if audit_id and not await _audit_parent_exists(db, "quality_audits", audit_id):
+            raise RuntimeError(
+                f"cannot safely migrate corrective action {item['car_id']}: quality audit {audit_id} does not exist"
+            )
+
+    await db.execute(
+        """CREATE TABLE corrective_actions__new (
+            car_id TEXT PRIMARY KEY,
+            finding_id TEXT,
+            audit_id TEXT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            finding_level TEXT NOT NULL DEFAULT 'level_2',
+            root_cause TEXT,
+            corrective_action TEXT,
+            preventive_action TEXT,
+            owner_id TEXT NOT NULL,
+            due_date TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            verification TEXT,
+            verified_by TEXT,
+            verified_at TEXT,
+            closed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            updated_by TEXT NOT NULL,
+            FOREIGN KEY (finding_id) REFERENCES quality_audit_findings(finding_id),
+            FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
+        )"""
+    )
+    copy_columns = (
+        "car_id", "finding_id", "audit_id", "title", "description", "finding_level", "root_cause",
+        "corrective_action", "preventive_action", "owner_id", "due_date", "status", "verification",
+        "verified_by", "verified_at", "closed_at", "created_at", "updated_at", "created_by", "updated_by",
+    )
+    extra_columns = columns - set(copy_columns)
+    for row in records:
+        item = dict(row)
+        if any(item.get(column) is not None for column in extra_columns):
+            raise RuntimeError(f"cannot safely migrate corrective action {item['car_id']}: unrecognized populated fields")
+    for row in records:
+        item = dict(row)
+        values = [item.get(column) for column in copy_columns]
+        if "finding_level" not in columns:
+            values[5] = "level_2"
+        await db.execute(
+            f"INSERT INTO corrective_actions__new ({', '.join(copy_columns)}) VALUES ({','.join('?' for _ in copy_columns)})",
+            values,
+        )
+    await db.execute("DROP INDEX IF EXISTS idx_cars_status")
+    await db.execute("DROP TABLE corrective_actions")
+    await db.execute("ALTER TABLE corrective_actions__new RENAME TO corrective_actions")
+    await db.execute("CREATE INDEX idx_cars_status ON corrective_actions(status)")
+
+
+async def _rebuild_external_audit_findings(db):
+    columns = await _table_columns(db, "audit_findings")
+    if "finding_number" not in columns:
+        return
+    fks = await (await db.execute("PRAGMA foreign_key_list(audit_findings)")).fetchall()
+    correct_audit_fk = any(row["table"] == "audit_reports" and row["from"] == "audit_id" and row["to"] == "audit_id" for row in fks)
+    correct_car_fk = any(row["table"] == "corrective_actions" and row["from"] == "corrective_action_id" and row["to"] == "car_id" for row in fks)
+    has_closure_evidence = "closure_evidence" in columns
+    known_columns = {
+        "finding_id", "audit_id", "finding_number", "area", "level", "title", "description",
+        "regulatory_reference", "status", "corrective_action_id", "due_date", "closed_at", "closed_by",
+        "closure_evidence", "created_at", "updated_at",
+    }
+    extra_columns = columns - known_columns
+    if correct_audit_fk and correct_car_fk and has_closure_evidence and not extra_columns:
+        return
+
+    records = await (await db.execute("SELECT * FROM audit_findings ORDER BY finding_id")).fetchall()
+    legacy_p1_columns = {"finding_type", "severity", "root_cause", "evidence"}
+    unknown_extra_columns = extra_columns - legacy_p1_columns
+    for row in records:
+        item = dict(row)
+        fid = item.get("finding_id")
+        if any(item.get(column) is not None for column in unknown_extra_columns):
+            raise RuntimeError(f"cannot safely migrate external audit finding {fid}: unrecognized populated fields")
+        populated_p1_columns = any(item.get(column) is not None for column in extra_columns & legacy_p1_columns)
+        if populated_p1_columns and not _is_defaulted_external_finding(item):
+            raise RuntimeError(f"cannot safely migrate external audit finding {fid}: P1 fields contain non-defaulted data")
+        mandatory = ("finding_id", "audit_id", "finding_number", "area", "level", "title", "description", "created_at", "updated_at")
+        if any(item.get(column) is None for column in mandatory):
+            raise RuntimeError(f"cannot safely migrate external audit finding {fid}: required field is missing")
+        if not await _audit_parent_exists(db, "audit_reports", item["audit_id"]):
+            raise RuntimeError(f"cannot safely migrate external audit finding {fid}: audit report {item['audit_id']} does not exist")
+        car_id = item.get("corrective_action_id")
+        if car_id:
+            car = await (await db.execute("SELECT 1 FROM corrective_actions WHERE car_id = ?", (car_id,))).fetchone()
+            if not car:
+                raise RuntimeError(
+                    f"cannot safely migrate external audit finding {fid}: corrective action {car_id} has no matching corrective_actions.car_id"
+                )
+
+    await db.execute("DROP INDEX IF EXISTS idx_audit_findings_audit")
+    await db.execute("DROP INDEX IF EXISTS idx_audit_findings_status")
+    await db.execute("ALTER TABLE audit_findings RENAME TO audit_findings__upgrade")
+    await _create_external_audit_findings(db)
+    for row in records:
+        item = dict(row)
+        values = tuple(item.get(key) for key in (
+            "finding_id", "audit_id", "finding_number", "area", "level", "title", "description",
+            "regulatory_reference", "status", "corrective_action_id", "due_date", "closed_at", "closed_by",
+            "closure_evidence", "created_at", "updated_at",
+        ))
+        await db.execute(
+            """INSERT INTO audit_findings
+               (finding_id, audit_id, finding_number, area, level, title, description, regulatory_reference,
+                status, corrective_action_id, due_date, closed_at, closed_by, closure_evidence, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", values,
+        )
+    await db.execute("DROP TABLE audit_findings__upgrade")
+
+
+async def migrate_audit_schema(db):
+    """Separate legacy audit records and validate all rebuilt audit foreign keys atomically."""
+    await db.execute("PRAGMA foreign_keys = OFF")
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        legacy_quality_table = await _migrate_legacy_quality_findings(db)
+        await _rebuild_corrective_actions_finding_fk(db)
+        if legacy_quality_table:
+            await db.execute("DROP TABLE audit_findings")
+            await _create_external_audit_findings(db)
+        await _rebuild_external_audit_findings(db)
+        for table in ("audit_findings", "corrective_actions"):
+            violations = await (await db.execute(f"PRAGMA foreign_key_check({table})")).fetchall()
+            if violations:
+                raise RuntimeError(f"audit schema migration left invalid foreign keys in {table}: {tuple(violations[0])}")
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.execute("PRAGMA foreign_keys = ON")
+
+
+async def _ensure_unique_mission_lifecycle_indexes(db: aiosqlite.Connection) -> None:
+    """Enforce one flight release and one post-flight report per mission.
+
+    Existing duplicates are preserved and make startup fail closed for manual
+    reconciliation; the migration never chooses or deletes a record silently.
+    """
+    for table_name, index_name in (
+        ("flight_releases", "idx_flight_releases_mission_unique"),
+        ("post_flight_reports", "idx_post_flight_reports_mission_unique"),
+    ):
+        duplicate = await (await db.execute(
+            f"SELECT mission_id, COUNT(*) AS row_count FROM {table_name} "
+            "GROUP BY mission_id HAVING COUNT(*) > 1 LIMIT 1"
+        )).fetchone()
+        if duplicate:
+            raise RuntimeError(
+                f"Cannot enforce one {table_name} row per mission: duplicate {table_name} rows "
+                f"for mission {duplicate['mission_id']} ({duplicate['row_count']} rows); reconcile before startup"
+            )
+        await db.execute(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(mission_id)"
+        )
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = await get_db()
     try:
         await db.executescript(SCHEMA)
+        await _ensure_unique_mission_lifecycle_indexes(db)
+        version_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(document_versions)")).fetchall()}
+        if "kcaa_evidence_sha256" not in version_columns:
+            await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_evidence_sha256 TEXT")
+        if "kcaa_evidence_id" not in version_columns:
+            await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_evidence_id TEXT")
+        await migrate_audit_schema(db)
+        quality_finding_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(quality_audit_findings)")).fetchall()}
+        for column in ("created_by", "updated_by"):
+            if column not in quality_finding_columns:
+                await db.execute(
+                    f"ALTER TABLE quality_audit_findings ADD COLUMN {column} TEXT NOT NULL DEFAULT 'system'"
+                )
         user_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(users)")).fetchall()}
         if "merged_into_user_id" not in user_columns:
             await db.execute("ALTER TABLE users ADD COLUMN merged_into_user_id TEXT")
@@ -1405,6 +1852,41 @@ async def init_db():
             )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id)"
+            )
+        except Exception:
+            pass
+        # Migration: add missing columns to existing audit_findings table
+        for col_def in (
+            "finding_number TEXT",
+            "area TEXT",
+            "level INTEGER",
+            "title TEXT",
+            "regulatory_reference TEXT",
+            "corrective_action_id TEXT",
+            "due_date TEXT",
+            "closed_at TEXT",
+            "closed_by TEXT",
+        ):
+            try:
+                await db.execute(f"ALTER TABLE audit_findings ADD COLUMN {col_def}")
+            except Exception:
+                pass  # Column may already exist
+        # Ensure audit_reports.audit_id is unique so FK constraints work
+        try:
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_reports_audit_id ON audit_reports(audit_id)"
+            )
+        except Exception:
+            pass
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_findings_audit ON audit_findings(audit_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_findings_level ON audit_findings(level)"
             )
         except Exception:
             pass
@@ -1606,6 +2088,8 @@ async def seed_db():
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         count = (await cursor.fetchone())[0]
         if count > 0:
+            await _install_mutation_audit_triggers(db)
+            await db.commit()
             return
 
         from datetime import datetime, timedelta
@@ -1792,7 +2276,7 @@ async def seed_db():
             ("ROC-001", "06", "0110", "KCAA/OPS/2117/ROC/06", "2026-10-12", "2027-10-11", "active", "A,B", 0, 0, 400, 1, "Division 6.2 Cat A&B", "EVLOS with qualified VO", now, now, "admin", "admin"),
         )
 
-        # Aircraft / UAS Fleet (21 aircraft from registry)
+        # Aircraft / UAS master fleet (20 registrations), separate from the 7 OpSpec-authorized registrations
         aircraft = [
             ("AC-001", "5Y-0029A", "DJI M350 RTK", "DJI", "154820399", "ROC-001", "active", "Category A", "MTOW < 25kg", 7.5, "2024-03-15", "BVLOS capable", now, now, "u-maintenance", "u-maintenance"),
             ("AC-002", "5Y-0030A", "DJI Phantom 4 Pro", "DJI", "154820400", "ROC-001", "active", "Category A", "MTOW < 25kg", 1.4, "2024-02-20", "Visual line of sight", now, now, "u-maintenance", "u-maintenance"),
@@ -1844,6 +2328,13 @@ async def seed_db():
             ("crew_currency_warning_days", "30", now),
         )
 
+        await db.commit()
+    finally:
+        await db.close()
+
+    db = await get_db()
+    try:
+        await _install_mutation_audit_triggers(db)
         await db.commit()
     finally:
         await db.close()

@@ -18,6 +18,8 @@ PERMISSIONS = [
     "change_request:create", "change_request:review",
     "change_request:approve", "distribution:manage", "retention:manage", "legal_hold:manage",
     "compliance:read", "compliance:manage", "audit:read", "audit:manage",
+    "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
+    "audit_report:read", "audit_report:create",
     "safety:read", "safety:create", "safety:update", "safety:close",
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
     "roc:read", "roc:manage", "aircraft:read", "aircraft:manage",
@@ -34,6 +36,7 @@ ROLE_PERMISSIONS = {
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
         "flight:release", "security:read_sensitive", "security:manage",
+        "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
     },
     "librarian": {
         "document:create", "document:read", "document:update", "document:propose", "document:annotate",
@@ -45,16 +48,18 @@ ROLE_PERMISSIONS = {
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
         "audit:read", "audit:manage", "safety:read", "safety:create", "safety:update", "safety:close",
         "roc:read", "aircraft:read", "personnel:read", "personnel:view",
+        "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
     "head_safety": {
         "document:read", "document:propose", "document:annotate", "safety:read", "safety:create",
         "safety:update", "safety:close", "occurrence:acknowledge", "occurrence:investigate",
         "roc:read", "aircraft:read", "audit:read", "personnel:read", "personnel:view",
-        "security:read_sensitive",
+        "security:read_sensitive", "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
     "head_security": {
         "document:read", "safety:read", "safety:create", "safety:update", "audit:read", "roc:read", "aircraft:read",
         "personnel:read", "personnel:view", "security:read_sensitive", "security:manage",
+        "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
     "head_operations": {
         "document:read", "safety:read", "safety:create", "safety:update", "flight:release", "roc:read", "roc:manage", "aircraft:read",
@@ -91,6 +96,7 @@ ROLE_PERMISSIONS = {
     "independent_auditor": {
         "document:read", "audit:read", "audit:manage", "compliance:read",
         "safety:read", "roc:read", "aircraft:read", "personnel:read", "personnel:view",
+        "audit_finding:read", "audit_report:read",
     },
     "as_contracted": {"document:read", "safety:read", "roc:read", "aircraft:read"},
 }

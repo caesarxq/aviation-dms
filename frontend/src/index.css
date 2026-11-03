@@ -189,8 +189,7 @@
     padding-right: 10px;
   }
   .app-sidebar .nav-label,
-  .app-sidebar .sidebar-section-label,
-  .app-sidebar .mt-auto {
+  .app-sidebar .sidebar-section-label {
     display: none;
   }
   .app-sidebar nav a {
@@ -205,6 +204,24 @@
   }
   .app-sidebar img { width: 40px; height: 40px; object-fit: cover; object-position: left; }
   .app-sidebar nav { margin-top: 8px; }
+  .mobile-session-controls {
+    position: fixed;
+    z-index: 60;
+    left: 72px;
+    right: 0;
+    bottom: 0;
+    max-height: 42vh;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.16);
+    background: var(--color-brand-blue-deep);
+    padding: 12px;
+    box-shadow: 0 -8px 24px rgba(16, 42, 67, 0.22);
+  }
+  .mobile-session-controls > .mt-3 {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .app-main { padding-bottom: 44vh; }
 }
 
 @media (max-width: 1024px) {

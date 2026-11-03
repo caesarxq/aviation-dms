@@ -19,7 +19,7 @@ jobs:
         run: |
           cd backend
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio httpx2
       - name: Run tests
         env:
           DEV_MODE: "true"
@@ -35,7 +35,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - name: Install dependencies
         run: |
           cd frontend
@@ -44,7 +44,152 @@ jobs:
         run: |
           cd frontend
           npx tsc --noEmit
+      - name: Run frontend unit tests
+        run: |
+          cd frontend
+          npm test -- --run
       - name: Build
         run: |
           cd frontend
           npm run build
+
+  deployment-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Caddyfile
+        env:
+          DMS_HOSTNAME: dms.example.invalid
+          ACME_EMAIL: ops@example.invalid
+        run: >-
+          docker run --rm
+          --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro"
+          --env DMS_HOSTNAME
+          --env ACME_EMAIL
+          caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validate Caddy apex and www routes
+        env:
+          DMS_HOSTNAME: dms.example.invalid
+          ACME_EMAIL: ops@example.invalid
+        run: |
+          docker run --rm --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" --env DMS_HOSTNAME --env ACME_EMAIL caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty > "$RUNNER_TEMP/caddy-adapt.json"
+          python - "$RUNNER_TEMP/caddy-adapt.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          routes = json.loads(pathlib.Path(sys.argv[1]).read_text())["apps"]["http"]["servers"]["srv0"]["routes"]
+
+          def handlers(node, name):
+              if isinstance(node, dict):
+                  if node.get("handler") == name:
+                      yield node
+                  for value in node.values():
+                      yield from handlers(value, name)
+              elif isinstance(node, list):
+                  for value in node:
+                      yield from handlers(value, name)
+
+          def route_for_host(host):
+              return next(
+                  (route for route in routes
+                   if any(host in matcher.get("host", []) for matcher in route.get("match", []))),
+                  None,
+              )
+
+          apex = route_for_host("dms.example.invalid")
+          www = route_for_host("www.dms.example.invalid")
+          assert apex is not None, "Missing apex host route for dms.example.invalid"
+          assert www is not None, "Missing www host route for www.dms.example.invalid"
+          assert any(
+              upstream.get("dial") == "frontend:80"
+              for proxy in handlers(apex, "reverse_proxy")
+              for upstream in proxy.get("upstreams", [])
+          ), "Apex route must reverse_proxy to frontend:80"
+          assert any(
+              response.get("status_code") == 301
+              and response.get("headers", {}).get("Location")
+              == ["https://dms.example.invalid{http.request.uri}"]
+              for response in handlers(www, "static_response")
+          ), "www route must return 301 to https://dms.example.invalid{http.request.uri}"
+          PY
+      - name: Validate production Compose configuration
+        env:
+          DMS_HOSTNAME: dms.example.invalid
+          DMS_RELEASE_TAG: ci
+          ACME_EMAIL: ops@example.invalid
+          KFL_BOOTSTRAP_TOKEN_FILE: /dev/null
+          SMTP_HOST: smtp.example.invalid
+          SMTP_USER: ci-user
+          SMTP_PASS_SECRET_FILE: /dev/null
+          SMTP_FROM: dms@example.invalid
+        run: docker compose config --quiet
+      - name: Build production services
+        env:
+          DMS_HOSTNAME: dms.example.invalid
+          DMS_RELEASE_TAG: ci
+          ACME_EMAIL: ops@example.invalid
+          KFL_BOOTSTRAP_TOKEN_FILE: /dev/null
+          SMTP_HOST: smtp.example.invalid
+          SMTP_USER: ci-user
+          SMTP_PASS_SECRET_FILE: /dev/null
+          SMTP_FROM: dms@example.invalid
+        run: docker compose build backend frontend https_proxy
+
+  playwright-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEV_MODE: "true"
+      DMS_DB_PATH: ${{ runner.temp }}/dms-e2e.sqlite3
+      CORS_ORIGINS: http://localhost:5173
+      AUTH_ALLOWED_ORIGINS: http://localhost:5173
+      SESSION_COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install backend and frontend dependencies
+        run: |
+          python -m pip install -r backend/requirements.txt
+          cd frontend
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Generate isolated E2E credential
+        shell: bash
+        run: |
+          password="$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$password"
+          echo "E2E_PASSWORD=$password" >> "$GITHUB_ENV"
+      - name: Start isolated backend and seed test data
+        shell: bash
+        run: |
+          cd backend
+          export DMS_E2E_SEED_PASSWORD="$E2E_PASSWORD"
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/dms-e2e-backend.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dms-e2e-backend.pid"
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then cat "$RUNNER_TEMP/dms-e2e-backend.log"; exit 1; fi
+          python -m app.seed_safety_data
+      - name: Run Playwright end-to-end suite
+        run: |
+          export KFL_E2E_USER=safety
+          export KFL_E2E_PASSWORD="$E2E_PASSWORD"
+          cd frontend
+          npm run test:e2e -- --reporter=line --workers=1
+      - name: Stop isolated backend
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/dms-e2e-backend.pid" ]; then kill "$(cat "$RUNNER_TEMP/dms-e2e-backend.pid")" 2>/dev/null || true; fi

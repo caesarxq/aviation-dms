@@ -7,6 +7,7 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 const DOCUMENT_TYPES = [
   "pilot_license", "medical", "type_rating", "proficiency_check",
@@ -14,24 +15,32 @@ const DOCUMENT_TYPES = [
   "indoctrination", "background_check", "english_proficiency", "avsec",
 ];
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
+}
+
 export function SelfServiceUpload() {
   const { toast } = useToast();
+  const { profile, hasPermission } = useAuth();
   const qc = useQueryClient();
-  const [personId] = useState("u-safety"); // default actor
+  const personId = profile?.user.user_id ?? "";
+  const canManagePersonnel = hasPermission("personnel:manage");
   const [statusFilter, setStatusFilter] = useState("");
   const [showUpload, setShowUpload] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [uploadForm, setUploadForm] = useState({
-    person_id: personId, license_type: "pilot_license", document_type: "license_copy",
-  });
+  const [uploadForm, setUploadForm] = useState({ license_type: "pilot_license", document_type: "license_copy" });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [actionError, setActionError] = useState("");
 
-  const { data: uploads = [], isLoading } = useQuery({
+  const { data: uploads = [], isLoading, isError, error: loadError, refetch } = useQuery({
     queryKey: ["personnel-uploads", personId],
-    queryFn: () => personId
-      ? api.get(`/p2/personnel/uploads/${personId}`).then((r: any) => r.data)
-      : Promise.resolve([]),
+    queryFn: async () => {
+      const response = await api.get(`/p2/personnel/uploads/${encodeURIComponent(personId)}`);
+      if (response.status !== 200) throw new Error("Unable to load personnel uploads");
+      return response.data;
+    },
     enabled: !!personId,
   });
 
@@ -40,34 +49,43 @@ export function SelfServiceUpload() {
   useUnsavedChanges(showUpload && dirty);
 
   const createMutation = useMutation({
-    mutationFn: (data: { person_id: string; license_type: string; document_type: string; file: File }) => {
+    mutationFn: (data: { license_type: string; document_type: string; file: File }) => {
       const formData = new FormData();
-      formData.append("person_id", data.person_id);
       formData.append("license_type", data.license_type);
       formData.append("document_type", data.document_type);
       formData.append("file", data.file);
       return api.post("/p2/personnel/uploads/file", formData, {
         headers: { "Content-Type": "multipart/form-data" },
-      }).then((r: any) => r.data);
+      }).then((r: any) => {
+        if (r.status !== 200) throw new Error("Upload was not accepted");
+        return r.data;
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personnel-uploads", personId] });
       setShowUpload(false);
       setDirty(false);
       setUploadError("");
-      setUploadForm({ person_id: personId, license_type: "pilot_license", document_type: "license_copy" });
+      setUploadForm({ license_type: "pilot_license", document_type: "license_copy" });
       setSelectedFile(null);
       toast({ title: "Credential uploaded", message: "Your document has been submitted for verification.", type: "success" });
     },
-    onError: () => {
-      setUploadError("Failed to upload credential. Please try again.");
+    onError: (error: unknown) => {
+      setUploadError(getErrorMessage(error, "Failed to upload credential. Please try again."));
     },
   });
 
   const verifyMutation = useMutation({
     mutationFn: ({ id, status, reason }: { id: string; status: string; reason?: string }) =>
-      api.patch(`/p2/personnel/uploads/${id}/verify`, { verification_status: status, rejection_reason: reason }).then((r: any) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["personnel-uploads", personId] }),
+      api.patch(`/p2/personnel/uploads/${encodeURIComponent(id)}/verify`, { verification_status: status, rejection_reason: reason }).then((r: any) => {
+        if (r.status !== 200) throw new Error("Personnel verification was not accepted");
+        return r.data;
+      }),
+    onSuccess: () => {
+      setActionError("");
+      qc.invalidateQueries({ queryKey: ["personnel-uploads", personId] });
+    },
+    onError: (error: unknown) => setActionError(getErrorMessage(error, "Unable to update this credential. Please try again.")),
   });
 
   const statusColor = (s: string) => {
@@ -83,7 +101,6 @@ export function SelfServiceUpload() {
   };
 
   const uploadRules = {
-    person_id: { required: true },
     file: { required: "Please select a file to upload." },
   } as const;
 
@@ -109,23 +126,20 @@ export function SelfServiceUpload() {
           <h1 className="app-title">Self-Service Upload</h1>
           <p className="app-subtitle">Upload your credential documents for verification by the compliance team.</p>
         </div>
-        <button onClick={() => setShowUpload(true)} className="app-btn-primary flex items-center gap-1">
-          <Upload size={16} /> Upload Credential
-        </button>
+        {hasPermission("personnel:view") && (
+          <button onClick={() => setShowUpload(true)} className="app-btn-primary flex items-center gap-1">
+            <Upload size={16} /> Upload Credential
+          </button>
+        )}
       </header>
 
-      {/* Upload Credential Modal */}
-      <Modal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Credential Document" description="Upload a clear, legible credential file belonging to the selected person. Confirm the credential type before choosing the file; the document will be held for verification.">
+      <Modal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Credential Document" description="Upload your own clear, legible credential file. It will be held for verification.">
         {uploadError && (
-          <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+          <div role="alert" className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
             {uploadError}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <FormField htmlFor="your_person_id_112" label="Person ID" hint="Use your personnel register ID, for example u-safety." required>
-            <input id="your_person_id_112" name="your_person_id" aria-describedby="your_person_id_112-error" aria-invalid={!!uploadFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={uploadForm.person_id} onChange={e => { setUploadForm({ ...uploadForm, person_id: e.target.value }); setDirty(true); }} />
-            {uploadFieldErrors.person_id && <p id="your_person_id_112-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.person_id}</p>}
-          </FormField>
           <FormField htmlFor="license_type_118" label="Credential type" required>
             <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => { setUploadForm({ ...uploadForm, license_type: e.target.value }); setDirty(true); }}>
               {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
@@ -136,8 +150,8 @@ export function SelfServiceUpload() {
               <option value="license_copy">License Copy</option><option value="certificate">Certificate</option><option value="medical_cert">Medical Certificate</option><option value="training_record">Training Record</option><option value="other">Other</option>
             </select>
           </FormField>
-          <FormField htmlFor="file_136" label="Credential file" hint="Upload a clear PDF or image for compliance verification." required className="col-span-2">
-            <input id="file_136" name="file" type="file" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => { setSelectedFile(e.target.files?.[0] || null); setDirty(true); }} />
+          <FormField htmlFor="file_136" label="Credential file" hint="PDF, PNG, or JPEG; maximum 10 MiB." required className="col-span-2">
+            <input id="file_136" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => { setSelectedFile(e.target.files?.[0] || null); setDirty(true); }} />
             {uploadFieldErrors.file && <p id="file_136-error" className="text-[11px] text-rose-700 mt-1">{uploadFieldErrors.file}</p>}
           </FormField>
         </div>
@@ -149,7 +163,6 @@ export function SelfServiceUpload() {
         </div>
       </Modal>
 
-      {/* Uploads list */}
       <section className="app-surface overflow-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="font-semibold text-kfl-text">Your Uploads</h2>
@@ -161,7 +174,13 @@ export function SelfServiceUpload() {
             ))}
           </div>
         </div>
-        {isLoading ? (
+        {actionError && <div role="alert" className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">{actionError}</div>}
+        {isError ? (
+          <div role="alert" className="p-6 text-center text-rose-800">
+            <p>Unable to load your uploads: {getErrorMessage(loadError, "Please try again.")}</p>
+            <button onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry loading uploads</button>
+          </div>
+        ) : isLoading ? (
           <div className="p-10 text-center text-kfl-muted">Loading uploads…</div>
         ) : filteredUploads.length === 0 ? (
           <div className="p-10 text-center text-kfl-muted">No uploads found. Upload a credential document to get started.</div>
@@ -183,11 +202,11 @@ export function SelfServiceUpload() {
                     {u.rejection_reason && <div className="text-xs text-red-600 mt-1">Reason: {u.rejection_reason}</div>}
                   </div>
                 </div>
-                <div className="text-xs text-kfl-muted mb-2">{u.file_path} ({u.file_size || 0} bytes, {u.content_type || "—"})</div>
-                {u.verification_status === "pending" && (
+                <div className="text-xs text-kfl-muted mb-2">{u.file_size || 0} bytes, {u.content_type || "—"}</div>
+                {canManagePersonnel && u.verification_status === "pending" && (
                   <div className="flex gap-2">
-                    <button onClick={() => verifyMutation.mutate({ id: u.upload_id, status: "verified" })} className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1"><CheckCircle size={12} /> Verify</button>
-                    <button onClick={() => verifyMutation.mutate({ id: u.upload_id, status: "rejected", reason: "Needs revision" })} className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1"><AlertTriangle size={12} /> Reject</button>
+                    <button disabled={verifyMutation.isPending} onClick={() => verifyMutation.mutate({ id: u.upload_id, status: "verified" })} className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1"><CheckCircle size={12} /> Verify</button>
+                    <button disabled={verifyMutation.isPending} onClick={() => verifyMutation.mutate({ id: u.upload_id, status: "rejected", reason: "Needs revision" })} className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1"><AlertTriangle size={12} /> Reject</button>
                   </div>
                 )}
               </div>

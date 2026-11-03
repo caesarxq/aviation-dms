@@ -5,8 +5,19 @@ import aiosqlite
 from .database import get_db
 
 
-async def log_audit_event(entity_type: str, entity_id: str, action: str, actor_id: str, details=None):
-    db = await get_db()
+async def log_audit_event(
+    entity_type: str,
+    entity_id: str,
+    action: str,
+    actor_id: str,
+    details=None,
+    *,
+    db: aiosqlite.Connection | None = None,
+):
+    """Write an audit event, optionally on the caller's transaction/connection."""
+    owns_connection = db is None
+    if db is None:
+        db = await get_db()
     try:
         event_id = f"EVT-{__import__('uuid').uuid4().hex[:12]}"
         now = datetime.now().isoformat()
@@ -14,9 +25,12 @@ async def log_audit_event(entity_type: str, entity_id: str, action: str, actor_i
             "INSERT INTO audit_events (event_id, entity_type, entity_id, action, actor_id, details, timestamp) VALUES (?,?,?,?,?,?,?)",
             (event_id, entity_type, entity_id, action, actor_id, json.dumps(details) if details else None, now),
         )
-        await db.commit()
+        if owns_connection:
+            await db.commit()
+        return event_id
     finally:
-        await db.close()
+        if owns_connection:
+            await db.close()
 
 
 async def query_audit_events(entity_type=None, entity_id=None, actor_id=None, limit=100, offset=0):

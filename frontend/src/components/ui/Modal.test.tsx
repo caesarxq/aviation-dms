@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Modal } from './Modal';
@@ -53,5 +53,57 @@ describe('Modal', () => {
     const closeBtn = screen.getByRole('button', { name: /close/i });
     await user.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('moves focus into the dialog, traps tab navigation, and restores focus on close', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <MemoryRouter>
+        <button type="button">Open modal</button>
+        <Modal open={false} onClose={() => {}} title="Focus dialog">
+          <button type="button">Save</button>
+        </Modal>
+      </MemoryRouter>
+    );
+    const opener = screen.getByRole('button', { name: 'Open modal' });
+    opener.focus();
+    rerender(
+      <MemoryRouter>
+        <button type="button">Open modal</button>
+        <Modal open={true} onClose={() => {}} title="Focus dialog">
+          <button type="button">Save</button>
+        </Modal>
+      </MemoryRouter>
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Focus dialog' });
+    const close = within(dialog).getByRole('button', { name: 'Close dialog' });
+    const save = within(dialog).getByRole('button', { name: 'Save' });
+    expect(close).toHaveFocus();
+    save.focus();
+    await user.tab();
+    expect(close).toHaveFocus();
+
+    rerender(
+      <MemoryRouter>
+        <button type="button">Open modal</button>
+        <Modal open={false} onClose={() => {}} title="Focus dialog">
+          <button type="button">Save</button>
+        </Modal>
+      </MemoryRouter>
+    );
+    expect(opener).toHaveFocus();
+  });
+
+  it('uses readable dark text on the light modal surface', () => {
+    render(
+      <MemoryRouter>
+        <Modal open={true} onClose={() => {}} title="Contrast dialog">
+          <p>Readable content</p>
+        </Modal>
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('heading', { name: 'Contrast dialog' })).toHaveClass('text-kfl-text');
+    expect(screen.getByText('Readable content').parentElement).toHaveClass('text-kfl-text');
   });
 });

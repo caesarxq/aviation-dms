@@ -8,6 +8,26 @@ import { useToast } from "../components/ui/Toast";
 import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/DocumentOutline";
 import { InlineSuggestionView } from "../components/documents/InlineSuggestionView";
 import { htmlToText } from "../utils/diff";
+import DOMPurify from "dompurify";
+
+const DOCUMENT_ALLOWED_TAGS = [
+  "a", "abbr", "address", "article", "b", "blockquote", "br", "caption", "cite", "code", "col", "colgroup",
+  "dd", "del", "details", "div", "dl", "dt", "em", "figcaption", "figure", "font", "h1", "h2", "h3", "h4", "h5", "h6",
+  "head", "hr", "html", "i", "img", "ins", "kbd", "li", "main", "mark", "ol", "p", "pre", "q", "s", "samp", "section", "small",
+  "span", "strong", "style", "sub", "summary", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "var", "body",
+];
+const DOCUMENT_ALLOWED_ATTRIBUTES = ["alt", "class", "colspan", "height", "href", "id", "scope", "src", "start", "style", "title", "type", "width", "rowspan"];
+
+function sanitizeDocumentHtml(html: string) {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: DOCUMENT_ALLOWED_TAGS,
+    ALLOWED_ATTR: DOCUMENT_ALLOWED_ATTRIBUTES,
+    ALLOW_DATA_ATTR: true,
+    ALLOW_ARIA_ATTR: false,
+    RETURN_TRUSTED_TYPE: false,
+  });
+}
+
 export function DocumentEditor() {
   const { docId: routeDocId } = useParams<{ docId: string }>();
   const [docId, setDocId] = useState(routeDocId || "");
@@ -143,7 +163,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    el.innerHTML = originalContent;
+    el.innerHTML = sanitizeDocumentHtml(originalContent);
   }, [originalContent]);
 
   useEffect(() => {
@@ -200,33 +220,49 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const handleEditorInput = useCallback(() => {
     const el = editorRef.current;
     if (!el) return;
-    const html = el.innerHTML;
+    const html = sanitizeDocumentHtml(el.innerHTML);
+    if (html !== el.innerHTML) el.innerHTML = html;
     setCurrentContent(html);
     setDirty(true);
   }, []);
+
+  const handleEditorPaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const html = event.clipboardData.getData("text/html");
+    const text = event.clipboardData.getData("text/plain");
+    if (html) {
+      document.execCommand("insertHTML", false, sanitizeDocumentHtml(html));
+    } else {
+      document.execCommand("insertText", false, text);
+    }
+    handleEditorInput();
+  }, [handleEditorInput]);
+
 
   const revertChanges = useCallback(() => {
     if (!window.confirm("Discard all unsuggested changes and revert to original?")) return;
     setCurrentContent(originalContent);
     setDirty(false);
-    if (editorRef.current) editorRef.current.innerHTML = originalContent;
+    if (editorRef.current) editorRef.current.innerHTML = sanitizeDocumentHtml(originalContent);
   }, [originalContent]);
 
   const toggleFormat = useCallback((command: string, value?: string) => {
     const el = editorRef.current;
     if (!el) return;
     document.execCommand(command, false, value || undefined);
-    const html = el.innerHTML;
+    const html = sanitizeDocumentHtml(el.innerHTML);
+    if (html !== el.innerHTML) el.innerHTML = html;
     setCurrentContent(html);
     setDirty(true);
   }, []);
 
   const hasChanges = currentContent !== originalContent;
+  const highFidelityManual = /<(?:style|link|svg)\b|@import\b/i.test(originalContent) || /\sstyle\s*=/i.test(originalContent) || /class=["'][^"']*\b(?:pf|pc|t)\b/i.test(originalContent);
 
   const { data: proposalPreview, isLoading: previewLoading } = useQuery({
     queryKey: ["proposal-preview", docId, currentContent],
-    queryFn: () => api.post(`/p2/documents/${docId}/proposals/preview`, { proposed_content: currentContent }).then((r: any) => r.data),
-    enabled: showSubmit && hasChanges,
+    queryFn: () => api.post(`/p2/documents/${docId}/proposals/preview`, { proposed_content: sanitizeDocumentHtml(currentContent) }).then((r: any) => r.data),
+    enabled: showSubmit && hasChanges && !highFidelityManual,
     staleTime: 1000,
   });
 
@@ -257,7 +293,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       // Reset the editor to the original content so the submitted changes
       // no longer appear as pending edits in the editor or diff preview.
       setCurrentContent(originalContent);
-      if (editorRef.current) editorRef.current.innerHTML = originalContent;
+      if (editorRef.current) editorRef.current.innerHTML = sanitizeDocumentHtml(originalContent);
       qc.invalidateQueries({ queryKey: ["doc-content", docId] });
       toast({ title: "Proposal submitted", message: "Your change proposal has been submitted for manual review.", type: "success" });
     },
@@ -269,6 +305,10 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 
   const handleSubmitProposal = () => {
     setEditError("");
+    if (highFidelityManual) {
+      setEditError("Proposal submission is disabled for this formatted manual because secure sanitization can alter its embedded layout. No edited content will be submitted.");
+      return;
+    }
     if (!proposalPreview?.changes?.length) {
       setEditError("No changes were detected for submission.");
       return;
@@ -279,7 +319,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     }
     setSubmitting(true);
     createProposalMutation.mutate({
-      proposed_content: currentContent,
+      proposed_content: sanitizeDocumentHtml(currentContent),
       base_version_id: proposalPreview.base_version_id,
       selected_change_sequences: selectedChangeSequences,
       rationale: submitRationale.trim() || undefined,
@@ -304,8 +344,12 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 
   const handleSave = () => {
     setEditError("");
+    if (highFidelityManual) {
+      setEditError("Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Proposal submission is also disabled; no edited content will be submitted.");
+      return;
+    }
     setSaving(true);
-    updateMutation.mutate({ content: currentContent, change_summary: changeSummary });
+    updateMutation.mutate({ content: sanitizeDocumentHtml(currentContent), change_summary: changeSummary });
   };
 
   const primaryDetectedChange = proposalPreview?.changes?.find((change: any) => selectedChangeSequences.includes(change.change_sequence)) || proposalPreview?.changes?.[0];
@@ -364,7 +408,8 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             </button>
             <button
               onClick={() => setShowSubmit(true)}
-              className="p-1.5 hover:bg-emerald-500/10 rounded transition text-emerald-600 font-bold"
+              disabled={highFidelityManual}
+              className="p-1.5 hover:bg-emerald-500/10 rounded transition text-emerald-600 font-bold disabled:cursor-not-allowed disabled:opacity-50"
               title="Submit proposal for review"
             >
               <UserCheck size={14} />
@@ -410,7 +455,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !dirty}
+            disabled={saving || !dirty || highFidelityManual}
             className="app-btn-primary px-4 py-2 flex items-center gap-1 text-sm"
           >
             <Save size={16} /> {saving ? "Saving…" : "Save as Draft"}
@@ -426,6 +471,11 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       {editError && (
         <div className="px-5 py-2">
           <div className="p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">{editError}</div>
+        </div>
+      )}
+      {highFidelityManual && (
+        <div className="px-5 py-2">
+          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Proposal submission is also disabled; no edited content will be submitted.</div>
         </div>
       )}
       <div className={`flex-1 min-h-[600px] overflow-y-auto relative ${showOutline ? "flex" : ""}`}>
@@ -455,6 +505,8 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             className="min-h-[500px] overflow-y-auto bg-white p-4 text-kfl-text"
             contentEditable={true}
             onInput={handleEditorInput}
+            onPaste={handleEditorPaste}
+            onDrop={(event) => event.preventDefault()}
             suppressContentEditableWarning={true}
             spellCheck={true}
           />

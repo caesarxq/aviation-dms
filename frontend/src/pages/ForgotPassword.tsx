@@ -19,7 +19,7 @@ export function ForgotPasswordPage() {
     setSubmitting(true);
     try {
       await api.post("/p0/auth/forgot-password", { username: username.trim() });
-      setMessage("If an active account with a password exists, a reset token has been issued. Check your email or contact your administrator for the reset link.");
+      setMessage("If an active account with a password exists, reset instructions will be sent to its registered email. Contact your administrator if you no longer have access to that address.");
       setUsername("");
     } catch (cause: any) {
       setError(cause?.response?.data?.detail || "Unable to process request. Try again or contact the administrator.");

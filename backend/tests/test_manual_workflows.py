@@ -51,6 +51,7 @@ class TestManualWorkflowControls:
             "no_leakage_visual_ok": True,
             "pic_weather_confirmed": False,
             "crew_layers_unopened_confirmed": True,
+            "weight_within_limit_ok": True,
         }, headers=admin_headers)
         assert fail_check.status_code == 201
         assert fail_check.json()["result"] == "rejected"
@@ -67,6 +68,7 @@ class TestManualWorkflowControls:
             "no_leakage_visual_ok": True,
             "pic_weather_confirmed": True,
             "crew_layers_unopened_confirmed": True,
+            "weight_within_limit_ok": True,
         }, headers=admin_headers)
         assert pass_check.status_code == 201
         assert pass_check.json()["result"] == "accepted"
@@ -75,6 +77,41 @@ class TestManualWorkflowControls:
         modified = client.patch(f"/api/p1/dg-shipments/{sid}", json={"quantity": "3.0 kg"}, headers=admin_headers)
         assert modified.status_code == 200
         assert modified.json()["status"] == "pending"
+
+    def test_car_patch_cannot_set_verified_or_verifier_metadata(self, client, admin_headers):
+        car = client.post("/api/p1/corrective-actions", json={
+            "title": "Protected CAR", "description": "CAP is not independently verified", "owner_id": "u-ops"
+        }, headers=admin_headers).json()
+        response = client.patch(f"/api/p1/corrective-actions/{car['car_id']}", json={
+            "status": "verified", "verification": "Bogus verification", "verified_by": "u-auditor",
+            "verified_at": "2026-11-01T10:00:00", "closed_at": "2026-11-01T10:00:00"
+        }, headers=admin_headers)
+        assert response.status_code == 422
+        closed_bypass = client.patch(f"/api/p1/corrective-actions/{car['car_id']}", json={"status": "closed"}, headers=admin_headers)
+        assert closed_bypass.status_code == 422
+        stored = next(item for item in client.get("/api/p1/corrective-actions", headers=admin_headers).json() if item["car_id"] == car["car_id"])
+        assert stored["status"] == "open"
+        assert stored["verified_by"] is None
+        assert stored["verified_at"] is None
+        assert stored["closed_at"] is None
+
+    def test_dg_acceptance_requires_every_check_and_missing_values_are_not_safe(self, client, admin_headers):
+        shipment = client.post("/api/p1/dg-shipments", json={
+            "dg_class": "Division 6.2", "proper_shipping_name": "Biological substance, Category B"
+        }, headers=admin_headers).json()
+        incomplete = client.post("/api/p1/dg-acceptance-checks", json={
+            "shipment_id": shipment["shipment_id"], "packaging_ok": True, "marking_ok": True,
+            "labeling_ok": True, "documentation_ok": True, "compatibility_ok": True,
+        }, headers=admin_headers)
+        assert incomplete.status_code == 422
+        complete = client.post("/api/p1/dg-acceptance-checks", json={
+            "shipment_id": shipment["shipment_id"], "packaging_ok": True, "marking_ok": True,
+            "labeling_ok": True, "documentation_ok": True, "compatibility_ok": True,
+            "triple_packaging_ok": True, "no_leakage_visual_ok": True, "pic_weather_confirmed": True,
+            "crew_layers_unopened_confirmed": True, "weight_within_limit_ok": True,
+        }, headers=admin_headers)
+        assert complete.status_code == 201
+        assert complete.json()["result"] == "accepted"
 
     def test_security_incident_head_security_update_and_ssi_masking(self, client):
         sec_headers = {"X-Role": "head_security", "X-Actor": "u-security"}
@@ -97,11 +134,31 @@ class TestManualWorkflowControls:
         assert upd.status_code == 200
         assert "SSI: Suspect vehicle" in upd.json()["investigation_notes"]
 
-        # Non-SSI role sees masked investigation_notes (SEC-KFL §3.10)
+        # A role with general safety access can read only a redacted incident shell.
         masked_list = client.get("/api/p1/security-incidents", headers=non_ssi_headers)
         assert masked_list.status_code == 200
-        target = next(item for item in masked_list.json() if item["incident_id"] == iid)
+        assert len(masked_list.json()) == 1
+        target = masked_list.json()[0]
+        assert target["incident_id"] == "[SSI REDACTED]"
         assert target["investigation_notes"] == "[SSI REDACTED]"
+        assert target["title"] == "[SSI REDACTED]"
+        assert target["description"] == "[SSI REDACTED]"
+        assert target["location"] == "[SSI REDACTED]"
+        assert target["status"] == "[SSI REDACTED]"
+        assert target["reported_at"] == "[SSI REDACTED]"
+
+    def test_non_security_role_cannot_create_or_update_security_incidents(self, client):
+        non_security = {"X-Role": "flight_ops_officer", "X-Actor": "u-flight-ops"}
+        create = client.post("/api/p1/security-incidents", json={
+            "title": "Unauthorized", "description": "Should not be persisted"
+        }, headers=non_security)
+        assert create.status_code == 403
+        sec_headers = {"X-Role": "head_security", "X-Actor": "u-security"}
+        incident = client.post("/api/p1/security-incidents", json={
+            "title": "Authorized", "description": "Security-owned record"
+        }, headers=sec_headers).json()
+        update = client.patch(f"/api/p1/security-incidents/{incident['incident_id']}", json={"status": "resolved"}, headers=non_security)
+        assert update.status_code == 403
 
     def test_qms_car_level_deadlines_and_independent_auditor_closure(self, client, admin_headers):
         auditor_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
@@ -146,6 +203,6 @@ class TestManualWorkflowControls:
             headers=auditor_headers,
         )
         assert verified.status_code == 200
-        closed = client.patch(f"/api/p1/corrective-actions/{cid}", json={"status": "closed"}, headers=auditor_headers)
+        closed = client.post(f"/api/p1/corrective-actions/{cid}/close", headers=auditor_headers)
         assert closed.status_code == 200
         assert closed.json()["status"] == "closed"

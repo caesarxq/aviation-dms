@@ -11,7 +11,7 @@ Seeds the following tables with aviation-realistic data:
 
 All foreign keys reference existing seed data:
   - users: u-safety, u-reporter, u-ops, u-chief-pilot, u-flight-ops, u-maintenance, u-quality, u-accountable
-  - aircraft: AC-001 through AC-021 (registrations 5Y-XXXXA)
+  - aircraft: 20 master-fleet registrations; OpSpec authorization remains a separate 7-aircraft subset
   - roc_register: ROC-001
 
 Usage:
@@ -31,8 +31,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.database import get_db
 
 NOW = datetime.now()
-TEST_PASSWORD = "TestPass1234!"  # 13 chars, meets policy (>=12, <=72 bytes)
-TEST_PASSWORD_HASH = bcrypt.hashpw(TEST_PASSWORD.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode()
 
 
 def _iso(dt: datetime) -> str:
@@ -40,6 +38,12 @@ def _iso(dt: datetime) -> str:
 
 
 async def seed_safety_data():
+    if os.getenv("DEV_MODE", "false").lower() != "true":
+        raise RuntimeError("Safety test data seeding is development-only")
+    e2e_password = os.getenv("DMS_E2E_SEED_PASSWORD", "")
+    if e2e_password and (len(e2e_password.encode("utf-8")) < 12 or len(e2e_password.encode("utf-8")) > 72):
+        raise RuntimeError("DMS_E2E_SEED_PASSWORD must be between 12 and 72 UTF-8 bytes")
+    e2e_password_hash = bcrypt.hashpw(e2e_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode() if e2e_password else None
     db = await get_db()
     try:
         # Guard: only seed if tables are empty (idempotent)
@@ -710,22 +714,24 @@ async def seed_safety_data():
         print(f"  safety_kpis: {len(safety_kpis)}")
         print(f"  missions: {len(missions)}")
 
-        # Set passwords on key accounts for E2E test login
-        test_accounts = [
-            "u-safety", "u-ops", "u-admin", "u-chief-pilot", "u-flight-ops",
-            "u-maintenance", "u-quality", "u-reporter", "u-accountable", "u-lib",
-        ]
-        for uid in test_accounts:
-            await db.execute(
-                "UPDATE users SET password_hash = ? WHERE user_id = ?",
-                (TEST_PASSWORD_HASH, uid),
-            )
-            await db.execute(
-                "UPDATE users SET onboarding_completed = 1 WHERE user_id = ?",
-                (uid,),
-            )
-        await db.commit()
-        print(f"  passwords and onboarding set on {len(test_accounts)} accounts (password: {TEST_PASSWORD})")
+        # Optional E2E credentials are injected by an isolated test harness only.
+        # Never set shared passwords from a seed script by default.
+        if e2e_password_hash:
+            test_accounts = [
+                "u-safety", "u-ops", "u-admin", "u-chief-pilot", "u-flight-ops",
+                "u-maintenance", "u-quality", "u-reporter", "u-accountable", "u-lib",
+            ]
+            for uid in test_accounts:
+                await db.execute(
+                    "UPDATE users SET password_hash = ? WHERE user_id = ?",
+                    (e2e_password_hash, uid),
+                )
+                await db.execute(
+                    "UPDATE users SET onboarding_completed = 1 WHERE user_id = ?",
+                    (uid,),
+                )
+            await db.commit()
+            print(f"  E2E password configured for {len(test_accounts)} test accounts")
     except Exception as e:
         await db.rollback()
         print(f"Seed failed: {e}")

@@ -1,14 +1,22 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-const TEST_USER = "safety";
-const TEST_PASSWORD = "TestPass1234!";
+const TEST_USER = process.env.KFL_E2E_USER || "safety";
+const TEST_PASSWORD = process.env.KFL_E2E_PASSWORD;
+
+function requireTestPassword() {
+  if (!TEST_PASSWORD) {
+    throw new Error("Set KFL_E2E_PASSWORD for an isolated E2E test database; no shared test password is built into the suite.");
+  }
+  return TEST_PASSWORD;
+}
 
 async function login(page: any) {
+  const password = requireTestPassword();
   await page.goto("/login");
   await page.waitForLoadState("networkidle");
   await page.fill('input[id="login-username"]', TEST_USER);
-  await page.fill('input[id="login-password"]', TEST_PASSWORD);
+  await page.fill('input[id="login-password"]', password);
   await page.click('button[type="submit"]:has-text("Sign in")');
   // Wait for redirect away from login page
   await page.waitForURL(url => url.pathname !== "/login");
@@ -17,12 +25,13 @@ async function login(page: any) {
 }
 
 async function loginAsAdmin(page: any) {
+  const password = requireTestPassword();
   // Clear existing session (beforeEach logs in as u-safety)
   await page.context().clearCookies();
   await page.goto("/login");
   await page.waitForLoadState("networkidle");
   await page.fill('input[id="login-username"]', "admin");
-  await page.fill('input[id="login-password"]', TEST_PASSWORD);
+  await page.fill('input[id="login-password"]', password);
   await page.click('button[type="submit"]:has-text("Sign in")');
   await page.waitForURL(url => url.pathname !== "/login");
   await page.waitForURL("**/");
@@ -156,28 +165,21 @@ test.describe("Navigation", () => {
     await expect(page.getByText("Detected changes")).toBeVisible();
     await expect(page.locator('input[readonly]').first()).toHaveValue(/section|block|paragraph/i);
   });
-  test("viewer provides heading outline navigation and fullscreen fallback", async ({ page }) => {
+  test("viewer opens an empty outline for content without semantic headings and supports fullscreen", async ({ page }) => {
     await page.goto("/documents/DOC-001/view");
     await expect(page.getByRole("heading", { name: "DOC-001" })).toBeVisible();
-    await page.getByTitle("Show document outline").click();
+    await page.getByRole("button", { name: "Show document outline" }).click();
     await expect(page.getByRole("navigation", { name: "Document outline" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "1.1 THE COMPANY", exact: true }).click();
-    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toHaveClass(/font-semibold/);
-    const viewerScroll = await page.frames().find((frame) => frame !== page.mainFrame() && frame.url() === "about:blank")?.evaluate(() => document.querySelector<HTMLElement>("#page-container")?.scrollTop || 0);
-    expect(viewerScroll).toBeGreaterThan(0);
+    await expect(page.getByText("No headings detected.")).toBeVisible();
     await page.getByTitle("Enter fullscreen").click();
     await expect(page.getByTitle("Exit fullscreen")).toBeVisible();
   });
 
-  test("editor outline navigation scrolls to the selected heading", async ({ page }) => {
+  test("editor clearly reports when source content has no semantic headings", async ({ page }) => {
     await page.goto("/documents/DOC-001/edit");
     await page.getByTitle("Show document outline").click();
-    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "1.1 THE COMPANY", exact: true }).click();
-    await expect(page.getByRole("button", { name: "1.1 THE COMPANY", exact: true })).toHaveClass(/font-semibold/);
-    await expect(page.locator('[contenteditable="true"] .proposal-target-highlight')).toHaveCount(1);
-    await expect(page.locator('[contenteditable="true"] .proposal-target-highlight')).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Document outline" })).toBeVisible();
+    await expect(page.getByText("No headings detected.")).toBeVisible();
   });
 
   test("submitting a proposal clears pending editor suggestions", async ({ page }) => {
@@ -210,12 +212,10 @@ test.describe("Missions", () => {
 });
 
 test.describe("Document Viewer", () => {
-  test("renders the source manual inside the iframe", async ({ page }) => {
+  test("renders plain-text source content inside the isolated iframe", async ({ page }) => {
     await page.goto("/documents/DOC-001/view");
     await expect(page.getByRole("heading", { name: "DOC-001" })).toBeVisible();
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame() && candidate.url() === "about:blank");
-    expect(frame).toBeDefined();
-    await expect(frame!.locator("body")).toContainText("COMPANY OPERATIONS MANUAL", { timeout: 20000 });
+    await expect(page.frameLocator('iframe[title="DOC-001"]').locator("body")).toContainText("KFL Operations Manual", { timeout: 20000 });
   });
 });
 
@@ -345,6 +345,7 @@ test.describe("Document Distributions", () => {
   });
 
   test("can create a distribution", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/distributions");
     await page.click("text=New Distribution");
     await page.waitForSelector("#distribution_create_version");
@@ -388,6 +389,7 @@ test.describe("Maintenance Management", () => {
   });
 
   test("can create a maintenance record", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/maintenance");
     await page.click("text=New Record");
     await page.waitForSelector("#maintenance_aircraft");
@@ -410,6 +412,7 @@ test.describe("Crew Management", () => {
   });
 
   test("can create a crew member", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/crew");
     await page.click("text=Add Crew");
     await page.waitForSelector("#crew_full_name");

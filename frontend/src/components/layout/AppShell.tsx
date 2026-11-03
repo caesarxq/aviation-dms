@@ -1,6 +1,7 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import {
   Activity,
+  BarChart3,
   LayoutDashboard,
   FileText,
   AlertTriangle,
@@ -165,6 +166,15 @@ const sections: SectionProps[] = [
     ],
   },
   {
+    label: "Audit",
+    icon: FileText,
+    items: [
+      { to: "/audit-reports", icon: FileText, label: "Audit Reports", permission: "audit_report:read" },
+      { to: "/audit-findings", icon: AlertTriangle, label: "Audit Findings", permission: "audit_finding:read" },
+      { to: "/audit-dashboard", icon: BarChart3, label: "Audit Dashboard", permission: "audit_finding:read" },
+    ],
+  },
+  {
     label: "Administration",
     icon: Activity,
     items: [{ to: "/admin/observability", icon: Activity, label: "System Observability", role: "system_admin" }],
@@ -224,7 +234,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-kfl-canvas">
+    <div className="app-shell flex min-h-screen bg-kfl-canvas">
       <aside className="app-sidebar sticky top-0 flex h-screen w-[264px] shrink-0 flex-col bg-kfl-dark px-4 py-5 text-white shadow-xl">
         <div className="mb-7 flex items-center justify-between gap-3 px-2">
           <button onClick={() => navigate(homeRoute)} className="rounded-md p-1 text-left focus-visible:ring-2 focus-visible:ring-sky-300" aria-label={homeLabel}>
@@ -279,7 +289,7 @@ export function AppShell() {
           })}
         </div>
 
-        <div className="mt-auto border-t border-white/10 px-3 pt-4 text-[11px] text-slate-400">
+        <div role="region" aria-label="Account and session controls" className="mobile-session-controls mt-auto border-t border-white/10 px-3 pt-4 text-[11px] text-slate-400">
           <div className={`flex items-center gap-2 ${logoutError ? "text-rose-300" : "text-emerald-300"}`}>
             <span className={`h-2 w-2 rounded-full ${logoutError ? "bg-rose-400 shadow-[0_0_0_3px_rgba(251,113,133,0.15)]" : "bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.15)]"}`} />
             <span>{logoutError ? "Sign-out not confirmed" : "Secure session active"}</span>
@@ -318,7 +328,7 @@ export function AppShell() {
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-auto bg-kfl-canvas">
+      <main className="app-main min-w-0 flex-1 overflow-auto bg-kfl-canvas">
         {logoutError && (
           <div role="alert" className="m-4 flex items-center justify-between gap-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
             <p>{logoutError}</p>

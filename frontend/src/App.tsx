@@ -39,6 +39,9 @@ const OutsourcedFunctions = lazy(() => import("./pages/P2Pages").then((module) =
 const SafetyKPIs = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.SafetyKPIs })));
 const SecurityReviews = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.SecurityReviews })));
 const DGResponsibilityMatrix = lazy(() => import("./pages/P2Pages").then((module) => ({ default: module.DGResponsibilityMatrix })));
+const AuditReports = lazy(() => import("./pages/AuditReports").then((module) => ({ default: module.AuditReports })));
+const AuditFindings = lazy(() => import("./pages/AuditFindings").then((module) => ({ default: module.AuditFindings })));
+const AuditDashboard = lazy(() => import("./pages/AuditDashboard").then((module) => ({ default: module.AuditDashboard })));
 const DocumentEditor = lazy(() => import("./pages/DocumentEditor").then((module) => ({ default: module.DocumentEditor })));
 const DocumentViewer = lazy(() => import("./pages/DocumentViewer").then((module) => ({ default: module.DocumentViewer })));
 const Notifications = lazy(() => import("./pages/Notifications").then((module) => ({ default: module.Notifications })));
@@ -121,6 +124,10 @@ export default function App() {
               <Route path="/version-diff" element={<RequireAccess permission="document:read"><VersionDiff /></RequireAccess>} />
               <Route path="/aircraft-insurance" element={<RequireAccess permission="aircraft:read"><AircraftInsurance /></RequireAccess>} />
               <Route path="/admin/observability" element={<RequireAccess role="system_admin"><AdminObservability /></RequireAccess>} />
+              <Route path="/audit-reports" element={<RequireAccess permission="audit_report:read"><AuditReports /></RequireAccess>} />
+              <Route path="/audit-findings" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
+              <Route path="/audit-findings/:findingId" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
+              <Route path="/audit-dashboard" element={<RequireAccess permission="audit_finding:read"><AuditDashboard /></RequireAccess>} />
               <Route path="/notifications" element={<RequireAccess permission="safety:read"><Notifications /></RequireAccess>} />
               <Route path="/account/security" element={<ChangePasswordPage />} />
               <Route path="/account/profile" element={<ProfileSettingsPage />} />

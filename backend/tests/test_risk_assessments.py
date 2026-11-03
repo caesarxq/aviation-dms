@@ -76,6 +76,12 @@ class TestRiskAssessments:
         data = resp.json()
         assert data["hazard_ids"] == []
 
+    def test_create_rejects_unknown_hazard_with_validation_error(self, client, safety_headers):
+        response = client.post("/api/p1/risk-assessments", json={
+            "title": "Unknown linked hazard", "hazard_ids": ["MISSING-HAZARD"],
+        }, headers=safety_headers)
+        assert response.status_code == 422
+
     def test_update_risk_assessment(self, client, safety_headers):
         resp = client.post("/api/p1/risk-assessments", json={
             "title": "Updatable risk",
@@ -84,20 +90,79 @@ class TestRiskAssessments:
         }, headers=safety_headers)
         assessment_id = resp.json()["assessment_id"]
         h = _create_hazard(client, safety_headers, "Updated hazard")
+        # Content/hazard edits remain patchable; approval is a separate command.
         resp = client.patch(f"/api/p1/risk-assessments/{assessment_id}", json={
-            "status": "approved",
-            "reviewed_by": "u-quality",
-            "residual_risk": "Accepted residual risk",
-            "hazard_ids": [h]
+            "residual_risk": "Accepted residual risk", "hazard_ids": [h]
         }, headers=safety_headers)
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "approved"
-        assert data["residual_risk"] == "Accepted residual risk"
-        assert data["hazard_ids"] == [h]
+        assert resp.json()["status"] == "draft"
+        assert resp.json()["residual_risk"] == "Accepted residual risk"
+        assert resp.json()["hazard_ids"] == [h]
+        approved = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=safety_headers)
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "approved"
+
+    @pytest.mark.parametrize("field,value", [
+        ("risk_model", "unrecognized_model"),
+        ("likelihood", "unknown"),
+        ("severity", "extreme"),
+        ("exposure", "unknown"),
+    ])
+    def test_unknown_risk_inputs_are_rejected(self, client, safety_headers, field, value):
+        response = client.post("/api/p1/risk-assessments", json={"title": "Invalid risk input", field: value}, headers=safety_headers)
+        assert response.status_code == 422
+
+    def test_flight_risk_model_requires_explicit_exposure(self, client, safety_headers):
+        response = client.post("/api/p1/risk-assessments", json={
+            "title": "Missing exposure", "risk_model": "om_flight_26", "likelihood": "possible", "severity": "minor",
+        }, headers=safety_headers)
+        assert response.status_code == 422
+
+    def test_invalid_hazard_replacement_rolls_back_entire_risk_update(self, client, safety_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Atomic risk update", "description": "Original", "risk_level": "medium",
+        }, headers=safety_headers).json()
+        assessment_id = created["assessment_id"]
+        response = client.patch(f"/api/p1/risk-assessments/{assessment_id}", json={
+            "title": "Must roll back", "hazard_ids": ["MISSING-HAZARD"],
+        }, headers=safety_headers)
+        assert response.status_code == 422
+        unchanged = next(
+            item for item in client.get("/api/p1/risk-assessments", headers=safety_headers).json()
+            if item["assessment_id"] == assessment_id
+        )
+        assert unchanged["title"] == "Atomic risk update"
+        assert unchanged["hazard_ids"] == []
+
+    def test_om_risk_score_is_derived_not_caller_supplied(self, client, safety_headers):
+        response = client.post("/api/p1/risk-assessments", json={
+            "title": "Derived flight risk", "risk_model": "om_flight_26", "likelihood": "probable",
+            "severity": "major", "exposure": "frequent", "risk_score": 26,
+        }, headers=safety_headers)
+        assert response.status_code == 201
+        assert response.json()["risk_score"] == 17
+        assert response.json()["flight_cancelled"] is False
+
+    def test_risk_assessment_status_and_score_are_not_patchable(self, client, safety_headers):
+        created = client.post("/api/p1/risk-assessments", json={"title": "Protected risk"}, headers=safety_headers).json()
+        response = client.patch(f"/api/p1/risk-assessments/{created['assessment_id']}", json={
+            "status": "approved", "risk_score": 25, "risk_level": "low"
+        }, headers=safety_headers)
+        assert response.status_code == 422
+        unchanged = next(item for item in client.get("/api/p1/risk-assessments", headers=safety_headers).json() if item["assessment_id"] == created["assessment_id"])
+        assert unchanged["status"] == "draft"
+        assert unchanged["risk_score"] == 6
+
+    def test_risk_approval_uses_dedicated_role_gated_command(self, client, safety_headers):
+        created = client.post("/api/p1/risk-assessments", json={"title": "Approval path"}, headers=safety_headers).json()
+        rejected = client.post(f"/api/p1/risk-assessments/{created['assessment_id']}/approve", headers={"X-Role": "flight_ops_officer", "X-Actor": "u-flight-ops"})
+        assert rejected.status_code == 403, rejected.text
+        approved = client.post(f"/api/p1/risk-assessments/{created['assessment_id']}/approve", headers=safety_headers)
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "approved"
 
     def test_nonexistent_risk_assessment_returns_404(self, client, safety_headers):
-        resp = client.patch("/api/p1/risk-assessments/NONEXISTENT", json={"status": "approved"}, headers=safety_headers)
+        resp = client.post("/api/p1/risk-assessments/NONEXISTENT/approve", headers=safety_headers)
         assert resp.status_code == 404
 
     def test_sms_5x5_rejects_contradictory_risk_level(self, client, safety_headers):
@@ -115,15 +180,15 @@ class TestRiskAssessments:
         r22 = client.post("/api/p1/risk-assessments", json={
             "title": "Unfamiliar route survey",
             "risk_model": "om_flight_26",
-            "likelihood": "possible",
-            "severity": "major",
+            "likelihood": "probable",
+            "severity": "hazardous",
             "exposure": "frequent",
             "risk_score": 22,
         }, headers=safety_headers)
         assert r22.status_code == 201
         d22 = r22.json()
         assert d22["risk_model"] == "om_flight_26"
-        assert d22["risk_score"] == 22
+        assert d22["risk_score"] == 21
         assert d22["scrutiny_required"] is True
         assert d22["flight_cancelled"] is False
 
@@ -133,7 +198,7 @@ class TestRiskAssessments:
             "risk_model": "om_flight_26",
             "likelihood": "frequent",
             "severity": "catastrophic",
-            "exposure": "frequent",
+            "exposure": "rare",
             "risk_score": 26,
         }, headers=safety_headers)
         assert r26.status_code == 201

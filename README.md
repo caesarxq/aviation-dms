@@ -11,7 +11,7 @@ aviation-dms/
 ├── backend/                 # FastAPI (Python 3.11) API
 │   ├── app/
 │   │   ├── main.py          # App entry, CORS, security headers, auth middleware
-│   │   ├── p0_auth.py       # JWT validation (production) / dev identity (development)
+│   │   ├── p0_auth.py       # HTTP-only session auth, CSRF, dev-only identity headers
 │   │   ├── p0_routes.py     # P0: documents, versions, content, change requests,
 │   │   │                  # distributions, retention, legal holds, compliance,
 │   │   │                  # audit events, evidence pack, admin observability,
@@ -42,7 +42,7 @@ aviation-dms/
 │   ├── e2e/                 # Playwright smoke tests (14 tests)
 │   ├── vitest.config.ts
 │   └── tsconfig.json
-├── docker-compose.yml       # Backend, frontend, Keycloak
+├── docker-compose.yml       # HTTPS production stack; see docs/PRODUCTION-DEPLOYMENT.md
 ├── DESIGN.md                # Design system tokens (KFL brand)
 └── .env.example             # Environment variable template
 ```
@@ -51,12 +51,12 @@ aviation-dms/
 
 **Backend**
 - FastAPI, Python 3.11, aiosqlite (SQLite)
-- python-jose (JWT validation)
-- pytest (80 tests)
+- Opaque server-managed HTTP-only sessions with CSRF validation (JWT/OIDC is not implemented)
+- pytest
 
 **Frontend**
-- React 18, TypeScript, Vite, Tailwind CSS
-- @tanstack/react-query, React Router DOM, Lucide icons, DOMPurify
+- React 18, TypeScript, Vite 6, Tailwind CSS
+- @tanstack/react-query, React Router DOM v7, Lucide icons, DOMPurify
 - Vitest (unit), Playwright (E2E)
 
 ## Quick Start
@@ -67,13 +67,13 @@ aviation-dms/
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt   # or install deps manually: fastapi uvicorn aiosqlite python-jose python-multipart
+pip install -r requirements.txt
 
-# Copy env template
-cp ../.env.example .env
-# Edit DEV_MODE=true for local development (header-based auth)
+# Copy the local-development environment template at the repository root.
+cp ../.env.example ../.env
+set -a; source ../.env; set +a
 
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Health check: `http://localhost:8000/health`
@@ -93,11 +93,7 @@ The frontend proxies `/api` to `http://localhost:8000` in dev.
 
 ### Docker
 
-```bash
-docker compose up --build
-```
-
-Services: backend (8000), frontend (80), Keycloak (8080).
+Local development should use the backend and Vite commands above. The root `docker-compose.yml` is a production-shaped HTTPS deployment and intentionally requires a hostname, SMTP configuration, and a mounted bootstrap-token file; it will not start with development defaults. Follow [`docs/PRODUCTION-DEPLOYMENT.md`](docs/PRODUCTION-DEPLOYMENT.md) for staging/production setup and release gates.
 
 ## Authentication & RBAC
 
@@ -111,7 +107,7 @@ Invalid or unknown actor/role pairs return `401`.
 
 ### Production mode (`DEV_MODE=false`)
 
-Bearer JWT validation via `python-jose`. Required claims: `sub`, `role`, `aud`, `iss`. Tokens must be signed with `JWT_SECRET` using `JWT_ALGORITHM` (HS256).
+Production API requests use an opaque, server-managed HTTP-only session cookie and a separate CSRF cookie/header pair. Mutations require an allowed HTTPS Origin. Session roles are loaded from the server-side assignments and active-role context. Development identity headers are disabled in production. Bearer JWT/OIDC validation is not implemented; do not configure or advertise those unused settings as an authentication method.
 
 ### Role profiles (16 roles)
 
@@ -143,10 +139,10 @@ Separation of duties: a change proposer cannot approve/reject/publish their own 
 `draft → in_review → {approved → kcaa_approved → published}` with `rejected` as an exit at most stages.
 
 - `draft → in_review`: librarian (document:update)
-- `in_review → approved`: head_quality (document:approve)
-- `approved → kcaa_approved`: system_admin (KCAA gate)
-- `kcaa_approved → published`: system_admin (document:publish, SoD: creator cannot publish)
-- KCAA gate: documents requiring KCAA approval cannot be published without `kcaa_approved`
+- `in_review → approved`: an authorized `document:approve` role; creator cannot approve
+- `approved → kcaa_approved`: `document:approve` after a retained evidence PDF is independently verified; uploader, verifier, and KCAA approver must be distinct
+- `kcaa_approved → published`: an authorized `document:publish` role; creator cannot publish and the verified evidence file/hash is rechecked
+- KCAA gate: documents requiring KCAA approval cannot be published without a retained PDF evidence artifact whose SHA-256 is computed server-side, verified by a separate `document:approve` principal, and linked to the exact version. This records internal evidence review; it is not an automated validation against KCAA systems.
 
 ### Atomic change proposals
 
@@ -273,15 +269,15 @@ npm run build                # TypeScript + Vite production build
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEV_MODE` | `false` | Header-based auth when true |
-| `DMS_DB_PATH` | `data/dms.db` | SQLite database path |
-| `JWT_SECRET` | `change-me...` | Production JWT signing secret |
-| `JWT_ALGORITHM` | `HS256` | JWT algorithm |
-| `JWT_AUDIENCE` | `kfl-aviation-dms` | JWT audience claim |
-| `JWT_ISSUER` | `kfl-aviation-dms` | JWT issuer claim |
+| `DEV_MODE` | local template: `true` | Development-only identity-header fallback; production must set `false` |
+| `DMS_DB_PATH` | backend `data/dms.db` locally | SQLite database path |
+| `SESSION_COOKIE_SECURE` | secure when `DEV_MODE=false` | Production must keep `true` and use HTTPS |
+| `AUTH_ALLOWED_ORIGINS` | localhost only in local dev | Exact browser origins permitted for session requests |
+| `PUBLIC_APP_URL` | localhost in local dev | HTTPS base URL used for password-reset links |
+| `KFL_BOOTSTRAP_TOKEN_FILE` | unset locally | Protected file containing the one-time production bootstrap token |
 | `UPLOAD_DIR` | `data/uploads` | Multipart upload storage |
-| `SMTP_*` | — | Email notification config |
-| `NOTIFICATION_ENABLED` | `false` | Enable email notifications |
+| `SMTP_*` | unset in local dev | Required production email/reset delivery settings |
+| `NOTIFICATION_ENABLED` | `false` locally | Enables configured email notifications |
 
 See `.env.example` for the full template.
 
@@ -293,12 +289,13 @@ Form UX, accessibility, and mutation-testing guidance is documented in [`docs/FO
 
 ## Security
 
-- Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy headers
-- CORS restricted to `http://localhost:5173` in dev
-- DOMPurify sanitization for all rendered document HTML
-- Role-based access control with separation of duties
-- No hardcoded credentials; all secrets via environment variables
-- Audit events logged for all state-changing operations
+- Production Compose uses HTTPS termination, HSTS and response security headers; local development uses localhost-only origins.
+- Browser authentication uses server-managed HTTP-only sessions, CSRF validation and explicit server-side role permissions; development identity headers are disabled in production.
+- Stored manual HTML is rendered in a script-disabled sandbox with a restrictive document CSP. The editor sanitizes untrusted pasted/proposed markup; direct draft saves are disabled for high-fidelity manuals when the editor would lose source layout.
+- Upload handling binds self-service access to the authenticated user, restricts filesystem paths, checks file signatures and enforces a size limit.
+- Production secrets are supplied through protected configuration or mounted secret files; no shared test password is embedded in the data seeder or E2E suite.
+- Audit events are recorded for controlled workflow operations; verify event coverage for every new state-changing endpoint before release.
+- Security and operational gates do not establish regulatory approval; use the release controls in [`docs/PRODUCTION-DEPLOYMENT.md`](docs/PRODUCTION-DEPLOYMENT.md).
 
 ## License
 

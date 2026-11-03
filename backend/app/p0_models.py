@@ -143,6 +143,8 @@ class DocumentVersionResponse(BaseModel):
     kcaa_approved_at: Optional[str] = None
     published_at: Optional[str] = None
     kcaa_reference: Optional[str] = None
+    kcaa_evidence_sha256: Optional[str] = None
+    kcaa_evidence_id: Optional[str] = None
     created_at: str
     updated_at: str
     created_by: str

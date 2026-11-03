@@ -1,6 +1,6 @@
 """P1 Pydantic models."""
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, Literal
 from enum import Enum
 
 
@@ -37,10 +37,8 @@ class OccurrenceUpdate(BaseModel):
     severity: Optional[str] = None
     status: Optional[str] = None
     location: Optional[str] = None
-    occurred_at: Optional[str] = None
-    mor_required: Optional[bool] = None
-    mor_deadline: Optional[str] = None
-    mor_submitted_at: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class OccurrenceMORAssessmentRequest(BaseModel):
@@ -137,11 +135,11 @@ class RiskAssessmentCreate(BaseModel):
     hazard_ids: Optional[list[str]] = None
     occurrence_id: Optional[str] = None
     mission_id: Optional[str] = None
-    likelihood: str = "possible"
-    severity: str = "minor"
-    risk_level: str = "medium"
-    risk_model: str = "sms_5x5"
-    exposure: Optional[str] = None
+    likelihood: Literal["rare", "remote", "unlikely", "occasional", "possible", "probable", "likely", "frequent", "almost_certain"] = "possible"
+    severity: Literal["negligible", "minor", "major", "moderate", "hazardous", "critical", "catastrophic"] = "minor"
+    risk_level: Literal["low", "medium", "high", "critical"] = "medium"
+    risk_model: Literal["sms_5x5", "om_flight_26"] = "sms_5x5"
+    exposure: Optional[Literal["rare", "remote", "unlikely", "occasional", "possible", "probable", "likely", "frequent", "almost_certain"]] = None
     risk_score: Optional[int] = None
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
@@ -150,17 +148,11 @@ class RiskAssessmentCreate(BaseModel):
 class RiskAssessmentUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    likelihood: Optional[str] = None
-    severity: Optional[str] = None
-    risk_level: Optional[str] = None
-    risk_model: Optional[str] = None
-    exposure: Optional[str] = None
-    risk_score: Optional[int] = None
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
-    status: Optional[str] = None
-    reviewed_by: Optional[str] = None
     hazard_ids: Optional[list[str]] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class RiskAssessmentResponse(BaseModel):
@@ -468,6 +460,9 @@ class FlightReleaseCreate(BaseModel):
     weather_confirmed: bool = False
     crew_confirmed: bool = False
     aircraft_confirmed: bool = False
+    weather_evidence: Optional[str] = None
+    crew_evidence: Optional[str] = None
+    aircraft_evidence: Optional[str] = None
     notes: Optional[str] = None
 
 class FlightReleaseResponse(BaseModel):
@@ -480,6 +475,9 @@ class FlightReleaseResponse(BaseModel):
     weather_confirmed: bool = False
     crew_confirmed: bool = False
     aircraft_confirmed: bool = False
+    weather_evidence: Optional[str] = None
+    crew_evidence: Optional[str] = None
+    aircraft_evidence: Optional[str] = None
     status: str
     notes: Optional[str] = None
     created_at: str
@@ -591,11 +589,8 @@ class CorrectiveActionUpdate(BaseModel):
     preventive_action: Optional[str] = None
     owner_id: Optional[str] = None
     due_date: Optional[str] = None
-    status: Optional[str] = None
-    verification: Optional[str] = None
-    verified_by: Optional[str] = None
-    verified_at: Optional[str] = None
-    closed_at: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 class CorrectiveActionResponse(BaseModel):
     car_id: str
@@ -666,16 +661,16 @@ class DGShipmentResponse(BaseModel):
 
 class DGAcceptanceCheckCreate(BaseModel):
     shipment_id: str
-    packaging_ok: bool = False
-    marking_ok: bool = False
-    labeling_ok: bool = False
-    documentation_ok: bool = False
-    compatibility_ok: bool = False
-    triple_packaging_ok: bool = True
-    no_leakage_visual_ok: bool = True
-    pic_weather_confirmed: bool = True
-    crew_layers_unopened_confirmed: bool = True
-    weight_within_limit_ok: bool = True
+    packaging_ok: bool
+    marking_ok: bool
+    labeling_ok: bool
+    documentation_ok: bool
+    compatibility_ok: bool
+    triple_packaging_ok: bool
+    no_leakage_visual_ok: bool
+    pic_weather_confirmed: bool
+    crew_layers_unopened_confirmed: bool
+    weight_within_limit_ok: bool
     notes: Optional[str] = None
 
 class DGAcceptanceCheckResponse(BaseModel):

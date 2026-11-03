@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { safetyApi } from "../api/safety";
 import { AlertTriangle, FileText } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 function severityClass(severity: string) {
   switch (severity) {
@@ -19,7 +21,9 @@ function severityClass(severity: string) {
 
 export function Occurrences() {
   const qc = useQueryClient();
-  const { data: occurrences = [], isLoading } = useQuery({
+  const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const { data: occurrences = [], isLoading, isError, refetch } = useQuery({
     queryKey: ["occurrences"],
     queryFn: () => safetyApi.listOccurrences(),
   });
@@ -29,6 +33,16 @@ export function Occurrences() {
   const [severity, setSeverity] = useState("minor");
   const [occurrenceType, setOccurrenceType] = useState("incident");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [mutationError, setMutationError] = useState("");
+
+  const filteredOccurrences = useMemo(() => occurrences.filter((occurrence: any) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || [occurrence.serial_number, occurrence.title, occurrence.location, occurrence.occurrence_type]
+      .some((value) => String(value ?? "").toLowerCase().includes(query));
+    return matchesSearch && (!statusFilter || occurrence.status === statusFilter);
+  }), [occurrences, search, statusFilter]);
 
   const { errors: occFieldErrors, isValid: occIsValid } = useValidation(
     { title, description, severity, occurrence_type: occurrenceType },
@@ -50,7 +64,9 @@ export function Occurrences() {
       setDescription("");
       setSeverity("minor");
       setOccurrenceType("incident");
+      setMutationError("");
     },
+    onError: () => setMutationError("Unable to submit the occurrence. Please try again."),
   });
 
   return (
@@ -61,12 +77,12 @@ export function Occurrences() {
           <h1 className="app-title">Safety Occurrences</h1>
           <p className="app-subtitle">Report, track, and manage aviation safety occurrences.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <AlertTriangle size={16} /> {showForm ? "Cancel" : "Report Occurrence"}
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -88,9 +104,9 @@ export function Occurrences() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <FileText size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input id="search_occurrences_74" name="search_occurrences" value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search occurrences…" className="app-input pl-9 relative z-10" />
+            <input id="search_occurrences_74" name="search_occurrences" type="search" aria-label="Search occurrences" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search occurrences…" className="app-input pl-9 relative z-10" />
           </div>
-          <select id="select_field_76" name="select_field" className="app-input w-full md:w-auto">
+          <select id="select_field_76" name="status" aria-label="Filter occurrences by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="reported">Reported</option>
             <option value="acknowledged">Acknowledged</option>
@@ -118,6 +134,7 @@ export function Occurrences() {
                 {occFieldErrors.description && <p id="description_95-error" className="text-[11px] text-rose-700 mt-1">{occFieldErrors.description}</p>}
                 </FormField>
             </div>
+            {mutationError && <p role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{mutationError}</p>}
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="app-label">Occurrence Type</label>
@@ -149,7 +166,12 @@ export function Occurrences() {
           </div>
         )}
 
-        {isLoading ? (
+        {isError ? (
+          <div className="p-10 text-center" role="alert">
+            <p className="text-sm font-semibold text-rose-800">Unable to load occurrences.</p>
+            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3" aria-label="Retry loading occurrences">Retry</button>
+          </div>
+        ) : isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">Loading occurrences…</div>
         ) : occurrences.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
@@ -157,6 +179,8 @@ export function Occurrences() {
             <p className="text-sm font-bold text-kfl-text">No occurrences reported.</p>
             <p className="mt-1 text-xs text-kfl-muted">Report your first occurrence to begin safety tracking.</p>
           </div>
+        ) : filteredOccurrences.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No occurrences match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -171,7 +195,7 @@ export function Occurrences() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {occurrences.map((o: any) => (
+                {filteredOccurrences.map((o: any) => (
                   <tr key={o.occurrence_id} className="transition hover:bg-kfl-surface-subtle group">
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{o.serial_number}</td>
                     <td className="px-4 py-4">
@@ -186,7 +210,7 @@ export function Occurrences() {
                       <span className="app-status app-status-info">{o.status}</span>
                     </td>
                     <td className="px-4 py-4 text-right text-sm">
-                      <button onClick={() => {}} className="text-xs font-medium text-kfl-blue hover:underline">Open</button>
+                      <button type="button" onClick={() => navigate(`/occurrences/${encodeURIComponent(o.occurrence_id)}`)} aria-label={`Open ${o.serial_number}`} className="text-xs font-medium text-kfl-blue hover:underline">Open</button>
                     </td>
                   </tr>
                 ))}

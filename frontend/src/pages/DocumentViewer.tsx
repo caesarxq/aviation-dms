@@ -1,38 +1,113 @@
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { ArrowLeft, Copy, Check, X, ListTree, Maximize2, Minimize2 } from "lucide-react";
-import { useRef, useEffect, useState } from "react";
-import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/DocumentOutline";
+import { ArrowLeft, Copy, Check, X, Maximize2, Minimize2, ListTree } from "lucide-react";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { DocumentOutline, buildOutlineFromHtml, type OutlineItem } from "../components/documents/DocumentOutline";
+
+const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'>';
+
+function addDocumentCsp(source: string): string {
+  const isHtmlDocument = /<(?:!doctype\s+html|html\b|head\b|body\b|div\b|p\b|h[1-6]\b|table\b|span\b|section\b)/i.test(source);
+  if (!isHtmlDocument) {
+    const escapedText = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<!doctype html><html><head><meta charset="utf-8"></head><body><pre>${escapedText}</pre></body></html>`;
+  }
+  const head = /<head\b[^>]*>/i.exec(source);
+  if (head && head.index !== undefined) {
+    const insertAt = head.index + head[0].length;
+    return `${source.slice(0, insertAt)}${DOCUMENT_CSP}${source.slice(insertAt)}`;
+  }
+  const html = /<html\b[^>]*>/i.exec(source);
+  if (html && html.index !== undefined) {
+    const insertAt = html.index + html[0].length;
+    return `${source.slice(0, insertAt)}<head>${DOCUMENT_CSP}</head>${source.slice(insertAt)}`;
+  }
+  return `<!doctype html><html><head>${DOCUMENT_CSP}</head><body>${source}</body></html>`;
+}
+
+function annotationText(annotation: any): string {
+  const target = String(annotation.target_ref || "").trim();
+  const marker = "Selected text:";
+  const markerIndex = target.toLowerCase().lastIndexOf(marker.toLowerCase());
+  if (markerIndex >= 0) return target.slice(markerIndex + marker.length).trim().slice(0, 500);
+  if (target.startsWith("selection:")) {
+    const start = target.indexOf('"');
+    const end = target.lastIndexOf('"');
+    if (start >= 0 && end > start) return target.slice(start + 1, end).slice(0, 500);
+  }
+  return target.slice(0, 500);
+}
+
+function applyAnnotationHighlights(doc: Document, annotations: any[]) {
+  const highlights = annotations.filter((annotation) => annotation.status !== "dismissed");
+  for (const annotation of highlights) {
+    const target = annotationText(annotation);
+    if (!target) continue;
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest("[data-kfl-annotation]") || !node.textContent) continue;
+      const text = node.textContent;
+      const index = text.indexOf(target);
+      if (index < 0 || !node.parentNode) continue;
+      const before = doc.createTextNode(text.slice(0, index));
+      const match = doc.createElement("mark");
+      match.dataset.kflAnnotation = annotation.annotation_id;
+      match.className = "kfl-document-annotation";
+      match.textContent = target;
+      const after = doc.createTextNode(text.slice(index + target.length));
+      node.parentNode.insertBefore(before, node);
+      node.parentNode.insertBefore(match, node);
+      node.parentNode.insertBefore(after, node.nextSibling);
+      node.parentNode.removeChild(node);
+      break;
+    }
+  }
+}
+
 
 export function DocumentViewer() {
   const { docId } = useParams();
-  const [searchParams] = useSearchParams();
-  const iframeRef = useRef<HTMLIFrameElement>(null);
   const viewerShellRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
-  const [annotationToolbar, setAnnotationToolbar] = useState<{ show: boolean; x: number; y: number; selectedText: string }>({ show: false, x: 0, y: 0, selectedText: "" });
-  const [newAnnotationType, setNewAnnotationType] = useState<"comment" | "highlight">("comment");
-  const [annotationContent, setAnnotationContent] = useState("");
-  const [annotationTargetRef, setAnnotationTargetRef] = useState("");
-  const [iframeReady, setIframeReady] = useState(false);
-  const [showOutline, setShowOutline] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeOutlineAnchor, setActiveOutlineAnchor] = useState(searchParams.get("section") || "");
 
   const { data: content, isLoading } = useQuery({
     queryKey: ["doc-content", docId],
     queryFn: () => api.get(`/p0/documents/${docId}/content`).then((r: any) => r.data),
     enabled: !!docId,
   });
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const parentObservedDocumentRef = useRef<Document | null>(null);
+  const selectionHandlerRef = useRef<EventListener | null>(null);
+  const annotationCommentRef = useRef<HTMLTextAreaElement>(null);
+  const selectionOpenerRef = useRef<HTMLElement | null>(null);
+  const [iframeReady, setIframeReady] = useState(false);
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [annotationType, setAnnotationType] = useState<"comment" | "highlight">("comment");
+  const [annotationContent, setAnnotationContent] = useState("");
+  const [annotationTarget, setAnnotationTarget] = useState("");
+  const [showOutline, setShowOutline] = useState(false);
+  const [activeOutlineAnchor, setActiveOutlineAnchor] = useState("");
+  const outlineItems = buildOutlineFromHtml(content?.content || "");
+
+  useEffect(() => {
+    if (!iframeRef.current || !content) return;
+    iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
+  }, [content?.content]);
+
+  const closeAnnotationDialog = useCallback(() => {
+    setSelection(null);
+    selectionOpenerRef.current?.focus();
+  }, []);
 
   const { data: annotations = [], isLoading: annLoading } = useQuery({
     queryKey: ["annotations", docId],
     queryFn: () => api.get(`/p2/documents/${docId}/annotations`).then((r: any) => r.data),
     enabled: !!docId,
   });
-
-  const outlineItems = buildOutlineFromHtml(content?.content || "");
 
   useEffect(() => {
     const handleFullscreen = () => setIsFullscreen(document.fullscreenElement === viewerShellRef.current);
@@ -56,162 +131,94 @@ export function DocumentViewer() {
     }
   };
 
-  const selectOutlineItem = (item: { anchorId: string; blockIndex: number }) => {
-    setActiveOutlineAnchor(item.anchorId);
-    const iframeDocument = iframeRef.current?.contentDocument;
-    if (!iframeDocument) return;
-    const selector = item.anchorId.startsWith("page-")
-      ? ".pf"
-      : item.anchorId.startsWith("heading-")
-        ? ".t"
-        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
-    const blocks = iframeDocument.querySelectorAll(selector);
-    const target = blocks[item.blockIndex] as HTMLElement | undefined;
-    if (!target) return;
-    const pageFrame = target.closest(".pf") as HTMLElement | null;
-    const container = iframeDocument.querySelector("#page-container") as HTMLElement | null;
-    if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && container && pageFrame) {
-      container.scrollTop = pageFrame.offsetTop;
-      container.dispatchEvent(new Event("scroll"));
-    } else {
-      target.scrollIntoView?.({ behavior: "auto", block: "center" });
-    }
-    target.classList.add("kfl-outline-target-highlight");
-    window.setTimeout(() => target.classList.remove("kfl-outline-target-highlight"), 2500);
-  };
-
-  const createMutation = useMutation({
-    mutationFn: (data: any) => api.post(`/p2/documents/${docId}/annotations`, data).then((r: any) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["annotations"] }); closeToolbar(); },
-  });
-
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => api.patch(`/p2/annotations/${id}`, data).then((r: any) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["annotations"] }),
   });
 
-  const closeToolbar = () => setAnnotationToolbar({ show: false, x: 0, y: 0, selectedText: "" });
+  const createMutation = useMutation({
+    mutationFn: (data: any) => api.post(`/p2/documents/${docId}/annotations`, data).then((r: any) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["annotations", docId] });
+      setAnnotationContent("");
+      setAnnotationTarget("");
+      closeAnnotationDialog();
+    },
+  });
 
-  // Listen for postMessage from iframe (text selection events)
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const { type, payload } = event.data || {};
-      if (type === "TEXT_SELECTED") {
-        setAnnotationToolbar({ show: true, x: payload.x, y: payload.y, selectedText: payload.text });
-      }
+  const handleFrameLoad = useCallback(() => {
+    const frameDocument = iframeRef.current?.contentDocument;
+    if (!frameDocument) return;
+    if (parentObservedDocumentRef.current && selectionHandlerRef.current) {
+      parentObservedDocumentRef.current.removeEventListener("mouseup", selectionHandlerRef.current);
+      parentObservedDocumentRef.current.removeEventListener("keyup", selectionHandlerRef.current);
+    }
+    const onSelection: EventListener = () => {
+      const frameWindow = frameDocument.defaultView;
+      const selectedRange = frameWindow?.getSelection();
+      const selected = selectedRange?.toString().trim() || "";
+      if (!selected || !selectedRange?.rangeCount) return;
+      selectionOpenerRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : iframeRef.current;
+      const frameRect = iframeRef.current?.getBoundingClientRect();
+      const range = selectedRange.getRangeAt(0);
+      const rangeRect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
+      setSelection({
+        text: selected.slice(0, 500),
+        x: (frameRect?.left || 0) + (rangeRect?.left || 16),
+        y: Math.max(8, (frameRect?.top || 0) + (rangeRect?.top || 16) - 12),
+      });
     };
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    frameDocument.addEventListener("mouseup", onSelection);
+    frameDocument.addEventListener("keyup", onSelection);
+    parentObservedDocumentRef.current = frameDocument;
+    selectionHandlerRef.current = onSelection;
+    setIframeReady(true);
   }, []);
 
-  // Render the source document once, then attach the annotation bridge without rewriting the iframe on load.
   useEffect(() => {
-    const iframe = iframeRef.current;
-    const html = content?.content;
-    if (!iframe || !html) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
+    if (selection) annotationCommentRef.current?.focus();
+  }, [selection]);
 
-    setIframeReady(false);
-    doc.open();
-    doc.write(html);
-    doc.close();
+  useEffect(() => () => {
+    if (parentObservedDocumentRef.current && selectionHandlerRef.current) {
+      parentObservedDocumentRef.current.removeEventListener("mouseup", selectionHandlerRef.current);
+      parentObservedDocumentRef.current.removeEventListener("keyup", selectionHandlerRef.current);
+    }
+  }, []);
 
-    const script = doc.createElement("script");
-    script.textContent = `
-      (function() {
-        document.addEventListener('mouseup', function() {
-          var sel = window.getSelection();
-          var text = sel ? sel.toString().trim() : '';
-          if (!text || !sel || sel.rangeCount === 0) return;
-          var rect = sel.getRangeAt(0).getBoundingClientRect();
-          window.parent.postMessage({
-            type: 'TEXT_SELECTED',
-            payload: {
-              text: text,
-              x: rect.left + window.scrollX + 10,
-              y: rect.top + window.scrollY - 40
-            }
-          }, window.location.origin);
-        });
-
-        window.addEventListener('message', function(event) {
-          if (event.origin !== window.location.origin || !event.data || event.data.type !== 'RENDER_HIGHLIGHTS') return;
-          var highlights = event.data.payload.highlights || [];
-          highlights.forEach(function(h) {
-            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-            var node;
-            var nodesToWrap = [];
-            while (node = walker.nextNode()) {
-              if (node.parentElement && !node.parentElement.classList.contains('kfl-annotation') && node.textContent.indexOf(h.text) >= 0) {
-                nodesToWrap.push({node: node, text: h.text, id: h.id, type: h.type, status: h.status});
-              }
-            }
-            nodesToWrap.forEach(function(item) {
-              var text = item.node.textContent;
-              var idx = text.indexOf(item.text);
-              if (idx < 0 || !item.node.parentNode) return;
-              var before = document.createTextNode(text.substring(0, idx));
-              var matchText = text.substring(idx, idx + item.text.length);
-              var after = document.createTextNode(text.substring(idx + item.text.length));
-              var span = document.createElement('span');
-              span.className = 'kfl-annotation kfl-' + item.type + ' kfl-status-' + item.status;
-              span.title = 'Annotation #' + item.id + ' (' + item.status + ')';
-              span.style.backgroundColor = item.type === 'comment' ? '#dbeafe' : '#fef3c7';
-              span.style.borderBottom = '2px solid';
-              span.style.borderBottomColor = item.type === 'comment' ? '#3b82f6' : '#d97706';
-              span.style.cursor = 'pointer';
-              span.textContent = matchText;
-              var parent = item.node.parentNode;
-              parent.insertBefore(before, item.node);
-              parent.insertBefore(span, item.node);
-              parent.insertBefore(after, item.node.nextSibling);
-              parent.removeChild(item.node);
-            });
-          });
-        });
-      })();
-    `;
-    (doc.body || doc.documentElement).appendChild(script);
-    setIframeReady(true);
-  }, [content]);
-
-  // Inject annotations into iframe as highlights
   useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !annotations) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-
-    const highlights = annotations.map((a: any) => ({
-      id: a.annotation_id,
-      text: a.target_ref || a.content?.substring(0, 50) || "annotation",
-      type: a.annotation_type || "comment",
-      status: a.status || "open",
-    }));
-
-    iframe.contentWindow?.postMessage(
-      { type: "RENDER_HIGHLIGHTS", payload: { highlights } },
-      window.location.origin
-    );
+    const frameDocument = iframeRef.current?.contentDocument;
+    if (iframeReady && frameDocument && annotations.length) {
+      applyAnnotationHighlights(frameDocument, annotations);
+    }
   }, [annotations, iframeReady]);
 
-  useEffect(() => {
-    const match = searchParams.get("section")?.match(/^block-(\d+)$/);
-    if (!match || !iframeReady) return;
-    selectOutlineItem({ anchorId: `block-${Number(match[1])}`, blockIndex: Number(match[1]) });
-  }, [iframeReady, searchParams]);
-
-  const handleSubmitAnnotation = () => {
+  const submitAnnotation = () => {
+    if (!selection) return;
     createMutation.mutate({
-      annotation_type: newAnnotationType,
-      target_ref: annotationTargetRef || `selection: "${annotationToolbar.selectedText.substring(0, 60)}"`,
-      content: annotationContent,
+      annotation_type: annotationType,
+      target_ref: `${annotationTarget.trim() ? `${annotationTarget.trim()} — ` : ""}Selected text: ${selection.text}`,
+      content: annotationContent.trim(),
       status: "open",
     });
-    setAnnotationContent("");
-    setAnnotationTargetRef("");
+  };
+
+  const selectOutlineItem = (item: OutlineItem) => {
+    setActiveOutlineAnchor(item.anchorId);
+    const frameDocument = iframeRef.current?.contentDocument;
+    if (!frameDocument) return;
+    const selector = item.anchorId.startsWith("page-")
+      ? ".pf"
+      : item.anchorId.startsWith("heading-")
+        ? ".t"
+        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+    const target = frameDocument.querySelectorAll(selector)[item.blockIndex] as HTMLElement | undefined;
+    if (!target) return;
+    target.scrollIntoView?.({ behavior: "auto", block: "center" });
+    target.classList.add("kfl-outline-target-highlight");
+    window.setTimeout(() => target.classList.remove("kfl-outline-target-highlight"), 2500);
   };
 
   const handleResolve = (id: string) => {
@@ -246,7 +253,7 @@ export function DocumentViewer() {
           <button
             onClick={() => setShowOutline((value) => !value)}
             className={`app-btn-secondary px-3 py-2 flex items-center gap-1 ${showOutline ? "bg-kfl-blue/10" : ""}`}
-            title={showOutline ? "Hide document outline" : "Show document outline"}
+            aria-label={showOutline ? "Hide document outline" : "Show document outline"}
           >
             <ListTree size={16} /> {showOutline ? "Hide outline" : "Outline"}
           </button>
@@ -273,32 +280,25 @@ export function DocumentViewer() {
         </div>
       </header>
 
-      {/* Annotation toolbar (floating, positioned by iframe postMessage) */}
-      {annotationToolbar.show && (
-        <div className="fixed z-50 bg-white border border-kfl-border rounded shadow-lg p-3" style={{ left: annotationToolbar.x, top: annotationToolbar.y }}>
-          <div className="text-xs font-semibold text-kfl-muted mb-2">Selected: "{annotationToolbar.selectedText.substring(0, 50)}{annotationToolbar.selectedText.length > 50 ? "…" : ""}"</div>
-          <div className="flex gap-2 mb-2">
-            <button onClick={() => setNewAnnotationType("comment")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "comment" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Comment</button>
-            <button onClick={() => setNewAnnotationType("highlight")} className={`px-2 py-1 text-xs rounded ${newAnnotationType === "highlight" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>Highlight</button>
+      {selection && (
+        <div
+          className="fixed z-50 max-w-sm rounded border border-kfl-border bg-white p-3 shadow-lg"
+          style={{ left: selection.x, top: selection.y }}
+          role="dialog"
+          aria-label="Add document annotation"
+        >
+          <p className="mb-2 text-xs text-kfl-muted">Selected: "{selection.text}"</p>
+          <div className="mb-2 flex gap-2">
+            <button type="button" onClick={() => setAnnotationType("comment")} className="app-btn-secondary px-2 py-1 text-xs">Comment</button>
+            <button type="button" onClick={() => setAnnotationType("highlight")} className="app-btn-secondary px-2 py-1 text-xs">Highlight</button>
           </div>
-          <label htmlFor="add_a_comment_284" className="block text-xs font-semibold text-kfl-text mb-1">Comment</label>
-          <textarea id="add_a_comment_284" name="add_a_comment"
-            className="w-full h-16 p-2 border border-kfl-border rounded text-sm resize-none focus:outline-none mb-2"
-            value={annotationContent}
-            onChange={e => setAnnotationContent(e.target.value)}
-            placeholder="Summarize the observation or required action"
-          />
-          <label htmlFor="target_reference_290" className="block text-xs font-semibold text-kfl-text mb-1">Target reference</label>
-          <p className="text-[11px] text-kfl-muted mb-1">Identify the affected section, line, or illustration.</p>
-          <input id="target_reference_290" name="target_reference"
-            className="w-full p-2 border border-kfl-border rounded text-sm focus:outline-none mb-2"
-            value={annotationTargetRef}
-            onChange={e => setAnnotationTargetRef(e.target.value)}
-            placeholder="Section 3.2, line 15"
-          />
+          <label htmlFor="document-annotation-comment" className="mb-1 block text-xs font-semibold">Comment</label>
+          <textarea ref={annotationCommentRef} id="document-annotation-comment" name="content" className="app-input mb-2 w-full" rows={2} value={annotationContent} onChange={(event) => setAnnotationContent(event.target.value)} />
+          <label htmlFor="document-annotation-target" className="mb-1 block text-xs font-semibold">Target reference</label>
+          <input id="document-annotation-target" name="target_ref" className="app-input mb-2 w-full" value={annotationTarget} onChange={(event) => setAnnotationTarget(event.target.value)} placeholder="Optional section reference" />
           <div className="flex justify-end gap-2">
-            <button onClick={closeToolbar} className="app-btn-secondary text-xs px-3 py-1.5">Cancel</button>
-            <button onClick={handleSubmitAnnotation} className="app-btn-primary text-xs px-3 py-1.5" disabled={createMutation.isPending}>
+            <button type="button" className="app-btn-secondary px-3 py-1 text-xs" onClick={closeAnnotationDialog}>Cancel</button>
+            <button type="button" className="app-btn-primary px-3 py-1 text-xs" onClick={submitAnnotation} disabled={createMutation.isPending}>
               {createMutation.isPending ? "Saving…" : "Add Annotation"}
             </button>
           </div>
@@ -308,12 +308,8 @@ export function DocumentViewer() {
       <section className="app-surface p-5">
         <div className={`flex gap-4 ${isFullscreen ? "h-[calc(100vh-170px)]" : "h-[calc(100vh-220px)]"}`}>
           {showOutline && (
-            <aside className="relative z-20 w-72 shrink-0 overflow-y-auto rounded border border-kfl-border bg-kfl-surface-subtle pointer-events-auto">
-              <DocumentOutline
-                items={outlineItems}
-                activeAnchor={activeOutlineAnchor}
-                onSelect={selectOutlineItem}
-              />
+            <aside className="w-72 shrink-0 overflow-y-auto rounded border border-kfl-border bg-kfl-surface-subtle">
+              <DocumentOutline items={outlineItems} activeAnchor={activeOutlineAnchor} onSelect={selectOutlineItem} />
             </aside>
           )}
           <div className="relative min-w-0 flex-1 overflow-hidden rounded border border-kfl-border bg-white">
@@ -321,7 +317,8 @@ export function DocumentViewer() {
               ref={iframeRef}
               title={docId || "Document"}
               className="h-full w-full border-0"
-              sandbox="allow-same-origin allow-scripts allow-popups"
+              sandbox="allow-same-origin"
+              onLoad={handleFrameLoad}
             />
           </div>
         </div>
@@ -331,12 +328,12 @@ export function DocumentViewer() {
       <section className="app-surface p-5 mt-4">
         <div className="flex justify-between items-center mb-3">
           <h2 className="font-semibold text-kfl-text">Annotations ({annotations.length})</h2>
-          <button onClick={() => setAnnotationToolbar({ show: false, x: 0, y: 0, selectedText: "" })} className="text-xs text-kfl-muted hover:text-kfl-text underline">Close</button>
         </div>
+        <p className="mb-3 text-sm text-kfl-muted">Select text in the document to create a comment or highlight. Rendering runs without document scripts or external network resources.</p>
         {annLoading ? (
           <div className="p-8 text-kfl-muted text-center">Loading annotations…</div>
         ) : annotations.length === 0 ? (
-          <div className="p-8 text-center text-kfl-muted">No annotations yet. Select text in the document to add one.</div>
+          <div className="p-8 text-center text-kfl-muted">No annotations yet.</div>
         ) : (
           <div className="space-y-3">
             {annotations.map((a: any) => (
@@ -362,12 +359,6 @@ export function DocumentViewer() {
           </div>
         )}
       </section>
-
-      <style>{`
-        .kfl-annotation { position: relative; }
-        .kfl-annotation:hover { z-index: 10; }
-        .kfl-outline-target-highlight { outline: 3px solid #1B7ABF; outline-offset: 4px; transition: outline-color 200ms ease; }
-      `}</style>
     </div>
   );
 }

@@ -1,0 +1,22 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DMS_HOSTNAME} {
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	}
+
+	reverse_proxy frontend:80
+}
+
+www.{$DMS_HOSTNAME} {
+	redir https://{$DMS_HOSTNAME}{uri} permanent
+}

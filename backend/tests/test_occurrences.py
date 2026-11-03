@@ -105,6 +105,21 @@ class TestOccurrences:
         resp = client.get("/api/p1/occurrences/NONEXISTENT", headers=safety_headers)
         assert resp.status_code == 404
 
+    def test_patch_cannot_change_mor_assessment_or_submission_fields(self, client, reporter_headers, safety_headers):
+        occ = client.post("/api/p1/occurrences", json={
+            "title": "MOR protection", "description": "MOR fields are command-owned", "occurred_at": "2026-10-30T10:00:00+03:00"
+        }, headers=reporter_headers).json()
+        oid = occ["occurrence_id"]
+        changed = client.patch(f"/api/p1/occurrences/{oid}", json={
+            "mor_required": True, "mor_deadline": "2026-11-02T10:00:00+03:00", "mor_submitted_at": "2026-10-31T10:00:00+03:00",
+            "occurred_at": "2026-10-31T12:00:00+03:00",
+        }, headers=safety_headers)
+        assert changed.status_code == 422
+        current = client.get(f"/api/p1/occurrences/{oid}", headers=safety_headers).json()
+        assert current["mor_required"] is False
+        assert current["mor_deadline"] is None
+        assert current["mor_submitted_at"] is None
+
     def test_occurrence_closure_requires_satisfactory_followup(self, client, reporter_headers, safety_headers):
         occ = client.post("/api/p1/occurrences", json={
             "title": "Follow-up gate test", "description": "Must verify effectiveness before closing",

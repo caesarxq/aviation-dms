@@ -1,4 +1,5 @@
 import { AuthContext } from "../auth/AuthContext";
+import { safetyApi } from "../api/safety";
 import { Dashboard } from "./Dashboard";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "../components/ui/Toast";
@@ -55,5 +56,29 @@ describe("Dashboard greeting", () => {
   it("uses a neutral greeting when the profile name is empty", () => {
     renderDashboard("");
     expect(screen.getByText(/A clear view of safety, compliance, and operational commitments/i)).toBeInTheDocument();
+  });
+
+  it("does not describe the whole system as healthy without dedicated health data", async () => {
+    renderDashboard("Miriam Njoroge");
+    expect(await screen.findByText("Dashboard data loaded" )).toBeInTheDocument();
+    expect(screen.queryByText("System healthy")).not.toBeInTheDocument();
+    expect(screen.getByText("Status not verified")).toBeInTheDocument();
+    expect(screen.getByText("Notification status not checked")).toBeInTheDocument();
+  });
+
+  it("shows unavailable dashboard metrics when their data query fails", async () => {
+    vi.mocked(safetyApi.getTrends).mockRejectedValueOnce(new Error("network"));
+    renderDashboard("Miriam Njoroge");
+    expect(await screen.findByText("Some dashboard data is unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable", { selector: "div" })).toHaveLength(3);
+    expect(screen.getByText("No overdue items")).toBeInTheDocument();
+  });
+
+  it("does not show an all-clear deadline state when deadline data fails", async () => {
+    vi.mocked(safetyApi.getDeadlines).mockRejectedValueOnce(new Error("network"));
+    renderDashboard("Miriam Njoroge");
+    expect(await screen.findByText("Unable to load deadline data.")).toBeInTheDocument();
+    expect(screen.queryByText("No deadlines require attention.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Deadline data unavailable")).toHaveLength(2);
   });
 });

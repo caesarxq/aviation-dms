@@ -45,4 +45,12 @@ describe("authentication authorization policy", () => {
     expect(getPostLoginPath(security)).toBe("/");
     expect(getPostLoginPath(admin, "/notifications")).toBe("/notifications");
   });
+
+  it("aligns audit return paths with report and finding read permissions", () => {
+    const reportReader = { role: "independent_auditor", active_role: "independent_auditor", permissions: ["audit_report:read"] };
+    const findingReader = { role: "head_quality", active_role: "head_quality", permissions: ["audit_finding:read"] };
+    expect(getPostLoginPath(reportReader, "/audit-reports")).toBe("/audit-reports");
+    expect(getPostLoginPath(reportReader, "/audit-findings")).toBe("/account/security");
+    expect(getPostLoginPath(findingReader, "/audit-findings")).toBe("/audit-findings");
+  });
 });

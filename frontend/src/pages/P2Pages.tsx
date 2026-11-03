@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { p2Api } from "../api/p2";
 import { Users, BarChart3, Calendar, Share2, Plus } from "lucide-react";
@@ -6,6 +6,7 @@ import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 function outsourcedStatusClass(status: string) {
   switch (status) {
@@ -19,6 +20,7 @@ function outsourcedStatusClass(status: string) {
 export function OutsourcedFunctions() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["outsourced-functions"],
     queryFn: () => p2Api.listOutsourcedFunctions(),
@@ -28,6 +30,11 @@ export function OutsourcedFunctions() {
   const [scope, setScope] = useState("");
   const [ofError, setOfError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredItems = useMemo(() => items.filter((item: any) => {
+    const query = search.trim().toLowerCase();
+    return !query || [item.provider_name, item.scope, item.status].some((value) => String(value ?? "").toLowerCase().includes(query));
+  }), [items, search]);
 
   const { errors: ofFieldErrors, isValid: ofIsValid } = useValidation(
     { provider_name: provider, scope_of_work: scope },
@@ -63,12 +70,12 @@ export function OutsourcedFunctions() {
           <h1 className="app-title">Outsourced Functions</h1>
           <p className="app-subtitle">Manage outsourced service providers and their scope of work.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "Add Provider"}
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -85,7 +92,7 @@ export function OutsourcedFunctions() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_providers_73" name="search_providers" value={showForm ? provider : ""} onChange={(e) => setProvider(e.target.value)} placeholder="Search providers…" className="app-input pl-9 relative z-10" />
+            <input id="search_providers_73" name="search_providers" type="search" aria-label="Search providers" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search providers…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -138,6 +145,8 @@ export function OutsourcedFunctions() {
             <p className="text-sm font-bold text-kfl-text">No outsourced functions.</p>
             <p className="mt-1 text-xs text-kfl-muted">Register your first service provider.</p>
           </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No outsourced functions match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -149,7 +158,7 @@ export function OutsourcedFunctions() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {items.map((i: any) => (
+                {filteredItems.map((i: any) => (
                   <tr key={i.function_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.provider_name}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.scope}</td>
@@ -170,6 +179,7 @@ export function OutsourcedFunctions() {
 export function SafetyKPIs() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["safety-kpis"],
     queryFn: () => p2Api.listSafetyKPIs(),
@@ -179,6 +189,11 @@ export function SafetyKPIs() {
   const [target, setTarget] = useState("");
   const [kpiError, setKpiError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredItems = useMemo(() => items.filter((item: any) => {
+    const query = search.trim().toLowerCase();
+    return !query || [item.kpi_name, item.target, item.status].some((value) => String(value ?? "").toLowerCase().includes(query));
+  }), [items, search]);
 
   const { errors: kpiFieldErrors, isValid: kpiIsValid } = useValidation(
     { kpi_name: name },
@@ -213,12 +228,12 @@ export function SafetyKPIs() {
           <h1 className="app-title">Safety KPIs</h1>
           <p className="app-subtitle">Monitor key safety performance indicators and targets.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <BarChart3 size={16} /> {showForm ? "Cancel" : "Add KPI"}
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -231,7 +246,7 @@ export function SafetyKPIs() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_kpis_208" name="search_kpis" value={showForm ? name : ""} onChange={(e) => setName(e.target.value)} placeholder="Search KPIs…" className="app-input pl-9 relative z-10" />
+            <input id="search_kpis_208" name="search_kpis" type="search" aria-label="Search KPIs" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search KPIs…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -283,6 +298,8 @@ export function SafetyKPIs() {
             <p className="text-sm font-bold text-kfl-text">No safety KPIs.</p>
             <p className="mt-1 text-xs text-kfl-muted">Create your first KPI to monitor safety performance.</p>
           </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No safety KPIs match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -294,7 +311,7 @@ export function SafetyKPIs() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {items.map((i: any) => (
+                {filteredItems.map((i: any) => (
                   <tr key={i.kpi_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.kpi_name}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.target}</td>
@@ -313,6 +330,7 @@ export function SafetyKPIs() {
 export function SecurityReviews() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["security-reviews"],
     queryFn: () => p2Api.listSecurityReviews(),
@@ -321,6 +339,11 @@ export function SecurityReviews() {
   const [date, setDate] = useState("");
   const [srError, setSrError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredItems = useMemo(() => items.filter((item: any) => {
+    const query = search.trim().toLowerCase();
+    return !query || [item.meeting_date, item.attendees, item.minutes, item.status].some((value) => String(value ?? "").toLowerCase().includes(query));
+  }), [items, search]);
 
   const { errors: srFieldErrors, isValid: srIsValid } = useValidation(
     { meeting_date: date },
@@ -354,12 +377,12 @@ export function SecurityReviews() {
           <h1 className="app-title">Security Review Meetings</h1>
           <p className="app-subtitle">Schedule and track security review meetings.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <Calendar size={16} /> {showForm ? "Cancel" : "Schedule Review"}
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -372,7 +395,7 @@ export function SecurityReviews() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_reviews_339" name="search_reviews" value={showForm ? date : ""} onChange={(e) => setDate(e.target.value)} placeholder="Search reviews…" className="app-input pl-9 relative z-10" />
+            <input id="search_reviews_339" name="search_reviews" type="search" aria-label="Search reviews" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search reviews…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -419,6 +442,8 @@ export function SecurityReviews() {
             <p className="text-sm font-bold text-kfl-text">No security reviews.</p>
             <p className="mt-1 text-xs text-kfl-muted">Schedule your first security review meeting.</p>
           </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No security reviews match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -430,7 +455,7 @@ export function SecurityReviews() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {items.map((i: any) => (
+                {filteredItems.map((i: any) => (
                   <tr key={i.review_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.meeting_date}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.status}</td>
@@ -449,6 +474,7 @@ export function SecurityReviews() {
 export function DGResponsibilityMatrix() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const { data: items = [], isLoading } = useQuery({
     queryKey: ["dg-matrix"],
     queryFn: () => p2Api.listDGMatrix(),
@@ -459,6 +485,11 @@ export function DGResponsibilityMatrix() {
   const [role, setRole] = useState("");
   const [dgError, setDgError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const filteredItems = useMemo(() => items.filter((item: any) => {
+    const query = search.trim().toLowerCase();
+    return !query || [item.project_or_route, item.process_stage, item.responsible_role, item.operation_type, item.status].some((value) => String(value ?? "").toLowerCase().includes(query));
+  }), [items, search]);
 
   const { errors: dgFieldErrors, isValid: dgIsValid } = useValidation(
     { project_or_route: project, process_stage: stage, responsible_role: role },
@@ -494,12 +525,12 @@ export function DGResponsibilityMatrix() {
           <h1 className="app-title">DG Responsibility Matrix</h1>
           <p className="app-subtitle">Assign DG responsibilities across projects and routes.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <Share2 size={16} /> {showForm ? "Cancel" : "Add Entry"}
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -512,7 +543,7 @@ export function DGResponsibilityMatrix() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_matrix_entries_465" name="search_matrix_entries" value={showForm ? project : ""} onChange={(e) => setProject(e.target.value)} placeholder="Search matrix entries…" className="app-input pl-9 relative z-10" />
+            <input id="search_matrix_entries_465" name="search_matrix_entries" type="search" aria-label="Search matrix entries" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search matrix entries…" className="app-input pl-9 relative z-10" />
           </div>
         </div>
 
@@ -565,8 +596,10 @@ export function DGResponsibilityMatrix() {
           <div className="app-surface border-dashed p-10 text-center">
             <Share2 size={26} className="mx-auto mb-2 text-kfl-muted" />
             <p className="text-sm font-bold text-kfl-text">No DG responsibility entries.</p>
-            <p className="mt-1 text-xs text-kfl-muted">Create your first entry to assign DG responsibilities.</p>
+            <p className="mt-1 text-xs text-kfl-muted">Add a matrix entry to assign operational responsibilities.</p>
           </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No matrix entries match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -579,7 +612,7 @@ export function DGResponsibilityMatrix() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {items.map((i: any) => (
+                {filteredItems.map((i: any) => (
                   <tr key={i.matrix_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.project_or_route}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.process_stage}</td>

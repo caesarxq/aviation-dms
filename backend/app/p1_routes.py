@@ -1,5 +1,6 @@
 """P1 API routes - Safety, ROC, Aircraft."""
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import ValidationError
 from typing import Optional, List
 from datetime import datetime, timedelta
 import uuid
@@ -75,39 +76,61 @@ def _gen_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
 
-async def _check_mission_eligibility(db, aircraft_id=None, rpas_pilot_id=None, visual_observer_id=None):
-    """Hard-block on expiry: verify crew licenses and aircraft insurance are valid."""
+async def _check_mission_eligibility(db, aircraft_id=None, rpas_pilot_id=None, visual_observer_id=None, require_pilot=False):
+    """Fail closed on missing, expired, inactive, or unverified operational credentials."""
     errors = []
-    today = datetime.now().date().isoformat()
+    today = datetime.now().date()
 
-    # Check pilot licenses
-    for person_id in [rpas_pilot_id, visual_observer_id]:
+    for person_id, qualification in ((rpas_pilot_id, "pilot"), (visual_observer_id, "observer")):
         if not person_id:
+            if require_pilot and qualification == "pilot":
+                errors.append("An assigned RPAS pilot is required for flight release")
+            continue
+        user_cursor = await db.execute("SELECT is_active FROM users WHERE user_id = ?", (person_id,))
+        user = await user_cursor.fetchone()
+        if not user or not user["is_active"]:
+            errors.append(f"Crew member {person_id} is missing or inactive")
             continue
         cursor = await db.execute(
-            "SELECT license_type, expiry_date, status FROM personnel_licenses WHERE person_id = ? AND status IN ('valid', 'expiring_soon')",
-            (person_id,)
+            "SELECT license_type, expiry_date, status, verified_by FROM personnel_licenses WHERE person_id = ?",
+            (person_id,),
         )
         rows = await cursor.fetchall()
-        if not rows:
-            errors.append(f"Person {person_id} has no valid licenses on record")
+        role_rows = [r for r in rows if qualification in (r["license_type"] or "").lower()]
+        if not role_rows:
+            errors.append(f"Crew member {person_id} has no {qualification} authorization on record")
             continue
-        for r in rows:
-            if r["expiry_date"] and r["expiry_date"] < today:
-                errors.append(f"Person {person_id} has expired {r['license_type']} (expired {r['expiry_date']})")
+        valid = False
+        for row in role_rows:
+            try:
+                expiry = datetime.fromisoformat(row["expiry_date"].replace("Z", "+00:00")).date()
+            except (TypeError, ValueError):
+                continue
+            if row["status"] in ("valid", "expiring_soon") and expiry >= today and row["verified_by"]:
+                valid = True
+                break
+        if not valid:
+            errors.append(f"Crew member {person_id} has no current verified {qualification} authorization")
 
-    # Check aircraft insurance
     if aircraft_id:
         cursor = await db.execute(
-            "SELECT insurance_type, expiry_date, status FROM aircraft_insurance WHERE aircraft_id = ? AND status IN ('active', 'valid', 'expiring_soon')",
-            (aircraft_id,)
+            "SELECT status, expiry_date FROM aircraft_insurance WHERE aircraft_id = ?",
+            (aircraft_id,),
         )
         rows = await cursor.fetchall()
-        if not rows:
-            errors.append(f"Aircraft {aircraft_id} has no valid insurance on record")
-        for r in rows:
-            if r["expiry_date"] and r["expiry_date"] < today:
-                errors.append(f"Aircraft {aircraft_id} has expired {r['insurance_type']} insurance (expired {r['expiry_date']})")
+        valid_policy = False
+        for row in rows:
+            try:
+                expiry = datetime.fromisoformat(row["expiry_date"].replace("Z", "+00:00")).date()
+            except (TypeError, ValueError):
+                continue
+            if row["status"] in ("active", "valid", "expiring_soon") and expiry >= today:
+                valid_policy = True
+                break
+        if not valid_policy:
+            errors.append(f"Aircraft {aircraft_id} has no current active insurance policy")
+    elif require_pilot:
+        errors.append("An assigned aircraft is required for flight release")
 
     if errors:
         raise HTTPException(status_code=422, detail={"eligibility_errors": errors})
@@ -205,18 +228,11 @@ async def update_occurrence(occ_id: str, update: OccurrenceUpdate, request: Requ
             raise HTTPException(status_code=404, detail="Occurrence not found")
         updates = []
         params = []
-        field_map = {
-            "title": update.title, "description": update.description, "occurrence_type": update.occurrence_type,
-            "severity": update.severity, "status": update.status, "location": update.location,
-            "occurred_at": update.occurred_at, "mor_deadline": update.mor_deadline, "mor_submitted_at": update.mor_submitted_at,
-        }
+        field_map = {"title": update.title, "description": update.description, "occurrence_type": update.occurrence_type, "severity": update.severity, "status": update.status, "location": update.location}
         for col, val in field_map.items():
             if val is not None:
                 updates.append(f"{col} = ?")
                 params.append(val)
-        if update.mor_required is not None:
-            updates.append("mor_required = ?")
-            params.append(1 if update.mor_required else 0)
         if updates:
             updates.append("updated_at = ?")
             params.append(now_iso())
@@ -462,12 +478,23 @@ _SEVERITY_WEIGHTS = {
 
 
 def _evaluate_risk_assessment(ra: RiskAssessmentCreate) -> tuple[str, int, bool, bool, str]:
-    """Keep SMS 5x5 matrix (SAF-07) and OM §2.6 3-factor flight risk tool (>20 scrutiny, >25 cancel) distinct."""
-    l_weight = _LIKELIHOOD_WEIGHTS.get((ra.likelihood or "possible").lower(), 3)
-    s_weight = _SEVERITY_WEIGHTS.get((ra.severity or "minor").lower(), 2)
+    """Keep SMS 5x5 matrix and OM §2.6 flight tool separate; reject unsupported inputs."""
+    if ra.risk_model not in {"sms_5x5", "om_flight_26"}:
+        raise HTTPException(status_code=422, detail="Unsupported risk model")
+    l_key = (ra.likelihood or "").lower()
+    s_key = (ra.severity or "").lower()
+    if l_key not in _LIKELIHOOD_WEIGHTS or s_key not in _SEVERITY_WEIGHTS:
+        raise HTTPException(status_code=422, detail="Unsupported likelihood or severity rating")
+    l_weight = _LIKELIHOOD_WEIGHTS[l_key]
+    s_weight = _SEVERITY_WEIGHTS[s_key]
     if ra.risk_model == "om_flight_26":
-        exp_weight = _LIKELIHOOD_WEIGHTS.get((ra.exposure or "occasional").lower(), 3)
-        score = ra.risk_score if ra.risk_score is not None else (l_weight * s_weight + exp_weight)
+        if not ra.exposure:
+            raise HTTPException(status_code=422, detail="Exposure is required for the OM §2.6 flight risk model")
+        exp_key = ra.exposure.lower()
+        if exp_key not in _LIKELIHOOD_WEIGHTS:
+            raise HTTPException(status_code=422, detail="Unsupported exposure rating")
+        exp_weight = _LIKELIHOOD_WEIGHTS[exp_key]
+        score = l_weight * s_weight + exp_weight
         scrutiny_required = score > 20
         flight_cancelled = score > 25
         if flight_cancelled:
@@ -485,7 +512,7 @@ def _evaluate_risk_assessment(ra: RiskAssessmentCreate) -> tuple[str, int, bool,
         return level, score, scrutiny_required, flight_cancelled, status
 
     # Default: SMS 5x5 matrix (SAF-07)
-    score = ra.risk_score if ra.risk_score is not None else (l_weight * s_weight)
+    score = l_weight * s_weight
     if score >= 17:
         computed_Band = {"high", "critical"}
     elif score >= 10:
@@ -513,6 +540,10 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
     hazard_ids = ra.hazard_ids or []
     db = await get_db()
     try:
+        for hazard_id in hazard_ids:
+            cursor = await db.execute("SELECT 1 FROM hazards WHERE hazard_id = ?", (hazard_id,))
+            if not await cursor.fetchone():
+                raise HTTPException(status_code=422, detail=f"Hazard {hazard_id} not found")
         await db.execute(
             """INSERT INTO risk_assessments (
                    assessment_id, hazard_id, occurrence_id, mission_id, title, description,
@@ -533,6 +564,7 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
                 "INSERT OR IGNORE INTO risk_assessment_hazards (assessment_id, hazard_id) VALUES (?, ?)",
                 (ra_id, hid),
             )
+        await log_audit_event("risk_assessment", ra_id, "created", actor, {"risk_model": ra.risk_model, "status": initial_status}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -586,55 +618,96 @@ async def list_risk_assessments(request: Request, hazard_id: Optional[str] = Non
 @router.patch("/risk-assessments/{assessment_id}", response_model=RiskAssessmentResponse)
 async def update_risk_assessment(assessment_id: str, update: RiskAssessmentUpdate, request: Request):
     _check(request, "safety:update")
+    actor = _actor(request)
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Risk assessment not found")
+        if update.hazard_ids is not None:
+            if len(update.hazard_ids) != len(set(update.hazard_ids)):
+                raise HTTPException(status_code=422, detail="Duplicate hazard IDs are not allowed")
+            for hazard_id in update.hazard_ids:
+                cursor = await db.execute("SELECT 1 FROM hazards WHERE hazard_id = ?", (hazard_id,))
+                if not await cursor.fetchone():
+                    raise HTTPException(status_code=422, detail=f"Hazard {hazard_id} not found")
+
         updates = []
         params = []
-        field_map = {"title": update.title, "description": update.description, "likelihood": update.likelihood, "severity": update.severity, "risk_level": update.risk_level, "mitigation_measures": update.mitigation_measures, "residual_risk": update.residual_risk, "status": update.status, "reviewed_by": update.reviewed_by}
+        field_map = {"title": update.title, "description": update.description, "mitigation_measures": update.mitigation_measures, "residual_risk": update.residual_risk}
+        changed_fields = []
         for col, val in field_map.items():
             if val is not None:
                 updates.append(f"{col} = ?")
                 params.append(val)
+                changed_fields.append(col)
+        changed = bool(updates) or update.hazard_ids is not None
         if updates:
             updates.append("updated_at = ?")
             params.append(now_iso())
             params.append(assessment_id)
             await db.execute(f"UPDATE risk_assessments SET {', '.join(updates)} WHERE assessment_id = ?", params)
-            await db.commit()
-        # Replace hazard links via junction table when provided
         if update.hazard_ids is not None:
             await db.execute("DELETE FROM risk_assessment_hazards WHERE assessment_id = ?", (assessment_id,))
-            for hid in update.hazard_ids:
+            for hazard_id in update.hazard_ids:
                 await db.execute(
-                    "INSERT OR IGNORE INTO risk_assessment_hazards (assessment_id, hazard_id) VALUES (?, ?)",
-                    (assessment_id, hid),
+                    "INSERT INTO risk_assessment_hazards (assessment_id, hazard_id) VALUES (?, ?)",
+                    (assessment_id, hazard_id),
                 )
-            # Keep legacy hazard_id column in sync with first hazard
-            if update.hazard_ids:
-                await db.execute(
-                    "UPDATE risk_assessments SET hazard_id = ? WHERE assessment_id = ?",
-                    (update.hazard_ids[0], assessment_id),
-                )
-            else:
-                await db.execute(
-                    "UPDATE risk_assessments SET hazard_id = NULL WHERE assessment_id = ?",
-                    (assessment_id,),
-                )
+            await db.execute(
+                "UPDATE risk_assessments SET hazard_id = ? WHERE assessment_id = ?",
+                (update.hazard_ids[0] if update.hazard_ids else None, assessment_id),
+            )
+        if changed:
+            await log_audit_event(
+                "risk_assessment", assessment_id, "updated", actor,
+                {"fields": changed_fields, "hazard_ids_changed": update.hazard_ids is not None}, db=db,
+            )
             await db.commit()
         cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
-        row = await cursor.fetchone()
-        row = dict(row)
+        result = await cursor.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Risk assessment not found")
+        row = dict(result)
         hz_cursor = await db.execute(
             "SELECT hazard_id FROM risk_assessment_hazards WHERE assessment_id = ? ORDER BY hazard_id",
             (assessment_id,),
         )
-        row["hazard_ids"] = [h["hazard_id"] for h in await hz_cursor.fetchall()]
+        row["hazard_ids"] = [hazard["hazard_id"] for hazard in await hz_cursor.fetchall()]
         return RiskAssessmentResponse(**row)
     finally:
         await db.close()
+
+
+@router.post("/risk-assessments/{assessment_id}/approve", response_model=RiskAssessmentResponse)
+async def approve_risk_assessment(assessment_id: str, request: Request):
+    role = _role(request)
+    if role not in {"head_safety", "head_operations", "chief_pilot", "accountable_manager", "system_admin"}:
+        raise HTTPException(status_code=403, detail="Authorized operational/safety approver role required")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Risk assessment not found")
+        current = dict(row)
+        if current.get("status") == "cancelled" or current.get("flight_cancelled"):
+            raise HTTPException(status_code=400, detail="Cancelled risk assessments cannot be approved for flight")
+        await db.execute(
+            "UPDATE risk_assessments SET status = 'approved', reviewed_by = ?, updated_at = ? WHERE assessment_id = ?",
+            (actor, now, assessment_id),
+        )
+        await log_audit_event("risk_assessment", assessment_id, "approved", actor, {"rule_ref": "SMS-KFL §2.6 / OM-KFL §2.6"}, db=db)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
+        result = dict(await cursor.fetchone())
+        hz_cursor = await db.execute("SELECT hazard_id FROM risk_assessment_hazards WHERE assessment_id = ? ORDER BY hazard_id", (assessment_id,))
+        result["hazard_ids"] = [h["hazard_id"] for h in await hz_cursor.fetchall()]
+    finally:
+        await db.close()
+    return RiskAssessmentResponse(**result)
 
 
 # ==================== INVESTIGATIONS ====================
@@ -1018,7 +1091,14 @@ async def create_mission(mission: MissionCreate, request: Request):
 
 
 @router.get("/missions", response_model=List[MissionResponse])
-async def list_missions(request: Request, status: Optional[str] = None, mission_type: Optional[str] = None, limit: int = 50, offset: int = 0):
+async def list_missions(
+    request: Request,
+    status: Optional[str] = Query(None, pattern="^(planned|released|in_progress|completed|cancelled|aborted)$"),
+    mission_type: Optional[str] = Query(None, max_length=50),
+    search: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1000000),
+):
     _check(request, "safety:read")
     db = await get_db()
     try:
@@ -1030,10 +1110,45 @@ async def list_missions(request: Request, status: Optional[str] = None, mission_
         if mission_type:
             conditions.append("mission_type = ?")
             params.append(mission_type)
+        if search and search.strip():
+            term = search.strip()
+            conditions.append("(instr(lower(COALESCE(mission_id, '')), lower(?)) > 0 OR instr(lower(COALESCE(title, '')), lower(?)) > 0 OR instr(lower(COALESCE(mission_type, '')), lower(?)) > 0 OR instr(lower(COALESCE(location, '')), lower(?)) > 0)")
+            params.extend([term] * 4)
         where = " AND ".join(conditions) if conditions else "1=1"
-        cursor = await db.execute(f"SELECT * FROM missions WHERE {where} ORDER BY planned_date DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        cursor = await db.execute(
+            f"SELECT * FROM missions WHERE {where} ORDER BY planned_date DESC, mission_id ASC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
         rows = await cursor.fetchall()
-        return [MissionResponse(**dict(r)) for r in rows]
+        return [MissionResponse(**dict(row)) for row in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/missions/summary")
+async def summarize_missions(request: Request):
+    """Return full-table mission counts by lifecycle status."""
+    _check(request, "safety:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN status = 'planned' THEN 1 ELSE 0 END) AS planned,
+                      SUM(CASE WHEN status = 'released' THEN 1 ELSE 0 END) AS released,
+                      SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+                      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                      SUM(CASE WHEN status = 'aborted' THEN 1 ELSE 0 END) AS aborted
+               FROM missions"""
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return {key: 0 for key in (
+                "total", "planned", "released", "in_progress", "completed", "cancelled", "aborted",
+            )}
+        return {key: (row[key] or 0) for key in (
+            "total", "planned", "released", "in_progress", "completed", "cancelled", "aborted",
+        )}
     finally:
         await db.close()
 
@@ -1059,37 +1174,63 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
-        if not await cursor.fetchone():
+        mission_row = await cursor.fetchone()
+        if not mission_row:
             raise HTTPException(status_code=404, detail="Mission not found")
+        mission = dict(mission_row)
+        field_map = {
+            "title": update.title,
+            "description": update.description,
+            "mission_type": update.mission_type,
+            "priority": update.priority,
+            "planned_date": update.planned_date,
+            "location": update.location,
+            "aircraft_id": update.aircraft_id,
+            "roc_id": update.roc_id,
+            "rpas_pilot_id": update.rpas_pilot_id,
+            "visual_observer_id": update.visual_observer_id,
+            "dg_category": update.dg_category,
+            "max_altitude_agl": update.max_altitude_agl,
+            "bvlos_required": None if update.bvlos_required is None else int(update.bvlos_required),
+            "night_required": None if update.night_required is None else int(update.night_required),
+            "risk_assessment_id": update.risk_assessment_id,
+        }
+        if mission.get("release_id") or mission.get("status") != "planned":
+            changed_fields = [
+                field for field, value in field_map.items()
+                if value is not None and value != mission.get(field)
+            ]
+            if changed_fields:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Mission is locked because its lifecycle has advanced; post-release amendments are not supported: "
+                    + ", ".join(changed_fields),
+                )
         # Hard-block on expiry when aircraft or crew is being changed
         if update.aircraft_id is not None or update.rpas_pilot_id is not None or update.visual_observer_id is not None:
-            # Get current mission to fill in unchanged values
-            cursor = await db.execute("SELECT aircraft_id, rpas_pilot_id, visual_observer_id FROM missions WHERE mission_id = ?", (mission_id,))
-            row = await cursor.fetchone()
-            aid = update.aircraft_id if update.aircraft_id is not None else (row["aircraft_id"] if row else None)
-            pid = update.rpas_pilot_id if update.rpas_pilot_id is not None else (row["rpas_pilot_id"] if row else None)
-            vid = update.visual_observer_id if update.visual_observer_id is not None else (row["visual_observer_id"] if row else None)
+            aid = update.aircraft_id if update.aircraft_id is not None else mission.get("aircraft_id")
+            pid = update.rpas_pilot_id if update.rpas_pilot_id is not None else mission.get("rpas_pilot_id")
+            vid = update.visual_observer_id if update.visual_observer_id is not None else mission.get("visual_observer_id")
             await _check_mission_eligibility(db, aid, pid, vid)
         updates = []
         params = []
-        field_map = {"title": update.title, "description": update.description, "mission_type": update.mission_type, "priority": update.priority, "planned_date": update.planned_date, "location": update.location, "aircraft_id": update.aircraft_id, "roc_id": update.roc_id, "rpas_pilot_id": update.rpas_pilot_id, "visual_observer_id": update.visual_observer_id, "dg_category": update.dg_category, "max_altitude_agl": update.max_altitude_agl, "risk_assessment_id": update.risk_assessment_id}
         for col, val in field_map.items():
             if val is not None:
                 updates.append(f"{col} = ?")
                 params.append(val)
-        if update.bvlos_required is not None:
-            updates.append("bvlos_required = ?")
-            params.append(1 if update.bvlos_required else 0)
-        if update.night_required is not None:
-            updates.append("night_required = ?")
-            params.append(1 if update.night_required else 0)
         if updates:
             updates.append("updated_at = ?")
             params.append(now_iso())
             updates.append("updated_by = ?")
             params.append(actor)
             params.append(mission_id)
-            await db.execute(f"UPDATE missions SET {', '.join(updates)} WHERE mission_id = ?", params)
+            cursor = await db.execute(
+                f"UPDATE missions SET {', '.join(updates)} WHERE mission_id = ? AND status = 'planned' AND release_id IS NULL",
+                params,
+            )
+            if cursor.rowcount != 1:
+                await db.rollback()
+                raise HTTPException(status_code=409, detail="Mission state changed during update; reload and retry")
             await db.commit()
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
@@ -1115,8 +1256,8 @@ async def transition_mission_state(mission_id: str, state: str, request: Request
 
         # Valid transitions
         VALID_TRANSITIONS = {
-            "planned": ["in_progress", "cancelled"],
-            "in_progress": ["completed", "aborted"],
+            "planned": ["cancelled"],
+            "in_progress": ["aborted"],
             "released": ["in_progress", "aborted"],
         }
         if state not in VALID_TRANSITIONS.get(current, []):
@@ -1124,6 +1265,16 @@ async def transition_mission_state(mission_id: str, state: str, request: Request
                 status_code=400,
                 detail=f"Invalid transition: {current} → {state}. Allowed: {VALID_TRANSITIONS.get(current, [])}",
             )
+        if state == "in_progress":
+            release_id = row.get("release_id")
+            if not release_id:
+                raise HTTPException(status_code=400, detail="A valid flight release record is required before mission start")
+            release = await (await db.execute(
+                "SELECT 1 FROM flight_releases WHERE release_id = ? AND mission_id = ? AND status = 'released'",
+                (release_id, mission_id),
+            )).fetchone()
+            if not release:
+                raise HTTPException(status_code=400, detail="A valid flight release record is required before mission start")
 
         # Permission checks
         if state in ("completed", "aborted"):
@@ -1131,10 +1282,13 @@ async def transition_mission_state(mission_id: str, state: str, request: Request
                 raise HTTPException(status_code=403, detail="safety:close permission required")
 
         now = now_iso()
-        await db.execute(
-            "UPDATE missions SET status = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?",
-            (state, now, actor, mission_id),
+        cursor = await db.execute(
+            "UPDATE missions SET status = ?, updated_at = ?, updated_by = ? WHERE mission_id = ? AND status = ?",
+            (state, now, actor, mission_id, current),
         )
+        if cursor.rowcount != 1:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Mission state changed during transition; reload and retry")
         await db.commit()
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
@@ -1201,6 +1355,18 @@ async def approve_flight_plan(plan_id: str, request: Request):
 
 # ==================== FLIGHT RELEASES ====================
 
+def _flight_release_response_data(row):
+    data = dict(row)
+    try:
+        stored = json.loads(data.get("notes") or "")
+    except (TypeError, json.JSONDecodeError):
+        stored = {}
+    if isinstance(stored, dict) and "release_evidence" in stored:
+        data["notes"] = stored.get("operator_notes")
+        data.update(stored.get("release_evidence") or {})
+    return data
+
+
 @router.post("/flight-releases", response_model=FlightReleaseResponse, status_code=201)
 async def create_flight_release(fr: FlightReleaseCreate, request: Request):
     _check(request, "flight:release")
@@ -1209,15 +1375,25 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
     now = now_iso()
     db = await get_db()
     try:
-        if not fr.pre_flight_checklist:
+        if not fr.pre_flight_checklist or not fr.pre_flight_checklist.strip():
             raise HTTPException(status_code=400, detail="Pre-flight checklist required")
         if not (fr.weather_confirmed and fr.crew_confirmed and fr.aircraft_confirmed):
             raise HTTPException(status_code=400, detail="All confirmations (weather, crew, aircraft) required")
+        evidence = {
+            "weather_evidence": fr.weather_evidence,
+            "crew_evidence": fr.crew_evidence,
+            "aircraft_evidence": fr.aircraft_evidence,
+        }
+        if any(not value or not value.strip() for value in evidence.values()):
+            raise HTTPException(status_code=400, detail="Explicit weather, crew, and aircraft evidence is required for flight release")
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (fr.mission_id,))
         mission_row = await cursor.fetchone()
         if not mission_row:
             raise HTTPException(status_code=400, detail="Mission not found for flight release")
         mission = dict(mission_row)
+        if mission.get("status") != "planned" or mission.get("release_id"):
+            raise HTTPException(status_code=400, detail="Only an unreleased planned mission can receive flight release")
 
         cursor = await db.execute("SELECT * FROM flight_plans WHERE plan_id = ?", (fr.plan_id,))
         plan_row = await cursor.fetchone()
@@ -1229,61 +1405,104 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
         if plan["status"] != "approved":
             raise HTTPException(status_code=400, detail="Flight plan must be approved before flight release (OM-KFL §3.3)")
 
-        # Enforce ROC/OpSpec operational limits and 7-registration OpSpec scope (while preserving 20-aircraft fleet)
+        # Enforce current ROC and OpSpec privileges at the moment of release.
         roc_id = mission.get("roc_id") or "ROC-001"
         cursor = await db.execute("SELECT * FROM roc_register WHERE roc_id = ?", (roc_id,))
         roc_row = await cursor.fetchone()
-        if roc_row:
-            roc = dict(roc_row)
-            if roc.get("status") != "active":
-                raise HTTPException(status_code=400, detail=f"ROC {roc_id} is not active")
-            if mission.get("bvlos_required") and not roc.get("bvlos_authorized"):
-                raise HTTPException(status_code=400, detail=f"BVLOS operations are not authorized under {roc_id} OpSpec")
-            if mission.get("night_required") and not roc.get("night_authorized"):
-                raise HTTPException(status_code=400, detail=f"Night operations are not authorized under {roc_id} OpSpec (OM-KFL §3.5)")
-            roc_max_alt = roc.get("max_altitude_agl")
-            mission_alt = mission.get("max_altitude_agl") or plan.get("max_altitude_agl")
-            if roc_max_alt is not None and mission_alt is not None and mission_alt > roc_max_alt:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Planned altitude ({mission_alt} ft AGL) exceeds {roc_id} OpSpec maximum of {roc_max_alt} ft AGL",
-                )
+        if not roc_row:
+            raise HTTPException(status_code=400, detail=f"ROC {roc_id} is not on record")
+        roc = dict(roc_row)
+        today = datetime.now().date()
+        try:
+            roc_issue = datetime.fromisoformat(roc["issue_date"].replace("Z", "+00:00")).date()
+            roc_expiry = datetime.fromisoformat(roc["expiry_date"].replace("Z", "+00:00")).date()
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"ROC {roc_id} has invalid validity dates")
+        if roc.get("status") != "active" or roc_issue > today or roc_expiry < today:
+            raise HTTPException(status_code=400, detail=f"ROC {roc_id} is inactive or outside its validity period")
+        if mission.get("bvlos_required") and not roc.get("bvlos_authorized"):
+            raise HTTPException(status_code=400, detail=f"BVLOS operations are not authorized under {roc_id} OpSpec")
+        if mission.get("night_required") and not roc.get("night_authorized"):
+            raise HTTPException(status_code=400, detail=f"Night operations are not authorized under {roc_id} OpSpec (OM-KFL §3.5)")
+        roc_max_alt = roc.get("max_altitude_agl")
+        mission_alt = mission.get("max_altitude_agl") or plan.get("max_altitude_agl")
+        if roc_max_alt is not None and mission_alt is not None and mission_alt > roc_max_alt:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Planned altitude ({mission_alt} ft AGL) exceeds {roc_id} OpSpec maximum of {roc_max_alt} ft AGL",
+            )
 
-        if mission.get("aircraft_id"):
-            cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (mission["aircraft_id"],))
-            ac_row = await cursor.fetchone()
-            if not ac_row:
-                raise HTTPException(status_code=400, detail="Assigned aircraft not found")
-            ac = dict(ac_row)
-            if ac.get("status") != "active":
-                raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not active")
-            if not ac.get("opspec_authorized"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Aircraft {ac['registration']} is in the 20-aircraft master fleet but is not listed on the active ROC/OpSpec authorization",
-                )
+        aircraft_id = mission.get("aircraft_id")
+        if not aircraft_id:
+            raise HTTPException(status_code=400, detail="Assigned aircraft is required for flight release")
+        cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (aircraft_id,))
+        ac_row = await cursor.fetchone()
+        if not ac_row:
+            raise HTTPException(status_code=400, detail="Assigned aircraft not found")
+        ac = dict(ac_row)
+        if ac.get("status") != "active":
+            raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not active")
+        if not ac.get("opspec_authorized"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Aircraft {ac['registration']} is in the 20-aircraft master fleet but is not listed on the active ROC/OpSpec authorization",
+            )
+        if ac.get("roc_id") and ac["roc_id"] != roc_id:
+            raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not assigned to ROC {roc_id}")
+        await _check_mission_eligibility(
+            db,
+            aircraft_id=aircraft_id,
+            rpas_pilot_id=mission.get("rpas_pilot_id"),
+            visual_observer_id=mission.get("visual_observer_id"),
+            require_pilot=True,
+        )
 
         if mission.get("risk_assessment_id"):
             cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (mission["risk_assessment_id"],))
             ra_row = await cursor.fetchone()
-            if ra_row:
-                ra = dict(ra_row)
-                if ra.get("flight_cancelled") or (ra.get("risk_score") is not None and ra["risk_score"] > 25):
+            if not ra_row:
+                raise HTTPException(status_code=400, detail="Flight release blocked: linked risk assessment is missing")
+            ra = dict(ra_row)
+            risk_model = ra.get("risk_model")
+            try:
+                stored_risk = RiskAssessmentCreate.model_validate({
+                    "title": ra.get("title") or "Stored flight risk",
+                    "likelihood": ra.get("likelihood"),
+                    "severity": ra.get("severity"),
+                    "risk_level": ra.get("risk_level"),
+                    "risk_model": ra.get("risk_model"),
+                    "exposure": ra.get("exposure"),
+                })
+                calculated_level, calculated_score, calculated_scrutiny, calculated_cancelled, _ = _evaluate_risk_assessment(stored_risk)
+            except (ValidationError, HTTPException, KeyError, TypeError, AttributeError):
+                raise HTTPException(status_code=400, detail="Flight release blocked: unsupported risk model or assessment inputs")
+            if (
+                ra.get("risk_score") != calculated_score
+                or ra.get("risk_level") != calculated_level
+                or bool(ra.get("scrutiny_required")) != calculated_scrutiny
+                or bool(ra.get("flight_cancelled")) != calculated_cancelled
+            ):
+                raise HTTPException(status_code=400, detail="Flight release blocked: stored risk assessment values are inconsistent with validated inputs")
+            if risk_model == "om_flight_26":
+                if calculated_cancelled or calculated_score > 25:
                     raise HTTPException(status_code=400, detail="Flight release blocked: OM §2.6 flight risk score exceeds 25 (cancel flight)")
-                if (ra.get("scrutiny_required") or ra.get("risk_level") in ("medium", "high", "critical")) and ra.get("status") != "approved":
-                    raise HTTPException(status_code=400, detail="Flight release blocked: Manager review/approval required for Medium/High or >20 flight risk (OM §§2.6, 3.3)")
+                if calculated_scrutiny and ra.get("status") != "approved":
+                    raise HTTPException(status_code=400, detail="Flight release blocked: Manager approval required for OM §2.6 flight risk requiring scrutiny")
+            elif calculated_level in ("medium", "high", "critical") and ra.get("status") != "approved":
+                raise HTTPException(status_code=400, detail="Flight release blocked: Manager approval required for Medium/High SMS risk assessment")
 
+        release_notes = json.dumps({"operator_notes": fr.notes, "release_evidence": evidence}, ensure_ascii=False)
         await db.execute(
             """INSERT INTO flight_releases (release_id, mission_id, plan_id, released_by, released_at, pre_flight_checklist, weather_confirmed, crew_confirmed, aircraft_confirmed, status, notes, created_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (release_id, fr.mission_id, fr.plan_id, actor, now, fr.pre_flight_checklist, 1 if fr.weather_confirmed else 0, 1 if fr.crew_confirmed else 0, 1 if fr.aircraft_confirmed else 0, "released", fr.notes, now),
+            (release_id, fr.mission_id, fr.plan_id, actor, now, fr.pre_flight_checklist, 1 if fr.weather_confirmed else 0, 1 if fr.crew_confirmed else 0, 1 if fr.aircraft_confirmed else 0, "released", release_notes, now),
         )
         await db.execute("UPDATE missions SET status = 'released', release_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?", (release_id, now, actor, fr.mission_id))
+        await log_audit_event("flight_release", release_id, "released", actor, {"mission_id": fr.mission_id, "rule_ref": "OM-KFL §§2.3.1, 3.3 / ROC-001"}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("flight_release", release_id, "released", actor, {"mission_id": fr.mission_id, "rule_ref": "OM-KFL §§2.3.1, 3.3 / ROC-001"})
-    return FlightReleaseResponse(release_id=release_id, mission_id=fr.mission_id, plan_id=fr.plan_id, released_by=actor, released_at=now, pre_flight_checklist=fr.pre_flight_checklist, weather_confirmed=fr.weather_confirmed, crew_confirmed=fr.crew_confirmed, aircraft_confirmed=fr.aircraft_confirmed, status="released", notes=fr.notes, created_at=now)
+    return FlightReleaseResponse(release_id=release_id, mission_id=fr.mission_id, plan_id=fr.plan_id, released_by=actor, released_at=now, pre_flight_checklist=fr.pre_flight_checklist, weather_confirmed=fr.weather_confirmed, crew_confirmed=fr.crew_confirmed, aircraft_confirmed=fr.aircraft_confirmed, weather_evidence=(fr.weather_evidence or "").strip(), crew_evidence=(fr.crew_evidence or "").strip(), aircraft_evidence=(fr.aircraft_evidence or "").strip(), status="released", notes=fr.notes, created_at=now)
 
 
 @router.get("/flight-releases", response_model=List[FlightReleaseResponse])
@@ -1296,7 +1515,7 @@ async def list_flight_releases(request: Request, mission_id: Optional[str] = Non
         else:
             cursor = await db.execute("SELECT * FROM flight_releases ORDER BY released_at DESC LIMIT ? OFFSET ?", (limit, offset))
         rows = await cursor.fetchall()
-        return [FlightReleaseResponse(**dict(r)) for r in rows]
+        return [FlightReleaseResponse(**_flight_release_response_data(r)) for r in rows]
     finally:
         await db.close()
 
@@ -1311,6 +1530,23 @@ async def create_post_flight_report(pfr: PostFlightReportCreate, request: Reques
     now = now_iso()
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (pfr.mission_id,))
+        mission_row = await cursor.fetchone()
+        if not mission_row:
+            raise HTTPException(status_code=404, detail="Mission not found")
+        mission = dict(mission_row)
+        if mission.get("post_flight_report_id"):
+            raise HTTPException(status_code=409, detail="Post-flight report already submitted for this mission")
+        if mission.get("status") not in ("released", "in_progress") or not mission.get("release_id"):
+            raise HTTPException(status_code=400, detail="Post-flight completion requires a released mission")
+        release_cursor = await db.execute(
+            "SELECT release_id, status FROM flight_releases WHERE release_id = ? AND mission_id = ?",
+            (mission["release_id"], pfr.mission_id),
+        )
+        release = await release_cursor.fetchone()
+        if not release or release["status"] != "released":
+            raise HTTPException(status_code=400, detail="Post-flight completion requires a valid released flight authorization")
         await db.execute(
             """INSERT INTO post_flight_reports (report_id, mission_id, actual_duration_min, actual_max_altitude, incidents, anomalies, battery_cycles, flight_hours, data_collected, submitted_by, submitted_at, status, created_at, updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1423,17 +1659,22 @@ async def update_quality_audit(audit_id: str, update: QualityAuditUpdate, reques
 @router.post("/audit-findings", response_model=AuditFindingResponse, status_code=201)
 async def create_audit_finding(finding: AuditFindingCreate, request: Request):
     _check(request, "safety:create")
+    actor = _actor(request)
     finding_id = _gen_id("AF")
     now = now_iso()
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         await db.execute(
-            """INSERT INTO audit_findings (finding_id, audit_id, finding_type, description, severity, root_cause, evidence, status, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (finding_id, finding.audit_id, finding.finding_type, finding.description, finding.severity, finding.root_cause, finding.evidence, "open", now, now),
+            """INSERT INTO quality_audit_findings (finding_id, audit_id, finding_type, description, severity, root_cause, evidence, status, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (finding_id, finding.audit_id, finding.finding_type, finding.description, finding.severity, finding.root_cause, finding.evidence, "open", now, now, actor, actor),
         )
-        # Update findings count
-        await db.execute("UPDATE quality_audits SET findings_count = findings_count + 1, updated_at = ? WHERE audit_id = ?", (now, finding.audit_id))
+        await db.execute("UPDATE quality_audits SET findings_count = findings_count + 1, updated_at = ?, updated_by = ? WHERE audit_id = ?", (now, actor, finding.audit_id))
+        await log_audit_event(
+            "quality_audit_finding", finding_id, "created", actor,
+            {"audit_id": finding.audit_id, "finding_type": finding.finding_type}, db=db,
+        )
         await db.commit()
     finally:
         await db.close()
@@ -1446,9 +1687,9 @@ async def list_audit_findings(request: Request, audit_id: Optional[str] = None, 
     db = await get_db()
     try:
         if audit_id:
-            cursor = await db.execute("SELECT * FROM audit_findings WHERE audit_id = ? ORDER BY created_at DESC", (audit_id,))
+            cursor = await db.execute("SELECT * FROM quality_audit_findings WHERE audit_id = ? ORDER BY created_at DESC", (audit_id,))
         else:
-            cursor = await db.execute("SELECT * FROM audit_findings ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
+            cursor = await db.execute("SELECT * FROM quality_audit_findings ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
         rows = await cursor.fetchall()
         return [AuditFindingResponse(**dict(r)) for r in rows]
     finally:
@@ -1516,18 +1757,9 @@ async def update_corrective_action(car_id: str, update: CorrectiveActionUpdate, 
         if not row:
             raise HTTPException(status_code=404, detail="CAR not found")
         current = dict(row)
-        if update.status == "closed":
-            effective_rc = update.root_cause if update.root_cause is not None else current.get("root_cause")
-            effective_ca = update.corrective_action if update.corrective_action is not None else current.get("corrective_action")
-            effective_ver = update.verification if update.verification is not None else current.get("verification")
-            if not (effective_rc and effective_ca and effective_ver) or current.get("status") not in ("verified", "closed"):
-                raise HTTPException(
-                    status_code=400,
-                    detail="CAR cannot be closed until root cause, corrective action, and independent verification are recorded (QM-KFL §§2.10.4, 2.10.6)",
-                )
         updates = []
         params = []
-        field_map = {"title": update.title, "description": update.description, "finding_level": update.finding_level, "root_cause": update.root_cause, "corrective_action": update.corrective_action, "preventive_action": update.preventive_action, "owner_id": update.owner_id, "due_date": update.due_date, "status": update.status, "verification": update.verification, "verified_by": update.verified_by, "verified_at": update.verified_at, "closed_at": update.closed_at}
+        field_map = {"title": update.title, "description": update.description, "finding_level": update.finding_level, "root_cause": update.root_cause, "corrective_action": update.corrective_action, "preventive_action": update.preventive_action, "owner_id": update.owner_id, "due_date": update.due_date}
         for col, val in field_map.items():
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -1578,6 +1810,33 @@ async def verify_car(car_id: str, request: Request, verification: str = "", veri
         await db.close()
     await log_audit_event("corrective_action", car_id, "verified", actor, {"verification": verification.strip(), "rule_ref": "QM-KFL §§2.10.4, 2.10.6"})
     return {"status": "verified"}
+
+
+@router.post("/corrective-actions/{car_id}/close", response_model=CorrectiveActionResponse)
+async def close_corrective_action(car_id: str, request: Request):
+    _check(request, "safety:update")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="CAR not found")
+        current = dict(row)
+        if current.get("status") != "verified" or not current.get("verification") or not current.get("verified_by"):
+            raise HTTPException(status_code=400, detail="CAR must be independently verified before closure (QM-KFL §2.10.6)")
+        await db.execute(
+            "UPDATE corrective_actions SET status = 'closed', closed_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?",
+            (now, now, actor, car_id),
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,))
+        result = dict(await cursor.fetchone())
+    finally:
+        await db.close()
+    await log_audit_event("corrective_action", car_id, "closed", actor, {"verified_by": result["verified_by"], "rule_ref": "QM-KFL §2.10.6"})
+    return CorrectiveActionResponse(**result)
 
 # ==================== DANGEROUS GOODS (P1 Phase 5) ====================
 
@@ -1787,7 +2046,7 @@ async def list_dg_training_records(request: Request, person_id: Optional[str] = 
 
 @router.post("/security-incidents", response_model=SecurityIncidentResponse, status_code=201)
 async def create_security_incident(incident: SecurityIncidentCreate, request: Request):
-    _check(request, "safety:create")
+    _check(request, "security:manage")
     actor = _actor(request)
     incident_id = _gen_id("SEC")
     now = now_iso()
@@ -1804,12 +2063,67 @@ async def create_security_incident(incident: SecurityIncidentCreate, request: Re
     return SecurityIncidentResponse(incident_id=incident_id, title=incident.title, description=incident.description, incident_type=incident.incident_type, severity=incident.severity, location=incident.location, reported_by=actor, reported_at=now, status="reported", created_at=now, updated_at=now)
 
 
+@router.get("/security-incidents/summary")
+async def summarize_security_incidents(request: Request):
+    """Return complete incident totals for authorized security management users."""
+    _check(request, "security:read_sensitive")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN lower(severity) IN ('critical', 'high') THEN 1 ELSE 0 END) AS critical_high,
+                      SUM(CASE WHEN lower(status) IN ('open', 'reported', 'investigating') THEN 1 ELSE 0 END) AS open
+               FROM security_incidents"""
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return {"total": 0, "critical_high": 0, "open": 0}
+        return {
+            "total": row["total"] or 0,
+            "critical_high": row["critical_high"] or 0,
+            "open": row["open"] or 0,
+        }
+    finally:
+        await db.close()
+
+
 @router.get("/security-incidents", response_model=List[SecurityIncidentResponse])
-async def list_security_incidents(request: Request, status: Optional[str] = None, incident_type: Optional[str] = None, limit: int = 50, offset: int = 0):
+async def list_security_incidents(
+    request: Request,
+    search: Optional[str] = Query(None, min_length=1, max_length=100),
+    status: Optional[str] = Query(None, max_length=40),
+    incident_type: Optional[str] = Query(None, max_length=80),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1_000_000),
+):
     _check(request, "safety:read")
     can_read_ssi = has_permission(_role(request), "security:read_sensitive")
     db = await get_db()
     try:
+        if not can_read_ssi:
+            if offset > 0:
+                return []
+            cursor = await db.execute("SELECT 1 FROM security_incidents LIMIT 1")
+            if not await cursor.fetchone():
+                return []
+            redacted = "[SSI REDACTED]"
+            return [SecurityIncidentResponse(
+                incident_id=redacted,
+                title=redacted,
+                description=redacted,
+                incident_type=redacted,
+                severity=redacted,
+                location=redacted,
+                reported_by=redacted,
+                reported_at=redacted,
+                status=redacted,
+                investigation_notes=redacted,
+                resolved_at=redacted,
+                resolved_by=redacted,
+                created_at=redacted,
+                updated_at=redacted,
+            )]
+
         conditions = []
         params = []
         if status:
@@ -1818,16 +2132,22 @@ async def list_security_incidents(request: Request, status: Optional[str] = None
         if incident_type:
             conditions.append("incident_type = ?")
             params.append(incident_type)
+        if search:
+            conditions.append(
+                "(lower(title) LIKE lower(?) OR lower(description) LIKE lower(?) "
+                "OR lower(incident_type) LIKE lower(?) OR lower(severity) LIKE lower(?) "
+                "OR lower(COALESCE(location, '')) LIKE lower(?))"
+            )
+            search_term = f"%{search}%"
+            params.extend([search_term] * 5)
         where = " AND ".join(conditions) if conditions else "1=1"
-        cursor = await db.execute(f"SELECT * FROM security_incidents WHERE {where} ORDER BY reported_at DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        cursor = await db.execute(
+            f"SELECT * FROM security_incidents WHERE {where} "
+            "ORDER BY reported_at DESC, incident_id DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
         rows = await cursor.fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            if d.get("investigation_notes") and not can_read_ssi:
-                d["investigation_notes"] = "[SSI REDACTED]"
-            results.append(SecurityIncidentResponse(**d))
-        return results
+        return [SecurityIncidentResponse(**dict(row)) for row in rows]
     finally:
         await db.close()
 
@@ -1888,7 +2208,7 @@ async def get_workflow_rules_registry(request: Request):
 
 @router.patch("/security-incidents/{incident_id}", response_model=SecurityIncidentResponse)
 async def update_security_incident(incident_id: str, update: SecurityIncidentUpdate, request: Request):
-    _check(request, "safety:update")
+    _check(request, "security:manage")
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM security_incidents WHERE incident_id = ?", (incident_id,))

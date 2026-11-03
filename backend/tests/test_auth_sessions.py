@@ -226,3 +226,76 @@ def test_password_change_revokes_other_sessions_but_preserves_current_session(cl
         other_client.close()
         _set_test_admin_password(None)
 
+
+def test_p3_api_requires_central_session_auth(client):
+    response = client.get("/api/p3/audit-reports")
+    assert response.status_code == 401
+
+
+def test_forgot_password_emails_a_working_single_use_reset_link(client, monkeypatch):
+    from urllib.parse import urlparse
+    from unittest.mock import patch
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    original_email = conn.execute("SELECT email FROM users WHERE user_id = 'u-admin'").fetchone()[0]
+    conn.execute("UPDATE users SET email = 'admin-reset@example.test' WHERE user_id = 'u-admin'")
+    conn.commit()
+    conn.close()
+    _set_test_admin_password(TEST_PASSWORD)
+    sent = []
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://dms.example.test")
+    try:
+        with patch("app.notifications.NOTIFICATION_ENABLED", True), patch("app.notifications.SMTP_HOST", "smtp.example.test"), patch(
+            "app.notifications.send_email", side_effect=lambda *args, **kwargs: sent.append((args, kwargs)) or True
+        ):
+            response = client.post(
+                "/api/p0/auth/forgot-password",
+                json={"username": "admin"},
+                headers={"Origin": TEST_ORIGIN},
+            )
+
+        assert response.status_code == 200
+        assert len(sent) == 1
+        link = sent[0][0][2]
+        assert link.startswith("Use this one-time link")
+        reset_url = link.splitlines()[2]
+        assert reset_url.startswith("https://dms.example.test/reset-password/")
+        token = urlparse(reset_url).path.rsplit("/", 1)[-1]
+        reset = client.post(
+            "/api/p0/auth/reset-password",
+            json={"reset_token": token, "new_password": "Another-Valid-Password-2026!"},
+            headers={"Origin": TEST_ORIGIN},
+        )
+        assert reset.status_code == 200
+        repeated = client.post(
+            "/api/p0/auth/reset-password",
+            json={"reset_token": token, "new_password": "Third-Valid-Password-2026!"},
+            headers={"Origin": TEST_ORIGIN},
+        )
+        assert repeated.status_code == 400
+    finally:
+        _set_test_admin_password(None)
+        conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+        conn.execute("UPDATE users SET email = ? WHERE user_id = 'u-admin'", (original_email,))
+        conn.execute("DELETE FROM auth_setup_tokens WHERE purpose = 'reset' AND user_id = 'u-admin'")
+        conn.commit()
+        conn.close()
+
+
+def test_bootstrap_token_can_be_loaded_from_mounted_secret_file(tmp_path, monkeypatch):
+    from app.p0_routes import _configured_bootstrap_token
+
+    token_file = tmp_path / "bootstrap-token"
+    token_file.write_text("mounted-secret-value", encoding="utf-8")
+    monkeypatch.delenv("KFL_BOOTSTRAP_TOKEN", raising=False)
+    monkeypatch.setenv("KFL_BOOTSTRAP_TOKEN_FILE", str(token_file))
+    assert _configured_bootstrap_token() == "mounted-secret-value"
+
+
+def test_bootstrap_token_file_read_failure_fails_closed(monkeypatch):
+    from app.p0_routes import _configured_bootstrap_token
+
+    monkeypatch.delenv("KFL_BOOTSTRAP_TOKEN", raising=False)
+    monkeypatch.setenv("KFL_BOOTSTRAP_TOKEN_FILE", "/nonexistent/bootstrap-secret")
+    assert _configured_bootstrap_token() == ""
+

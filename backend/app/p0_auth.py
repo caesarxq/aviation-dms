@@ -104,9 +104,11 @@ class P0AuthMiddleware(BaseHTTPMiddleware):
         "/api/p0/auth/bootstrap-status",
         "/api/p0/auth/bootstrap",
         "/api/p0/auth/password-setup",
+        "/api/p0/auth/forgot-password",
+        "/api/p0/auth/reset-password",
     })
     SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-    API_PREFIXES = ("/api/p0", "/api/p1", "/api/p2")
+    API_PREFIXES = ("/api/p0", "/api/p1", "/api/p2", "/api/p3")
 
     async def _load_session(self, token: str):
         db = await get_db()

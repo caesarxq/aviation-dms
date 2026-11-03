@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Plus, Package, Share2 } from "lucide-react";
@@ -7,6 +7,7 @@ import FormField from "../components/ui/FormField";
 import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 function dgStatusClass(status: string) {
   switch (status) {
@@ -20,6 +21,7 @@ function dgStatusClass(status: string) {
 export function DangerousGoods() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const { data: shipments = [], isLoading } = useQuery({
     queryKey: ["dg-shipments"],
     queryFn: () => api.get("/p1/dg-shipments").then((r: any) => r.data),
@@ -31,6 +33,13 @@ export function DangerousGoods() {
   const [unNumber, setUnNumber] = useState("");
   const [dgError, setDgError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const filteredShipments = useMemo(() => shipments.filter((shipment: any) => {
+    const query = search.trim().toLowerCase();
+    return (!query || [shipment.shipment_id, shipment.proper_shipping_name, shipment.dg_class, shipment.un_number].some((value) => String(value ?? "").toLowerCase().includes(query))) &&
+      (!statusFilter || shipment.status === statusFilter);
+  }), [shipments, search, statusFilter]);
 
   const { errors: dgShipFieldErrors, isValid: dgShipIsValid } = useValidation(
     { proper_shipping_name: properShippingName, dg_class: dgClass },
@@ -67,18 +76,18 @@ export function DangerousGoods() {
           <h1 className="app-title">Dangerous Goods Shipments</h1>
           <p className="app-subtitle">Track DG shipments, acceptance checks, and training records.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Shipment"}
-        </button>
-        <button
+        </button>}
+        {hasPermission("safety:create") && <button
           onClick={() => setShowDGModal(true)}
           className="app-btn-secondary"
         >
           <Share2 size={16} /> Assign DG Responsibility
-        </button>
+        </button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -101,13 +110,15 @@ export function DangerousGoods() {
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Package size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
             <input id="search_shipments_88" name="search_shipments"
-              value={showForm ? properShippingName : ""}
-              onChange={(e) => setProperShippingName(e.target.value)}
+              value={search}
+              type="search"
+              aria-label="Search shipments"
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search shipments…"
               className="app-input pl-9 relative z-10"
             />
           </div>
-          <select id="select_field_95" name="select_field" className="app-input w-full md:w-auto">
+          <select id="select_field_95" name="status" aria-label="Filter shipments by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="accepted">Accepted</option>
@@ -163,6 +174,8 @@ export function DangerousGoods() {
             <p className="text-sm font-bold text-kfl-text">No DG shipments.</p>
             <p className="mt-1 text-xs text-kfl-muted">Register your first DG shipment to begin acceptance tracking.</p>
           </div>
+        ) : filteredShipments.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">No shipments match these filters.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
@@ -176,7 +189,7 @@ export function DangerousGoods() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {shipments.map((s: any) => (
+                {filteredShipments.map((s: any) => (
                   <tr key={s.shipment_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{s.shipment_id}</td>
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{s.proper_shipping_name}</td>

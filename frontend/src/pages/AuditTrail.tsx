@@ -31,7 +31,7 @@ export function AuditTrail() {
         <div>
           <div className="app-eyebrow">Compliance & Governance</div>
           <h1 className="app-title">Audit Trail</h1>
-          <p className="app-subtitle">Immutable record of all system actions and state changes for compliance review.</p>
+          <p className="app-subtitle">Business audit records plus transaction-bound database row changes. Integrity depends on database access controls.</p>
         </div>
       </header>
 

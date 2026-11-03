@@ -2,10 +2,12 @@
 import os
 import uuid
 import smtplib
+import ssl
 import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, List, Dict
 import asyncio
 
@@ -44,10 +46,25 @@ def persist_notification(recipient, subject, body, entity_type=None, entity_id=N
             return loop.run_until_complete(_persist())
     except Exception:
         return None
+
+
+def _load_smtp_password(secret_file: str, environment_password: str) -> str:
+    """Read an SMTP password from a mounted secret file, with a local-dev fallback."""
+    if not secret_file:
+        return environment_password
+    try:
+        password = Path(secret_file).read_text(encoding="utf-8").rstrip("\r\n")
+    except OSError as exc:
+        raise RuntimeError("SMTP password secret file cannot be read") from exc
+    if not password:
+        raise RuntimeError("SMTP password secret file is empty")
+    return password
+
+
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_PASS = _load_smtp_password(os.getenv("SMTP_PASS_FILE", ""), os.getenv("SMTP_PASS", ""))
 SMTP_FROM = os.getenv("SMTP_FROM", "dms@kfl-aviation.local")
 NOTIFICATION_ENABLED = os.getenv("NOTIFICATION_ENABLED", "false").lower() == "true"
 
@@ -79,7 +96,7 @@ def send_email(to: str, subject: str, body: str, entity_type: str = None, entity
             msg.attach(MIMEText(html, "html"))
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
+            server.starttls(context=ssl.create_default_context())
             if SMTP_USER and SMTP_PASS:
                 server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)

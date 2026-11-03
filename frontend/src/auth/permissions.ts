@@ -44,6 +44,9 @@ export function getPostLoginPath(profile: AccessProfile, returnTo?: string): str
   }
 
   const routePermissions: Array<[string, string]> = [
+    ["/audit-reports", "audit_report:read"],
+    ["/audit-findings", "audit_finding:read"],
+    ["/audit-dashboard", "audit_finding:read"],
     ["/notifications", "safety:read"],
     ["/occurrences", "safety:read"],
     ["/missions", "safety:read"],

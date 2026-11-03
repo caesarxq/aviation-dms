@@ -37,11 +37,11 @@ function priorityClass(priority: string) {
 
 export function Dashboard() {
   const { profile } = useAuth();
-  const { data: trends, isLoading: trendsLoading } = useQuery({
+  const { data: trends, isLoading: trendsLoading, isError: trendsError } = useQuery({
     queryKey: ["trends"],
     queryFn: () => safetyApi.getTrends(),
   });
-  const { data: deadlines, isLoading: deadlinesLoading } = useQuery({
+  const { data: deadlines, isLoading: deadlinesLoading, isError: deadlinesError } = useQuery({
     queryKey: ["deadlines"],
     queryFn: () => safetyApi.getDeadlines(30),
   });
@@ -49,6 +49,7 @@ export function Dashboard() {
 
   const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
   const isLoading = trendsLoading || deadlinesLoading;
+  const hasDataErrors = trendsError || deadlinesError;
 
   return (
     <div className="app-page">
@@ -59,7 +60,9 @@ export function Dashboard() {
           <p className="app-subtitle">{profile?.user.full_name ? `Welcome, ${profile.user.full_name}. ` : ""}A clear view of safety, compliance, and operational commitments.</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="app-status app-status-healthy">System healthy</span>
+          <span className={`app-status ${hasDataErrors ? "app-status-warning" : "app-status-info"}`}>
+            {isLoading ? "Checking dashboard data" : hasDataErrors ? "Some dashboard data is unavailable" : "Dashboard data loaded"}
+          </span>
           <Link to="/notifications" className="app-btn-secondary">
             View notifications <ArrowUpRight size={15} />
           </Link>
@@ -73,10 +76,10 @@ export function Dashboard() {
       </header>
 
       <section className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Key metrics">
-        <MetricCard label="Occurrences (30 days)" value={isLoading ? "—" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
-        <MetricCard label="Total Hazards" value={isLoading ? "—" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
-        <MetricCard label="Open Safety Actions" value={isLoading ? "—" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="green" />
-        <MetricCard label="Deadlines requiring attention" value={isLoading ? "—" : deadlines?.overdue_count ?? 0} context="Overdue items" icon={CalendarClock} tone={deadlines?.overdue_count ? "red" : "green"} />
+        <MetricCard label="Occurrences (30 days)" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
+        <MetricCard label="Total Hazards" value={trendsLoading ? "—" : trendsError ? "Unavailable" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
+        <MetricCard label="Open Safety Actions" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="blue" />
+        <MetricCard label="Deadlines requiring attention" value={deadlinesLoading ? "—" : deadlinesError ? "Unavailable" : deadlines?.overdue_count ?? 0} context={deadlinesError ? "Deadline data unavailable" : "Overdue items"} icon={CalendarClock} tone={deadlinesError ? "blue" : deadlines?.overdue_count ? "red" : "green"} />
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr_0.85fr]">
@@ -93,6 +96,9 @@ export function Dashboard() {
           </div>
 
           <div className="p-5">
+            {deadlinesError && (
+              <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">Unable to load deadline data.</div>
+            )}
             {deadlines?.overdue?.length > 0 && (
               <div className="mb-5">
                 <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-700">
@@ -123,7 +129,7 @@ export function Dashboard() {
                 </ul>
               </div>
             )}
-            {!deadlines?.overdue?.length && !deadlines?.upcoming?.length && (
+            {!deadlinesError && !deadlinesLoading && deadlines && !deadlines?.overdue?.length && !deadlines?.upcoming?.length && (
               <div className="rounded-lg border border-dashed border-kfl-border bg-kfl-surface-subtle p-8 text-center">
                 <CheckCircle2 className="mx-auto mb-2 text-emerald-600" size={24} />
                 <p className="text-sm font-semibold text-kfl-text">No deadlines require attention.</p>
@@ -143,17 +149,17 @@ export function Dashboard() {
           </div>
           <div className="space-y-4">
             {[
-              ["Document control", "Published baseline available", "healthy"],
-              ["Safety reporting", "Occurrence workflow active", "healthy"],
-              ["Deadline monitoring", deadlines?.overdue_count ? `${deadlines.overdue_count} overdue item(s)` : "No overdue items", deadlines?.overdue_count ? "critical" : "healthy"],
-              ["Notification service", "Scheduler connected", "healthy"],
-            ].map(([label, value, tone]) => (
+              ["Document control", "Status not verified", "info", "Unverified"],
+              ["Safety reporting", trendsError ? "Safety data unavailable" : trendsLoading ? "Checking safety data" : "Safety data available", "info", trendsError ? "Unavailable" : trendsLoading ? "Checking" : "Data available"],
+              ["Deadline monitoring", deadlinesError ? "Deadline data unavailable" : deadlinesLoading ? "Checking deadlines" : deadlines?.overdue_count ? `${deadlines.overdue_count} overdue item(s)` : "No overdue items", deadlinesError ? "info" : deadlinesLoading ? "info" : deadlines?.overdue_count ? "critical" : "healthy", deadlinesError ? "Unavailable" : deadlinesLoading ? "Checking" : deadlines?.overdue_count ? "Action" : "Clear"],
+              ["Notification service", "Notification status not checked", "info", "Not checked"],
+            ].map(([label, value, tone, status]) => (
               <div key={label} className="flex items-center justify-between gap-3 border-b border-kfl-border pb-3 last:border-0 last:pb-0">
                 <div>
                   <p className="text-sm font-semibold text-kfl-text">{label}</p>
                   <p className="mt-0.5 text-xs text-kfl-muted">{value}</p>
                 </div>
-                <span className={`app-status ${tone === "critical" ? "app-status-critical" : "app-status-healthy"}`}>{tone === "critical" ? "Action" : "Ready"}</span>
+                <span className={`app-status ${tone === "critical" ? "app-status-critical" : tone === "healthy" ? "app-status-healthy" : "app-status-info"}`}>{status}</span>
               </div>
             ))}
           </div>

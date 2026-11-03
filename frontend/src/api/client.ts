@@ -26,7 +26,7 @@ api.interceptors.response.use(
   (error: AxiosError) => {
     const status = error.response?.status;
     const url = error.config?.url || "";
-    const credentialRoute = /\/auth\/(login|bootstrap|bootstrap-status|password-setup|change-password)/.test(url);
+    const credentialRoute = /\/auth\/(login|bootstrap|bootstrap-status|password-setup|change-password|forgot-password|reset-password)/.test(url);
     if (status === 401 && !credentialRoute && typeof window !== "undefined") {
       window.dispatchEvent(new Event("kfl:session-expired"));
     }

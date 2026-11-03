@@ -1,39 +1,92 @@
-version: "3.8"
-
 services:
   backend:
+    image: kfl-aviation-dms-backend:${DMS_RELEASE_TAG:?Set DMS_RELEASE_TAG to a unique build identifier}
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
-      - "DEV_MODE=false"
-      - "DMS_DB_PATH=/app/data/dms.db"
+      DEV_MODE: "false"
+      DMS_DB_PATH: /app/data/dms.db
+      SESSION_COOKIE_SECURE: "true"
+      AUTH_ALLOWED_ORIGINS: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
+      CORS_ORIGINS: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
+      PUBLIC_APP_URL: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
+      KFL_BOOTSTRAP_TOKEN_FILE: /run/secrets/kfl_bootstrap_token
+      NOTIFICATION_ENABLED: "true"
+      SMTP_HOST: "${SMTP_HOST:?Set SMTP_HOST for password reset and notifications}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:?Set SMTP_USER for password reset and notifications}"
+      SMTP_PASS_FILE: /run/secrets/smtp_pass
+      SMTP_FROM: "${SMTP_FROM:?Set SMTP_FROM for password reset and notifications}"
+    secrets:
+      - kfl_bootstrap_token
+      - smtp_pass
     volumes:
-      - "dms_data:/app/data"
+      - dms_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   frontend:
+    image: kfl-aviation-dms-frontend:${DMS_RELEASE_TAG:?Set DMS_RELEASE_TAG to a unique build identifier}
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    expose:
+      - "80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: 172.31.254.3
+
+  https_proxy:
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    environment:
+      DMS_HOSTNAME: "${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
+      ACME_EMAIL: "${ACME_EMAIL:?Set ACME_EMAIL for certificate registration}"
     ports:
       - "80:80"
-    restart: unless-stopped
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:latest
-    environment:
-      - "KEYCLOAK_ADMIN=admin"
-      - "KEYCLOAK_ADMIN_PASSWORD=changeme"
-    ports:
-      - "8080:8080"
-    command: start-dev
+      - "443:443"
+      - "443:443/udp"
     volumes:
-      - "keycloak_data:/opt/keycloak/data"
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   dms_data: {}
-  keycloak_data: {}
+  caddy_data: {}
+  caddy_config: {}
+
+networks:
+  default:
+    name: kfl-aviation-dms
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.254.0/24
+
+secrets:
+  kfl_bootstrap_token:
+    file: "${KFL_BOOTSTRAP_TOKEN_FILE:?Set KFL_BOOTSTRAP_TOKEN_FILE to a protected host-side secret file}"
+  smtp_pass:
+    file: "${SMTP_PASS_SECRET_FILE:?Set SMTP_PASS_SECRET_FILE to a protected host-side SMTP password file}"

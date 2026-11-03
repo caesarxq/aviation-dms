@@ -1,6 +1,6 @@
 """P0 API routes."""
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -10,16 +10,47 @@ import bcrypt
 import hashlib
 import hmac
 import os
+import ipaddress
 import secrets
+import asyncio
+from pathlib import Path
+from urllib.parse import urlsplit
 from collections import Counter
 
-from .database import get_db
+from .database import get_db, DB_PATH
 from .audit import log_audit_event
 from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
 
 router = APIRouter()
+TRUSTED_FRONTEND_IP = "172.31.254.3"
+KCAA_EVIDENCE_DIR = Path(os.getenv("KCAA_EVIDENCE_DIR", str(Path(DB_PATH).parent / "kcaa-evidence")))
+MAX_KCAA_EVIDENCE_BYTES = 10 * 1024 * 1024
+
+
+def _validated_kcaa_evidence_path(stored_filename: str) -> Path:
+    root = KCAA_EVIDENCE_DIR.resolve()
+    path = (root / stored_filename).resolve()
+    if path.parent != root or path.name != stored_filename:
+        raise HTTPException(status_code=400, detail="Invalid KCAA evidence storage path")
+    return path
+
+
+def _hash_kcaa_evidence(path: Path) -> str:
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with path.open("rb") as source:
+            while chunk := source.read(64 * 1024):
+                total += len(chunk)
+                if total > MAX_KCAA_EVIDENCE_BYTES:
+                    raise HTTPException(status_code=413, detail="Stored KCAA evidence exceeds the size limit")
+                digest.update(chunk)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=409, detail="Stored KCAA evidence file is missing") from exc
+    return digest.hexdigest()
+
 
 
 def _actor(request: Request) -> str:
@@ -112,6 +143,20 @@ def _clear_session_cookies(response: JSONResponse) -> JSONResponse:
     return response
 
 
+def _client_ip(request: Request) -> str:
+    """Resolve the login-throttle client IP without trusting arbitrary forwarding headers."""
+    peer_ip = request.client.host if request.client else "unknown"
+    if peer_ip != TRUSTED_FRONTEND_IP:
+        return peer_ip
+
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    try:
+        # Caddy overwrites XFF with one sanitized address; reject chains and malformed values.
+        return str(ipaddress.ip_address(forwarded_for))
+    except ValueError:
+        return peer_ip
+
+
 def _request_is_loopback(request: Request) -> bool:
     host = request.client.host if request.client else ""
     try:
@@ -119,6 +164,19 @@ def _request_is_loopback(request: Request) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def _configured_bootstrap_token() -> str:
+    token = os.getenv("KFL_BOOTSTRAP_TOKEN", "").strip()
+    if token:
+        return token
+    token_file = os.getenv("KFL_BOOTSTRAP_TOKEN_FILE", "").strip()
+    if not token_file:
+        return ""
+    try:
+        return Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _dummy_password_hash() -> bytes:
@@ -281,7 +339,7 @@ async def auth_login(body: AuthLoginRequest, request: Request):
     """Authenticate credentials and issue a short-lived opaque HttpOnly session cookie."""
     username = body.username.strip().lower()
     password = body.password
-    client_host = request.client.host if request.client else "unknown"
+    client_host = _client_ip(request)
     attempt_key = _token_hash(f"{username}\0{client_host}")
     now = _auth_now()
     db = await get_db()
@@ -357,12 +415,12 @@ async def auth_bootstrap_status(request: Request):
         admin = await cursor.fetchone()
         cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'auth_bootstrap_completed'")
         completed = await cursor.fetchone()
-        configured = bool(os.getenv("KFL_BOOTSTRAP_TOKEN")) or (DEV_MODE and _request_is_loopback(request))
+        configured = bool(_configured_bootstrap_token()) or (DEV_MODE and _request_is_loopback(request))
         setup_required = bool(admin and admin["is_active"] and not admin["password_hash"] and not completed)
         return {
             "setup_required": setup_required,
             "bootstrap_configured": configured,
-            "bootstrap_token_required": bool(os.getenv("KFL_BOOTSTRAP_TOKEN")),
+            "bootstrap_token_required": bool(_configured_bootstrap_token()),
         }
     finally:
         await db.close()
@@ -372,7 +430,7 @@ async def auth_bootstrap_status(request: Request):
 async def auth_bootstrap(body: AuthBootstrapRequest, request: Request):
     """Set the initial admin password once, using an operator-provided bootstrap token."""
     _validate_new_password(body.password)
-    configured_token = os.getenv("KFL_BOOTSTRAP_TOKEN")
+    configured_token = _configured_bootstrap_token()
     local_dev_bootstrap = DEV_MODE and _request_is_loopback(request) and not configured_token
     if not local_dev_bootstrap and (not configured_token or not body.bootstrap_token or not hmac.compare_digest(body.bootstrap_token, configured_token)):
         raise HTTPException(status_code=403, detail="Invalid bootstrap authorization")
@@ -533,7 +591,7 @@ async def issue_invite(body: AuthInviteRequest, request: Request):
     """Issue a one-time invite code for an account to set their password."""
     _check(request, "settings:manage")
     actor = _actor(request)
-    client_host = request.client.host if request.client else "unknown"
+    client_host = _client_ip(request)
 
     # Rate limit: max 5 invite requests per actor per 15 minutes
     attempt_key = _token_hash(f"invite\0{actor}\0{client_host}")
@@ -623,11 +681,30 @@ async def issue_invite(body: AuthInviteRequest, request: Request):
 
 @router.post("/auth/forgot-password")
 async def forgot_password(body: AuthForgotPasswordRequest, request: Request):
-    """Request a password reset token. Always returns success to prevent account enumeration."""
+    """Issue a reset link only when it can be delivered; keep responses non-enumerating."""
     username = body.username.strip().lower()
-    client_host = request.client.host if request.client else "unknown"
+    client_host = _client_ip(request)
     attempt_key = _token_hash(f"forgot\\0{username}\\0{client_host}")
     now = _auth_now()
+    reset_token = None
+    setup_id = None
+    recipient = None
+    public_app_url = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    try:
+        parsed_app_url = urlsplit(public_app_url)
+        hostname = parsed_app_url.hostname or ""
+        local_http = DEV_MODE and parsed_app_url.scheme == "http" and hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed_app_url.username
+            or parsed_app_url.password
+            or parsed_app_url.query
+            or parsed_app_url.fragment
+            or not hostname
+            or (parsed_app_url.scheme != "https" and not local_http)
+        ):
+            public_app_url = ""
+    except ValueError:
+        public_app_url = ""
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
@@ -642,44 +719,67 @@ async def forgot_password(body: AuthForgotPasswordRequest, request: Request):
             if (locked_until and locked_until <= now) or now - window_start > timedelta(minutes=15):
                 attempt = None
 
-        cursor = await db.execute("SELECT user_id, username, password_hash, is_active FROM users WHERE lower(username) = ?", (username,))
+        cursor = await db.execute(
+            "SELECT user_id, username, email, password_hash, is_active FROM users WHERE lower(username) = ?",
+            (username,),
+        )
         user = await cursor.fetchone()
+        failures = (attempt["failure_count"] + 1) if attempt else 1
+        window_started = attempt["window_started_at"] if attempt else now.isoformat()
+        locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
+        await db.execute(
+            """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
+                 window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
+            (attempt_key, failures, window_started, locked),
+        )
 
-        if user and user["is_active"] and user["password_hash"]:
-            failures = (attempt["failure_count"] + 1) if attempt else 1
-            window_started = attempt["window_started_at"] if attempt else now.isoformat()
-            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
-            await db.execute(
-                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
-                     window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
-                (attempt_key, failures, window_started, locked),
-            )
-            raw_token = secrets.token_urlsafe(32)
-            expires = now + timedelta(hours=1)
-            await db.execute(
-                """INSERT INTO auth_setup_tokens
-                   (setup_id, user_id, token_hash, purpose, issued_by, created_at, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(uuid.uuid4()), user["user_id"], _token_hash(raw_token), "reset", "system", now.isoformat(), expires.isoformat()),
-            )
-            await db.commit()
-        else:
-            failures = (attempt["failure_count"] + 1) if attempt else 1
-            window_started = attempt["window_started_at"] if attempt else now.isoformat()
-            locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
-            await db.execute(
-                """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
-                     window_started_at = excluded.window_started_at, locked_until = excluded.locked_until""",
-                (attempt_key, failures, window_started, locked),
-            )
-            await db.commit()
+        if user and user["is_active"] and user["password_hash"] and user["email"] and public_app_url:
+            from .notifications import NOTIFICATION_ENABLED, SMTP_HOST
+            if NOTIFICATION_ENABLED and SMTP_HOST:
+                reset_token = secrets.token_urlsafe(32)
+                setup_id = str(uuid.uuid4())
+                recipient = user["email"]
+                expires = now + timedelta(hours=1)
+                await db.execute(
+                    """INSERT INTO auth_setup_tokens
+                       (setup_id, user_id, token_hash, purpose, issued_by, created_at, expires_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (setup_id, user["user_id"], _token_hash(reset_token), "reset", "system", now.isoformat(), expires.isoformat()),
+                )
+        await db.commit()
     finally:
         await db.close()
-    return JSONResponse({"message": "If an active account with a password exists, a reset token has been issued."}, headers={"Cache-Control": "no-store"})
+
+    if reset_token and setup_id and recipient:
+        reset_url = f"{public_app_url}/reset-password/{reset_token}"
+        from .notifications import send_email
+        sent = await asyncio.to_thread(
+            send_email,
+            recipient,
+            "KFL Aviation DMS password reset",
+            f"Use this one-time link within one hour to reset your password:\n\n{reset_url}\n\nIf you did not request this, ignore this message.",
+            "auth_password_reset",
+            setup_id,
+            "high",
+        )
+        if not sent:
+            cleanup_db = await get_db()
+            try:
+                await cleanup_db.execute(
+                    "UPDATE auth_setup_tokens SET used_at = ? WHERE setup_id = ? AND used_at IS NULL",
+                    (_auth_now_iso(), setup_id),
+                )
+                await cleanup_db.commit()
+            finally:
+                await cleanup_db.close()
+
+    return JSONResponse(
+        {"message": "If an active account with a password exists, reset instructions will be sent to its registered email."},
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 
 @router.post("/auth/reset-password")
@@ -810,10 +910,10 @@ async def create_document(doc: DocumentCreate, request: Request):
             "INSERT INTO documents (document_id, title, doc_class, classification, status, owner_id, description, tags, created_at, updated_at, created_by, updated_by, kcaa_approval_required, review_due_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (doc_id, doc.title, doc.doc_class, doc.classification, "draft", doc.owner_id, doc.description, doc.tags, now, now, actor, actor, 1 if doc.kcaa_approval_required else 0, doc.review_due_date),
         )
+        await log_audit_event("document", doc_id, "created", actor, {"title": doc.title, "kcaa_required": doc.kcaa_approval_required}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("document", doc_id, "created", actor, {"title": doc.title, "kcaa_required": doc.kcaa_approval_required})
     return DocumentResponse(document_id=doc_id, title=doc.title, doc_class=doc.doc_class, classification=doc.classification, status="draft", owner_id=doc.owner_id, description=doc.description, tags=doc.tags, current_version_id=None, kcaa_approval_required=doc.kcaa_approval_required, review_due_date=doc.review_due_date, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
@@ -853,6 +953,7 @@ async def update_document(doc_id: str, update: DocumentUpdate, request: Request)
             params.append(actor)
             params.append(doc_id)
             await db.execute(f"UPDATE documents SET {', '.join(updates)} WHERE document_id = ?", params)
+            await log_audit_event("document", doc_id, "updated", actor, {"fields": [col for col, val in {"title": update.title, "doc_class": update.doc_class, "classification": update.classification, "description": update.description, "tags": update.tags, "owner_id": update.owner_id}.items() if val is not None]}, db=db)
             await db.commit()
         cursor = await db.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,))
         row = await cursor.fetchone()
@@ -893,19 +994,164 @@ async def create_version(ver: DocumentVersionCreate, request: Request):
             "INSERT INTO document_versions (version_id, document_id, version_number, state, content, change_summary, kcaa_approved, kcaa_approved_by, kcaa_approved_at, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (ver_id, ver.document_id, ver.version_number, "draft", ver.content, ver.change_summary, 0, None, None, now, now, actor, actor),
         )
+        await log_audit_event("document_version", ver_id, "created", actor, {"document_id": ver.document_id, "version_number": ver.version_number}, db=db)
         await db.commit()
     finally:
         await db.close()
     return DocumentVersionResponse(version_id=ver_id, document_id=ver.document_id, version_number=ver.version_number, state="draft", content=ver.content, change_summary=ver.change_summary, approved_by=None, approved_at=None, kcaa_approved=0, kcaa_approved_by=None, kcaa_approved_at=None, published_at=None, kcaa_reference=None, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
+@router.post("/versions/{version_id}/kcaa-evidence", status_code=201)
+async def upload_kcaa_approval_evidence(version_id: str, request: Request, reference: str = ""):
+    """Retain a KCAA approval artifact and compute its digest server-side."""
+    _check(request, "document:update")
+    reference = reference.strip()
+    if not reference or len(reference) > 200:
+        raise HTTPException(status_code=422, detail="A KCAA approval reference of 1-200 characters is required")
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/pdf":
+        raise HTTPException(status_code=415, detail="KCAA approval evidence must be a PDF")
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_KCAA_EVIDENCE_BYTES:
+                raise HTTPException(status_code=413, detail="KCAA evidence exceeds the 10 MiB limit")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > MAX_KCAA_EVIDENCE_BYTES:
+            raise HTTPException(status_code=413, detail="KCAA evidence exceeds the 10 MiB limit")
+        content.extend(chunk)
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=415, detail="KCAA evidence content is not a PDF")
+
+    actor = _actor(request)
+    evidence_id = _gen_id("KCAA")
+    stored_filename = f"{evidence_id}.pdf"
+    root = KCAA_EVIDENCE_DIR.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    path = _validated_kcaa_evidence_path(stored_filename)
+    file_sha256 = hashlib.sha256(content).hexdigest()
+    uploaded_at = now_iso()
+    committed = False
+    try:
+        with path.open("xb") as stored_file:
+            stored_file.write(content)
+        db = await get_db()
+        try:
+            version = await (await db.execute(
+                "SELECT state FROM document_versions WHERE version_id = ?", (version_id,)
+            )).fetchone()
+            if not version:
+                raise HTTPException(status_code=404, detail="Version not found")
+            if version["state"] != "approved":
+                raise HTTPException(status_code=409, detail="KCAA evidence can only be attached to an internally approved version")
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                """INSERT INTO kcaa_approval_evidence
+                   (evidence_id, version_id, reference, stored_filename, file_path, file_sha256,
+                    file_size, uploaded_by, uploaded_at, status)
+                   VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
+                (evidence_id, version_id, reference, stored_filename, str(path), file_sha256, len(content), actor, uploaded_at),
+            )
+            await log_audit_event("kcaa_approval_evidence", evidence_id, "uploaded", actor, {
+                "version_id": version_id, "reference": reference, "file_sha256": file_sha256,
+            }, db=db)
+            await db.commit()
+            committed = True
+        except Exception:
+            await db.rollback()
+            raise
+        finally:
+            await db.close()
+    except Exception:
+        if not committed and path.exists():
+            path.unlink()
+        raise
+    return {
+        "evidence_id": evidence_id, "version_id": version_id, "reference": reference,
+        "stored_filename": stored_filename, "file_sha256": file_sha256, "file_size": len(content),
+        "uploaded_by": actor, "uploaded_at": uploaded_at, "status": "pending",
+    }
+
+
+@router.post("/versions/{version_id}/kcaa-evidence/{evidence_id}/verify")
+async def verify_kcaa_approval_evidence(version_id: str, evidence_id: str, request: Request):
+    """Independently review retained KCAA evidence before it can satisfy publication control."""
+    _check(request, "document:approve")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        evidence = await (await db.execute(
+            "SELECT * FROM kcaa_approval_evidence WHERE evidence_id = ? AND version_id = ?",
+            (evidence_id, version_id),
+        )).fetchone()
+        if not evidence:
+            raise HTTPException(status_code=404, detail="KCAA evidence not found")
+        if evidence["status"] != "pending":
+            raise HTTPException(status_code=409, detail="KCAA evidence is not pending verification")
+        if same_principal(request, evidence["uploaded_by"]):
+            raise HTTPException(status_code=403, detail="The evidence uploader cannot verify the same artifact")
+        path = _validated_kcaa_evidence_path(evidence["stored_filename"])
+        actual_hash = _hash_kcaa_evidence(path)
+        if not hmac.compare_digest(actual_hash, evidence["file_sha256"]):
+            raise HTTPException(status_code=409, detail="KCAA evidence file hash no longer matches its retained record")
+        verified_at = now_iso()
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "UPDATE kcaa_approval_evidence SET status='verified', verified_by=?, verified_at=? WHERE evidence_id=? AND status='pending'",
+            (actor, verified_at, evidence_id),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=409, detail="KCAA evidence verification was already completed")
+        await log_audit_event("kcaa_approval_evidence", evidence_id, "verified", actor, {
+            "version_id": version_id, "file_sha256": actual_hash,
+        }, db=db)
+        await db.commit()
+        return {"evidence_id": evidence_id, "version_id": version_id, "status": "verified", "verified_by": actor, "verified_at": verified_at}
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+@router.get("/versions/{version_id}/kcaa-evidence/{evidence_id}/file")
+async def download_kcaa_approval_evidence(version_id: str, evidence_id: str, request: Request):
+    _check(request, "document:read")
+    db = await get_db()
+    try:
+        evidence = await (await db.execute(
+            "SELECT stored_filename FROM kcaa_approval_evidence WHERE evidence_id=? AND version_id=?",
+            (evidence_id, version_id),
+        )).fetchone()
+        if not evidence:
+            raise HTTPException(status_code=404, detail="KCAA evidence not found")
+        path = _validated_kcaa_evidence_path(evidence["stored_filename"])
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="KCAA evidence file not found")
+        return FileResponse(path, media_type="application/pdf", filename=evidence["stored_filename"])
+    finally:
+        await db.close()
+
+
 @router.patch("/versions/{version_id}/state", response_model=DocumentVersionResponse)
-async def transition_version_state(version_id: str, request: Request, state: str = None):
+async def transition_version_state(
+    version_id: str,
+    request: Request,
+    state: Optional[str] = None,
+    kcaa_reference: Optional[str] = None,
+    kcaa_evidence_id: Optional[str] = None,
+):
     _check(request, "document:read")
     actor = _actor(request)
     role = _role(request)
     if state not in {"draft", "in_review", "approved", "rejected", "kcaa_approved", "published"}:
         raise HTTPException(status_code=422, detail=f"Invalid version state: {state}")
+    approval_reference = ""
+    approval_evidence_hash = ""
+    if state == "kcaa_approved" and not kcaa_evidence_id:
+        raise HTTPException(status_code=422, detail="A verified KCAA evidence ID is required")
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM document_versions WHERE version_id = ?", (version_id,))
@@ -940,12 +1186,51 @@ async def transition_version_state(version_id: str, request: Request, state: str
         cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (row["document_id"],))
         doc_row = await cursor.fetchone()
         kcaa_required = doc_row["kcaa_approval_required"] if doc_row else 0
+        evidence_id_for_transition = ""
+        evidence_uploader = ""
+        evidence_verifier = ""
+        if state == "kcaa_approved" or (state == "published" and kcaa_required):
+            evidence_id_for_transition = kcaa_evidence_id if state == "kcaa_approved" else row.get("kcaa_evidence_id")
+            if not evidence_id_for_transition:
+                raise HTTPException(status_code=403, detail="Verified KCAA evidence is required before approval or publication")
+            evidence = await (await db.execute(
+                "SELECT * FROM kcaa_approval_evidence WHERE evidence_id=? AND version_id=?",
+                (evidence_id_for_transition, version_id),
+            )).fetchone()
+            if not evidence or evidence["status"] != "verified":
+                raise HTTPException(status_code=403, detail="KCAA evidence must be independently verified before approval or publication")
+            evidence_uploader = evidence["uploaded_by"]
+            evidence_verifier = evidence["verified_by"]
+            if state == "kcaa_approved" and same_principal(request, evidence["uploaded_by"]):
+                raise HTTPException(status_code=403, detail="The evidence uploader cannot grant KCAA approval for the same artifact")
+            if state == "kcaa_approved" and same_principal(request, evidence["verified_by"]):
+                raise HTTPException(status_code=403, detail="The evidence verifier cannot grant KCAA approval for the same artifact")
+            evidence_path = _validated_kcaa_evidence_path(evidence["stored_filename"])
+            actual_evidence_hash = _hash_kcaa_evidence(evidence_path)
+            if not hmac.compare_digest(actual_evidence_hash, evidence["file_sha256"]):
+                raise HTTPException(status_code=409, detail="KCAA evidence file hash no longer matches its verified record")
+            if kcaa_reference and kcaa_reference.strip() != evidence["reference"]:
+                raise HTTPException(status_code=422, detail="KCAA reference does not match the verified evidence record")
+            approval_reference = evidence["reference"]
+            approval_evidence_hash = actual_evidence_hash
         # KCAA gate and separation-of-duties checks for publication.
         if state == "published":
             if not check_sod("version", "publish", actor, row["created_by"], getattr(request.state, "actor_aliases", None)):
                 raise HTTPException(status_code=403, detail="Cannot publish own version (SoD)")
-            if kcaa_required and row["kcaa_approved"] != 1:
-                raise HTTPException(status_code=403, detail="KCAA approval required before publishing")
+            if kcaa_required and (
+                row["kcaa_approved"] != 1
+                or not row.get("kcaa_reference")
+                or not row.get("kcaa_evidence_sha256")
+                or not row.get("kcaa_evidence_id")
+                or not row.get("kcaa_approved_by")
+            ):
+                raise HTTPException(status_code=403, detail="Verified KCAA approval evidence is required before publishing")
+            if kcaa_required and same_principal(request, row.get("kcaa_approved_by")):
+                raise HTTPException(status_code=403, detail="The KCAA approver cannot publish the same version")
+            if kcaa_required and same_principal(request, evidence_uploader):
+                raise HTTPException(status_code=403, detail="The KCAA evidence uploader cannot publish the same version")
+            if kcaa_required and same_principal(request, evidence_verifier):
+                raise HTTPException(status_code=403, detail="The KCAA evidence verifier cannot publish the same version")
         updates = ["state = ?", "updated_at = ?", "updated_by = ?"]
         params = [state, now_iso(), actor]
         if state == "approved":
@@ -954,7 +1239,8 @@ async def transition_version_state(version_id: str, request: Request, state: str
             updates.append("approved_at = ?")
             params.append(now_iso())
         if state == "kcaa_approved":
-            updates.append("kcaa_approved = 1")
+            updates.extend(["kcaa_approved = 1", "kcaa_reference = ?", "kcaa_evidence_sha256 = ?", "kcaa_evidence_id = ?"])
+            params.extend([approval_reference, approval_evidence_hash, evidence_id_for_transition])
             updates.append("kcaa_approved_by = ?")
             params.append(actor)
             updates.append("kcaa_approved_at = ?")
@@ -974,14 +1260,15 @@ async def transition_version_state(version_id: str, request: Request, state: str
                 "UPDATE documents SET current_version_id = ?, status = 'published', updated_at = ?, updated_by = ? WHERE document_id = ?",
                 (version_id, now_val, actor, row["document_id"]),
             )
-        await db.commit()
         await log_audit_event(
             "document_version",
             version_id,
             "state_changed",
             actor,
             {"from_state": row["state"], "to_state": state, "document_id": row["document_id"]},
+            db=db,
         )
+        await db.commit()
         cursor = await db.execute("SELECT * FROM document_versions WHERE version_id = ?", (version_id,))
         row = await cursor.fetchone()
         return DocumentVersionResponse(**dict(row))
@@ -994,14 +1281,22 @@ async def transition_version_state(version_id: str, request: Request, state: str
 async def get_document_content(doc_id: str, request: Request, include_draft: bool = False):
     """Get the effective (current published) version content of a document."""
     _check(request, "document:read")
+    if include_draft:
+        _check(request, "document:update")
     db = await get_db()
     try:
         row = None
-        if not include_draft:
+        if include_draft:
+            cursor = await db.execute(
+                "SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
+                (doc_id,),
+            )
+            row = await cursor.fetchone()
+        else:
             cursor = await db.execute(
                 """SELECT v.* FROM documents d
                    JOIN document_versions v ON v.version_id = d.current_version_id
-                   WHERE d.document_id = ?""",
+                   WHERE d.document_id = ? AND v.state = 'published'""",
                 (doc_id,),
             )
             row = await cursor.fetchone()
@@ -1012,13 +1307,7 @@ async def get_document_content(doc_id: str, request: Request, include_draft: boo
                 )
                 row = await cursor.fetchone()
         if not row:
-            cursor = await db.execute(
-                "SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
-                (doc_id,),
-            )
-            row = await cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Document version not found")
+            raise HTTPException(status_code=404, detail="Effective published document version not found")
         row = dict(row)
         return DocumentContentResponse(
             document_id=row["document_id"],
@@ -1081,6 +1370,7 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
                 now, now, actor, actor,
             ),
         )
+        await log_audit_event("document_version", ver_id, "created_from_content_update", actor, {"document_id": doc_id, "version_number": new_ver}, db=db)
         await db.commit()
 
         return DocumentContentResponse(
@@ -1132,10 +1422,10 @@ async def create_change_request(cr: ChangeRequestCreate, request: Request):
             "INSERT INTO change_requests (cr_id, document_id, version_id, title, description, change_type, status, requester_id, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (cr_id, cr.document_id, cr.version_id, cr.title, cr.description, cr.change_type, "open", actor, now, now, actor, actor),
         )
+        await log_audit_event("change_request", cr_id, "created", actor, {"title": cr.title}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("change_request", cr_id, "created", actor, {"title": cr.title})
     return ChangeRequestResponse(cr_id=cr_id, document_id=cr.document_id, version_id=cr.version_id, title=cr.title, description=cr.description, change_type=cr.change_type, status="open", requester_id=actor, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
@@ -1198,13 +1488,19 @@ async def update_change_request(cr_id: str, request: Request, status: Optional[s
         params.append(actor)
         params.append(cr_id)
         await db.execute(f"UPDATE change_requests SET {', '.join(updates)} WHERE cr_id = ?", params)
+        await log_audit_event(
+            "change_request",
+            cr_id,
+            f"status_{status}" if status else "updated",
+            actor,
+            {"from_status": row["status"], "to_status": status} if status else {"reviewer_id": reviewer_id, "approver_id": approver_id},
+            db=db,
+        )
         await db.commit()
         cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
         updated_row = dict(await cursor.fetchone())
     finally:
         await db.close()
-    if status:
-        await log_audit_event("change_request", cr_id, f"status_{status}", actor, {"from_status": row["status"], "to_status": status})
     return ChangeRequestResponse(**updated_row)
 
 
@@ -1242,6 +1538,7 @@ async def create_distribution(dist: DistributionCreate, request: Request):
             "INSERT INTO distributions (distribution_id, version_id, recipient_id, channel, status, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?)",
             (dist_id, dist.version_id, dist.recipient_id, dist.channel, "pending", now, now, actor, actor),
         )
+        await log_audit_event("distribution", dist_id, "created", actor, {"recipient_id": dist.recipient_id, "version_id": dist.version_id}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -1267,10 +1564,10 @@ async def acknowledge_distribution(dist_id: str, request: Request):
                 detail="Only the named recipient or an authorized distribution custodian may acknowledge this distribution (QMS §3.11)",
             )
         await db.execute("UPDATE distributions SET status = 'acknowledged', acknowledged_at = ?, acknowledged_by = ?, updated_at = ?, updated_by = ? WHERE distribution_id = ?", (now, actor, now, actor, dist_id))
+        await log_audit_event("distribution", dist_id, "acknowledged", actor, {"recipient_id": dist["recipient_id"]}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("distribution", dist_id, "acknowledged", actor, {"recipient_id": dist["recipient_id"]})
     return {"status": "acknowledged"}
 
 
@@ -1315,6 +1612,7 @@ async def create_legal_hold(hold: LegalHoldCreate, request: Request):
             "INSERT INTO legal_holds (hold_id, entity_type, entity_id, reason, imposed_by, imposed_at, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?, ?,?)",
             (hold_id, hold.entity_type, hold.entity_id, hold.reason, actor, now, "active", now, now),
         )
+        await log_audit_event("legal_hold", hold_id, "imposed", actor, {"entity_type": hold.entity_type, "entity_id": hold.entity_id}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -1328,7 +1626,10 @@ async def release_legal_hold(hold_id: str, request: Request):
     now = now_iso()
     db = await get_db()
     try:
-        await db.execute("UPDATE legal_holds SET status = 'released', released_by = ?, released_at = ?, updated_at = ? WHERE hold_id = ?", (actor, now, now, hold_id))
+        cursor = await db.execute("UPDATE legal_holds SET status = 'released', released_by = ?, released_at = ?, updated_at = ? WHERE hold_id = ? AND status = 'active'", (actor, now, now, hold_id))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Active legal hold not found")
+        await log_audit_event("legal_hold", hold_id, "released", actor, {}, db=db)
         await db.commit()
     finally:
         await db.close()

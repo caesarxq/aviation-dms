@@ -1,12 +1,13 @@
 """FastAPI application entry point."""
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .database import init_db
+from .database import get_db, init_db
 from .p0_auth import P0AuthMiddleware, DEV_MODE
 from .p0_routes import router as p0_router
 from .p1_routes import router as p1_router
 from .p2_routes import router as p2_router
+from .p3_routes import router as p3_router
 
 from contextlib import asynccontextmanager
 
@@ -57,8 +58,16 @@ app.add_middleware(P0AuthMiddleware)
 app.include_router(p0_router, prefix="/api/p0")
 app.include_router(p1_router, prefix="/api/p1")
 app.include_router(p2_router, prefix="/api/p2")
+app.include_router(p3_router, prefix="/api/p3")
 
 
 @app.get("/health")
 async def health():
+    db = await get_db()
+    try:
+        await db.execute("SELECT 1")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    finally:
+        await db.close()
     return {"status": "ok"}

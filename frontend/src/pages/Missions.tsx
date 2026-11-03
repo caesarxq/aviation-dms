@@ -6,6 +6,7 @@ import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 function missionStatusClass(status: string) {
   switch (status) {
@@ -20,11 +21,13 @@ function missionStatusClass(status: string) {
 
 const STATUS_ACTIONS: Record<string, { label: string; state: string; tone: "blue" | "green" | "red" }[]> = {
   planned: [
-    { label: "Start", state: "in_progress", tone: "green" },
     { label: "Cancel", state: "cancelled", tone: "red" },
   ],
+  released: [
+    { label: "Start", state: "in_progress", tone: "green" },
+    { label: "Abort", state: "aborted", tone: "red" },
+  ],
   in_progress: [
-    { label: "Complete", state: "completed", tone: "blue" },
     { label: "Abort", state: "aborted", tone: "red" },
   ],
 };
@@ -44,9 +47,26 @@ function toneColor(tone: string) {
 export function Missions() {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const { data: missions = [], isLoading } = useQuery({
-    queryKey: ["missions"],
-    queryFn: () => api.get("/p1/missions").then((r: any) => r.data),
+  const { hasPermission } = useAuth();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const pageSize = 50;
+  const trimmedSearch = search.trim();
+  const { data: missions = [], isLoading, isError, refetch } = useQuery({
+    queryKey: ["missions", trimmedSearch, statusFilter, page],
+    queryFn: () => api.get("/p1/missions", {
+      params: {
+        ...(trimmedSearch ? { search: trimmedSearch } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
+        limit: pageSize,
+        offset: page * pageSize,
+      },
+    }).then((r: any) => r.data),
+  });
+  const { data: missionSummary, isLoading: summaryLoading, isError: summaryError, refetch: refetchSummary } = useQuery({
+    queryKey: ["mission-summary"],
+    queryFn: () => api.get("/p1/missions/summary").then((r: any) => r.data),
   });
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
@@ -66,6 +86,7 @@ export function Missions() {
     mutationFn: (data: any) => api.post("/p1/missions", data).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["missions"] });
+      qc.invalidateQueries({ queryKey: ["mission-summary"] });
       setShowForm(false);
       setDirty(false);
       setTitle("");
@@ -82,6 +103,7 @@ export function Missions() {
       api.patch(`/p1/missions/${id}/state?state=${state}`).then((r: any) => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["missions"] });
+      qc.invalidateQueries({ queryKey: ["mission-summary"] });
     },
   });
 
@@ -93,44 +115,47 @@ export function Missions() {
           <h1 className="app-title">Missions</h1>
           <p className="app-subtitle">Plan, track, and transition flight missions through their operational lifecycle.</p>
         </div>
-        <button
+        {hasPermission("safety:create") && <button
           onClick={() => setShowForm(!showForm)}
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Mission"}
-        </button>
+        </button>}
       </header>
 
-      <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {summaryError && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Unable to load mission metrics. <button type="button" className="font-semibold underline" onClick={() => void refetchSummary()}>Retry mission metrics</button></div>}
+      <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="app-surface p-4">
           <div className="app-label">Total Missions</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-text">{missions.length}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-text">{summaryLoading ? "…" : summaryError ? "—" : missionSummary?.total ?? "—"}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Planned</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-blue">{missions.filter((m: any) => m.status === "planned").length}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-blue">{summaryLoading ? "…" : summaryError ? "—" : missionSummary?.planned ?? "—"}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">In Progress</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-blue">{missions.filter((m: any) => m.status === "in_progress").length}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-blue">{summaryLoading ? "…" : summaryError ? "—" : missionSummary?.in_progress ?? "—"}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Completed</div>
-          <div className="mt-2 text-2xl font-bold text-emerald-700">{missions.filter((m: any) => m.status === "completed").length}</div>
+          <div className="mt-2 text-2xl font-bold text-emerald-700">{summaryLoading ? "…" : summaryError ? "—" : missionSummary?.completed ?? "—"}</div>
         </div>
       </section>
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_missions_112" name="search_missions" value={showForm ? title : ""} onChange={(e) => setTitle(e.target.value)} placeholder="Search missions…" className="app-input pl-9 relative z-10" />
+            <input id="search_missions_112" name="search_missions" type="search" aria-label="Search missions" value={search} onChange={(e) => { setPage(0); setSearch(e.target.value); }} placeholder="Search missions…" className="app-input pl-9 relative z-10" />
           </div>
-          <select id="select_field_114" name="select_field" className="app-input w-full md:w-auto">
+          <select id="select_field_114" name="status" aria-label="Filter missions by status" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }} className="app-input w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="planned">Planned</option>
+            <option value="released">Released</option>
             <option value="in_progress">In Progress</option>
             <option value="completed">Completed</option>
             <option value="cancelled">Cancelled</option>
+            <option value="aborted">Aborted</option>
           </select>
         </div>
 
@@ -167,13 +192,24 @@ export function Missions() {
 
         {isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">Loading missions…</div>
-        ) : missions.length === 0 ? (
+        ) : isError ? (
+          <div className="p-10 text-center" role="alert">
+            <p className="text-sm font-semibold text-rose-800">Unable to load missions.</p>
+            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry missions</button>
+          </div>
+        ) : missions.length === 0 && page === 0 && !trimmedSearch && !statusFilter ? (
           <div className="app-surface border-dashed p-10 text-center">
             <Plus size={26} className="mx-auto mb-2 text-kfl-muted" />
             <p className="text-sm font-bold text-kfl-text">No missions found.</p>
             <p className="mt-1 text-xs text-kfl-muted">Create your first mission to begin tracking flight operations.</p>
           </div>
+        ) : missions.length === 0 ? (
+          <div className="p-10 text-center text-sm text-kfl-muted">
+            <p>{page > 0 ? "No missions on this page." : "No missions match these filters."}</p>
+            {page > 0 && <button type="button" className="app-btn-secondary mt-3" disabled={isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>}
+          </div>
         ) : (
+          <>
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
@@ -200,7 +236,9 @@ export function Missions() {
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.priority}</td>
                     <td className="px-4 py-4 text-right text-sm">
-                      {availableActions(m.status).map((a) => (
+                      {hasPermission("safety:update") && availableActions(m.status)
+                        .filter((action) => action.state !== "aborted" || hasPermission("safety:close"))
+                        .map((a) => (
                         <button
                           key={a.state}
                           onClick={() => transitionMutation.mutate({ id: m.mission_id, state: a.state })}
@@ -216,6 +254,14 @@ export function Missions() {
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-between border-t border-kfl-border p-4">
+            <span className="text-sm text-kfl-muted">Page {page + 1}</span>
+            <div className="flex gap-2">
+              <button type="button" className="app-btn-secondary" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>
+              <button type="button" className="app-btn-secondary" disabled={missions.length < pageSize || isLoading} onClick={() => setPage((current) => current + 1)}>Next page</button>
+            </div>
+          </div>
+          </>
         )}
       </section>
     </div>
