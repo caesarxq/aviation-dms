@@ -153,13 +153,38 @@ class TestRiskAssessments:
         assert unchanged["status"] == "draft"
         assert unchanged["risk_score"] == 6
 
-    def test_risk_approval_uses_dedicated_role_gated_command(self, client, safety_headers):
-        created = client.post("/api/p1/risk-assessments", json={"title": "Approval path"}, headers=safety_headers).json()
-        rejected = client.post(f"/api/p1/risk-assessments/{created['assessment_id']}/approve", headers={"X-Role": "flight_ops_officer", "X-Actor": "u-flight-ops"})
-        assert rejected.status_code == 403, rejected.text
-        approved = client.post(f"/api/p1/risk-assessments/{created['assessment_id']}/approve", headers=safety_headers)
-        assert approved.status_code == 200
+    @pytest.mark.parametrize("role,actor", [
+        ("system_admin", "admin"),
+        ("accountable_manager", "u-accountable"),
+        ("head_safety", "u-safety"),
+        ("head_operations", "u-ops"),
+        ("chief_pilot", "u-chief-pilot"),
+    ])
+    def test_risk_assessment_approval_permission_allows_existing_roles(self, client, safety_headers, role, actor):
+        created = client.post("/api/p1/risk-assessments", json={"title": f"Approval by {role}"}, headers=safety_headers).json()
+        approved = client.post(
+            f"/api/p1/risk-assessments/{created['assessment_id']}/approve",
+            headers={"X-Role": role, "X-Actor": actor},
+        )
+        assert approved.status_code == 200, approved.text
         assert approved.json()["status"] == "approved"
+
+    @pytest.mark.parametrize("role,actor", [
+        ("head_security", "u-security"),
+        ("flight_ops_officer", "u-flight-ops"),
+        ("head_quality", "u-quality"),
+        ("librarian", "u-lib"),
+    ])
+    def test_risk_assessment_approval_permission_denies_other_roles(self, client, safety_headers, role, actor):
+        created = client.post("/api/p1/risk-assessments", json={"title": f"Denied approval by {role}"}, headers=safety_headers).json()
+        rejected = client.post(
+            f"/api/p1/risk-assessments/{created['assessment_id']}/approve",
+            headers={"X-Role": role, "X-Actor": actor},
+        )
+        assert rejected.status_code == 403, rejected.text
+        current = client.get("/api/p1/risk-assessments", headers=safety_headers).json()
+        assessment = next(item for item in current if item["assessment_id"] == created["assessment_id"])
+        assert assessment["status"] == "draft"
 
     def test_nonexistent_risk_assessment_returns_404(self, client, safety_headers):
         resp = client.post("/api/p1/risk-assessments/NONEXISTENT/approve", headers=safety_headers)

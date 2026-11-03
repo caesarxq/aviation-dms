@@ -31,14 +31,6 @@ _cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://
 _auth_headers = ["Content-Type", "X-CSRF-Token"]
 if DEV_MODE:
     _auth_headers.extend(["X-Role", "X-Actor"])
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=_auth_headers,
-)
-
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.requests import Request
@@ -52,8 +44,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
-app.add_middleware(SecurityHeadersMiddleware)
+from .rate_limiter import RateLimitMiddleware
+
+# Starlette executes the last-added middleware outermost. Keep CORS and security
+# headers outside the limiter so 429 responses retain browser-facing headers;
+# the limiter still runs before auth and covers unauthorized requests.
 app.add_middleware(P0AuthMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=_auth_headers,
+)
 
 app.include_router(p0_router, prefix="/api/p0")
 app.include_router(p1_router, prefix="/api/p1")

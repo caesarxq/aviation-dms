@@ -56,6 +56,7 @@ function renderShell(
             <Route path="/login" element={<div data-testid="login-screen">Sign in</div>} />
             <Route element={<AppShell />}>
               <Route path="/documents" element={<div data-testid="documents-screen">Documents</div>} />
+              <Route path="/document-proposals" element={<div data-testid="document-proposals-screen">Document proposals</div>} />
               <Route path="/notifications" element={<div data-testid="notifications-screen">Notifications</div>} />
             </Route>
           </Routes>
@@ -111,6 +112,24 @@ describe("AppShell authentication screens", () => {
     expect(screen.queryByRole("button", { name: /Notifications/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Account security" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("shows document catalogue and proposal navigation for proposal-only users", async () => {
+    const proposalOnlyProfile = {
+      ...recordsCustodianProfile,
+      permissions: ["document:propose"],
+    };
+    renderShell(async () => {}, "/documents", proposalOnlyProfile);
+
+    await userEvent.click(screen.getByRole("button", { name: "Document Control" }));
+    expect(screen.getByRole("link", { name: "Documents" })).toBeInTheDocument();
+    const proposalsLink = screen.getByRole("link", { name: "Document Proposals" });
+    expect(proposalsLink).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Change Requests" })).not.toBeInTheDocument();
+
+    await userEvent.click(proposalsLink);
+    await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("/document-proposals"));
+    expect(screen.getByTestId("document-proposals-screen")).toBeInTheDocument();
   });
 
   it("uses the records custodian's permitted landing screen from the brand control", async () => {

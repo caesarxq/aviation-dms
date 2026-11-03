@@ -8,6 +8,20 @@ from app.database import get_db
 
 
 @pytest.fixture
+def proposal_only_headers(monkeypatch):
+    original_has_permission = p0_routes.has_permission
+    proposal_permissions = {"document:propose"}
+
+    def has_permission(role, permission):
+        if role == "head_safety" and permission.startswith("document:"):
+            return permission in proposal_permissions
+        return original_has_permission(role, permission)
+
+    monkeypatch.setattr(p0_routes, "has_permission", has_permission)
+    return {"X-Role": "head_safety", "X-Actor": "u-safety"}
+
+
+@pytest.fixture
 def independent_publisher_headers(monkeypatch):
     actor_id = f"u-publisher-test-{uuid.uuid4().hex[:8]}"
     monkeypatch.setitem(p0_auth.DEV_IDENTITY_ROLES, actor_id, (actor_id, "system_admin"))
@@ -251,6 +265,69 @@ class TestDocumentVersioning:
         allowed_draft = client.get(f"/api/p0/documents/{document_id}/content?include_draft=true", headers=librarian_headers)
         assert allowed_draft.status_code == 200
         assert allowed_draft.json()["content"] == "Unapproved draft secret"
+
+    def test_proposal_only_can_read_catalogue_and_published_content_but_not_drafts_or_save(self, client, librarian_headers, proposal_only_headers):
+        draft = client.put(
+            "/api/p0/documents/DOC-006/content",
+            json={"content": "Proposal-only must not read this draft", "change_summary": "test"},
+            headers=librarian_headers,
+        )
+        assert draft.status_code == 200
+
+        listed = client.get("/api/p0/documents", headers=proposal_only_headers)
+        assert listed.status_code == 200
+        assert any(item["document_id"] == "DOC-006" for item in listed.json())
+
+        detail = client.get("/api/p0/documents/DOC-006", headers=proposal_only_headers)
+        assert detail.status_code == 200
+        assert detail.json()["document_id"] == "DOC-006"
+
+        published = client.get("/api/p0/documents/DOC-006/content", headers=proposal_only_headers)
+        assert published.status_code == 200
+        assert published.json()["state"] == "published"
+        assert published.json()["content"] != "Proposal-only must not read this draft"
+
+        hidden_draft = client.get(
+            "/api/p0/documents/DOC-006/content?include_draft=true",
+            headers=proposal_only_headers,
+        )
+        assert hidden_draft.status_code == 403
+
+        saved = client.put(
+            "/api/p0/documents/DOC-006/content",
+            json={"content": "Unauthorized save", "change_summary": "test"},
+            headers=proposal_only_headers,
+        )
+        assert saved.status_code == 403
+
+    def test_versions_endpoint_hides_unpublished_content_from_readers(self, client, librarian_headers, reporter_headers, proposal_only_headers):
+        marker = "Unpublished version must remain restricted"
+        draft = client.put(
+            "/api/p0/documents/DOC-006/content",
+            json={"content": marker, "change_summary": "version-list visibility test"},
+            headers=librarian_headers,
+        )
+        assert draft.status_code == 200
+        draft_id = draft.json()["version_id"]
+
+        for headers in (reporter_headers, proposal_only_headers):
+            published_only = client.get("/api/p0/documents/DOC-006/versions", headers=headers)
+            assert published_only.status_code == 200, published_only.text
+            assert draft_id not in {item["version_id"] for item in published_only.json()}
+            assert all(item["state"] == "published" for item in published_only.json())
+            denied = client.get(
+                "/api/p0/documents/DOC-006/versions?include_draft=true",
+                headers=headers,
+            )
+            assert denied.status_code == 403
+
+        editor_versions = client.get(
+            "/api/p0/documents/DOC-006/versions?include_draft=true",
+            headers=librarian_headers,
+        )
+        assert editor_versions.status_code == 200, editor_versions.text
+        assert draft_id in {item["version_id"] for item in editor_versions.json()}
+        assert any(marker in item["content"] for item in editor_versions.json())
 
     def test_get_document_content(self, client, librarian_headers):
         resp = client.get("/api/p0/documents/DOC-001/content", headers=librarian_headers)

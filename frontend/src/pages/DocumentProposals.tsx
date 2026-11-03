@@ -9,6 +9,7 @@ import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 function ProposalExcerpt({ label, html, fallback, tone }: { label: string; html?: string; fallback?: string; tone: "removed" | "added" }) {
   const safeHtml = html ? DOMPurify.sanitize(html) : "";
@@ -22,6 +23,12 @@ function ProposalExcerpt({ label, html, fallback, tone }: { label: string; html?
 
 export function DocumentProposals() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission("document:update");
+  const canPropose = hasPermission("document:propose");
+  const canApproveOrReject = canUpdate || hasPermission("document:approve");
+  const canOpenAffectedSection = canPropose || canUpdate;
+  const canPublish = hasPermission("document:publish");
   const qc = useQueryClient();
   const [docId, setDocId] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -133,9 +140,11 @@ export function DocumentProposals() {
       {docId && (
         <>
           <div className="flex gap-2 mb-4">
-            <button onClick={() => setShowForm(true)} className="app-btn-primary flex items-center gap-1 text-sm">
-              <Plus size={14} /> New Proposal
-            </button>
+            {canPropose && (
+              <button onClick={() => setShowForm(true)} className="app-btn-primary flex items-center gap-1 text-sm">
+                <Plus size={14} /> New Proposal
+              </button>
+            )}
             {["", "draft", "submitted", "approved", "rejected", "applied"].map(s => (
               <button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-1 text-sm rounded ${filterStatus === s ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>
                 {s || "All"}
@@ -144,7 +153,7 @@ export function DocumentProposals() {
           </div>
 
           {/* Proposal Modal */}
-          <Modal open={showForm} onClose={() => setShowForm(false)} title="Create Proposal" description="Describe one controlled-document change. Target the exact section or block, show the original and proposed text, and explain why the change is needed before submitting it for review.">
+          <Modal open={showForm && canPropose} onClose={() => setShowForm(false)} title="Create Proposal" description="Describe one controlled-document change. Target the exact section or block, show the original and proposed text, and explain why the change is needed before submitting it for review.">
             {proposalError && (
               <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
                 {proposalError}
@@ -179,9 +188,11 @@ export function DocumentProposals() {
             </div>
             <div className="mt-4 flex gap-2 justify-end">
               <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-              <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
-                {createMutation.isPending ? "Saving…" : "Submit Proposal"}
-              </button>
+              {canPropose && (
+                <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
+                  {createMutation.isPending ? "Saving…" : "Submit Proposal"}
+                </button>
+              )}
             </div>
           </Modal>
 
@@ -210,19 +221,19 @@ export function DocumentProposals() {
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     {p.rationale && <div className="text-sm text-kfl-muted"><strong>Rationale:</strong> {p.rationale}</div>}
-                    <Link to={`/documents/${p.document_id}/edit?proposal=${encodeURIComponent(p.proposal_id)}&section=${encodeURIComponent(p.anchor_id || "")}`} className="shrink-0 text-xs font-semibold text-kfl-blue hover:underline">Open affected section</Link>
+                    {canOpenAffectedSection && <Link to={`/documents/${p.document_id}/edit?proposal=${encodeURIComponent(p.proposal_id)}&section=${encodeURIComponent(p.anchor_id || "")}`} className="shrink-0 text-xs font-semibold text-kfl-blue hover:underline">Open affected section</Link>}
                   </div>
                   <div className="mt-2 flex gap-2">
-                    {p.status === "draft" && (
+                    {canPropose && p.status === "draft" && (
                       <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "submitted" } })} className="app-btn-primary text-xs px-3 py-1">Submit</button>
                     )}
-                    {p.status === "submitted" && (
+                    {canApproveOrReject && p.status === "submitted" && (
                       <>
                         <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "approved" } })} className="app-btn-primary text-xs px-3 py-1 flex items-center gap-1"><Check size={12} /> Approve</button>
                         <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "rejected" } })} className="app-btn-secondary text-xs px-3 py-1 flex items-center gap-1"><X size={12} /> Reject</button>
                       </>
                     )}
-                    {p.status === "approved" && (
+                    {canPublish && p.status === "approved" && (
                       <button onClick={() => applyMutation.mutate(p.proposal_id)} className="app-btn-primary text-xs px-3 py-1 flex items-center gap-1"><ArrowUpRight size={12} /> Apply to New Version</button>
                     )}
                   </div>

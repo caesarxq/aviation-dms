@@ -156,10 +156,10 @@ async def create_occurrence(occ: OccurrenceCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (occ_id, serial, occ.title, occ.description, occ.occurrence_type, occ.severity, "reported", actor, 1 if occ.reporter_confidential else 0, occ.location, occ.occurred_at, now, 0, None, now, now, actor, actor),
         )
+        await log_audit_event("occurrence", occ_id, "reported", actor, {"title": occ.title}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("occurrence", occ_id, "reported", actor, {"title": occ.title})
     return OccurrenceResponse(occurrence_id=occ_id, serial_number=serial, title=occ.title, description=occ.description, occurrence_type=occ.occurrence_type, severity=occ.severity, status="reported", reporter_id=actor, reporter_confidential=occ.reporter_confidential, location=occ.location, occurred_at=occ.occurred_at, reported_at=now, mor_required=False, mor_deadline=None, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
@@ -259,10 +259,10 @@ async def acknowledge_occurrence(occ_id: str, request: Request):
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Occurrence not found")
         await db.execute("UPDATE occurrences SET status = 'acknowledged', acknowledged_at = ?, acknowledged_by = ?, updated_at = ?, updated_by = ? WHERE occurrence_id = ?", (now, actor, now, actor, occ_id))
+        await log_audit_event("occurrence", occ_id, "acknowledged", actor, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("occurrence", occ_id, "acknowledged", actor)
     return {"status": "acknowledged"}
 
 
@@ -312,23 +312,20 @@ async def assess_occurrence_mor(occ_id: str, body: OccurrenceMORAssessmentReques
                 occ_id,
             ),
         )
+        await log_audit_event(
+            "occurrence", occ_id, "mor_assessed", actor,
+            {
+                "mor_required": body.mor_required,
+                "mor_deadline": mor_deadline,
+                "rationale": body.rationale.strip(),
+                "rule_ref": "SMS-KFL §2.2.3 / §2.3",
+            }, db=db,
+        )
         await db.commit()
         cursor = await db.execute("SELECT * FROM occurrences WHERE occurrence_id = ?", (occ_id,))
         updated = dict(await cursor.fetchone())
     finally:
         await db.close()
-    await log_audit_event(
-        "occurrence",
-        occ_id,
-        "mor_assessed",
-        actor,
-        {
-            "mor_required": body.mor_required,
-            "mor_deadline": mor_deadline,
-            "rationale": body.rationale.strip(),
-            "rule_ref": "SMS-KFL §2.2.3 / §2.3",
-        },
-    )
     return OccurrenceResponse(**updated)
 
 
@@ -369,23 +366,20 @@ async def close_occurrence(occ_id: str, body: OccurrenceCloseRequest, request: R
                WHERE occurrence_id = ?""",
             (body.followup_notes.strip(), mor_submitted_at, actor, now, now, actor, occ_id),
         )
+        await log_audit_event(
+            "occurrence", occ_id, "closed", actor,
+            {
+                "effectiveness_confirmed": True,
+                "no_new_hazards": True,
+                "followup_notes": body.followup_notes.strip(),
+                "rule_ref": "SMS-KFL §2.3.2",
+            }, db=db,
+        )
         await db.commit()
         cursor = await db.execute("SELECT * FROM occurrences WHERE occurrence_id = ?", (occ_id,))
         updated = dict(await cursor.fetchone())
     finally:
         await db.close()
-    await log_audit_event(
-        "occurrence",
-        occ_id,
-        "closed",
-        actor,
-        {
-            "effectiveness_confirmed": True,
-            "no_new_hazards": True,
-            "followup_notes": body.followup_notes.strip(),
-            "rule_ref": "SMS-KFL §2.3.2",
-        },
-    )
     return OccurrenceResponse(**updated)
 
 
@@ -404,6 +398,7 @@ async def create_hazard(hazard: HazardCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (hazard_id, hazard.title, hazard.description, hazard.category, "identified", hazard.risk_level, hazard.likelihood, hazard.severity, hazard.mitigation, hazard.owner_id, actor, now, now, now),
         )
+        await log_audit_event("hazard", hazard_id, "created", actor, {"title": hazard.title}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -681,9 +676,7 @@ async def update_risk_assessment(assessment_id: str, update: RiskAssessmentUpdat
 
 @router.post("/risk-assessments/{assessment_id}/approve", response_model=RiskAssessmentResponse)
 async def approve_risk_assessment(assessment_id: str, request: Request):
-    role = _role(request)
-    if role not in {"head_safety", "head_operations", "chief_pilot", "accountable_manager", "system_admin"}:
-        raise HTTPException(status_code=403, detail="Authorized operational/safety approver role required")
+    _check(request, "risk_assessment:approve")
     actor = _actor(request)
     now = now_iso()
     db = await get_db()
@@ -726,10 +719,10 @@ async def create_investigation(inv: InvestigationCreate, request: Request):
         )
         # Update occurrence status to investigating
         await db.execute("UPDATE occurrences SET status = 'investigating', investigation_id = ?, updated_at = ?, updated_by = ? WHERE occurrence_id = ?", (inv_id, now, _actor(request), inv.occurrence_id))
+        await log_audit_event("investigation", inv_id, "opened", _actor(request), {"occurrence_id": inv.occurrence_id}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("investigation", inv_id, "opened", _actor(request), {"occurrence_id": inv.occurrence_id})
     return InvestigationResponse(investigation_id=inv_id, occurrence_id=inv.occurrence_id, investigator_id=inv.investigator_id, status="open", findings=inv.findings, root_cause=inv.root_cause, recommendations=inv.recommendations, started_at=now, created_at=now, updated_at=now)
 
 
@@ -798,6 +791,7 @@ async def create_safety_action(sa: SafetyActionCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (sa_id, sa.occurrence_id, sa.hazard_id, sa.investigation_id, sa.title, sa.description, sa.action_type, sa.owner_id, sa.due_date, "open", now, now),
         )
+        await log_audit_event("safety_action", sa_id, "created", actor, {"title": sa.title}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -906,6 +900,7 @@ async def create_roc(roc: ROCRegisterCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (roc_id, roc.roc_number, roc.serial_number, roc.kcaa_reference, roc.issue_date, roc.expiry_date, "active", roc.categories, 1 if roc.bvlos_authorized else 0, 1 if roc.night_authorized else 0, roc.max_altitude_agl, 1 if roc.evlos_authorized else 0, roc.dg_category, roc.notes, now, now, actor, actor),
         )
+        await log_audit_event("roc", roc_id, "created", actor, {"roc_number": roc.roc_number}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -992,6 +987,7 @@ async def create_aircraft(ac: AircraftCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ac_id, ac.registration, ac.model, ac.manufacturer, ac.serial_number, ac.roc_id, "active", ac.category, ac.weight_class, ac.max_takeoff_weight_kg, ac.acquired_date, ac.notes, now, now, actor, actor),
         )
+        await log_audit_event("aircraft", ac_id, "created", actor, {"registration": ac.registration}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -1083,10 +1079,10 @@ async def create_mission(mission: MissionCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mission_id, mission.title, mission.description, mission.mission_type, "planned", mission.priority, mission.planned_date, mission.location, mission.aircraft_id, mission.roc_id, mission.rpas_pilot_id, mission.visual_observer_id, mission.dg_category, mission.max_altitude_agl, 1 if mission.bvlos_required else 0, 1 if mission.night_required else 0, now, now, actor, actor),
         )
+        await log_audit_event("mission", mission_id, "created", actor, {"title": mission.title}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("mission", mission_id, "created", actor, {"title": mission.title})
     return MissionResponse(mission_id=mission_id, title=mission.title, description=mission.description, mission_type=mission.mission_type, status="planned", priority=mission.priority, planned_date=mission.planned_date, location=mission.location, aircraft_id=mission.aircraft_id, roc_id=mission.roc_id, rpas_pilot_id=mission.rpas_pilot_id, visual_observer_id=mission.visual_observer_id, dg_category=mission.dg_category, max_altitude_agl=mission.max_altitude_agl, bvlos_required=mission.bvlos_required, night_required=mission.night_required, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
@@ -1173,6 +1169,7 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
     actor = _actor(request)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         mission_row = await cursor.fetchone()
         if not mission_row:
@@ -1235,6 +1232,10 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
         return MissionResponse(**dict(row))
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
@@ -1247,6 +1248,7 @@ async def transition_mission_state(mission_id: str, state: str, request: Request
     role = _role(request)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
         if not row:
@@ -1289,11 +1291,15 @@ async def transition_mission_state(mission_id: str, state: str, request: Request
         if cursor.rowcount != 1:
             await db.rollback()
             raise HTTPException(status_code=409, detail="Mission state changed during transition; reload and retry")
+        await log_audit_event("mission", mission_id, f"state:{state}", actor, {"from": current, "to": state}, db=db)
         await db.commit()
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
-        await log_audit_event("mission", mission_id, f"state:{state}", actor, {"from": current, "to": state})
         return MissionResponse(**dict(row))
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
@@ -1346,10 +1352,10 @@ async def approve_flight_plan(plan_id: str, request: Request):
         if not await cursor.fetchone():
             raise HTTPException(status_code=404, detail="Flight plan not found")
         await db.execute("UPDATE flight_plans SET status = 'approved', approved_by = ?, approved_at = ?, updated_at = ?, updated_by = ? WHERE plan_id = ?", (actor, now, now, actor, plan_id))
+        await log_audit_event("flight_plan", plan_id, "approved", actor, {"rule_ref": "OM-KFL §2.3.1 / §3.3"}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("flight_plan", plan_id, "approved", actor, {"rule_ref": "OM-KFL §2.3.1 / §3.3"})
     return {"status": "approved"}
 
 
@@ -1500,6 +1506,12 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
         await db.execute("UPDATE missions SET status = 'released', release_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?", (release_id, now, actor, fr.mission_id))
         await log_audit_event("flight_release", release_id, "released", actor, {"mission_id": fr.mission_id, "rule_ref": "OM-KFL §§2.3.1, 3.3 / ROC-001"}, db=db)
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
     return FlightReleaseResponse(release_id=release_id, mission_id=fr.mission_id, plan_id=fr.plan_id, released_by=actor, released_at=now, pre_flight_checklist=fr.pre_flight_checklist, weather_confirmed=fr.weather_confirmed, crew_confirmed=fr.crew_confirmed, aircraft_confirmed=fr.aircraft_confirmed, weather_evidence=(fr.weather_evidence or "").strip(), crew_evidence=(fr.crew_evidence or "").strip(), aircraft_evidence=(fr.aircraft_evidence or "").strip(), status="released", notes=fr.notes, created_at=now)
@@ -1553,7 +1565,17 @@ async def create_post_flight_report(pfr: PostFlightReportCreate, request: Reques
             (report_id, pfr.mission_id, pfr.actual_duration_min, pfr.actual_max_altitude, pfr.incidents, pfr.anomalies, pfr.battery_cycles, pfr.flight_hours, pfr.data_collected, actor, now, "submitted", now, now),
         )
         await db.execute("UPDATE missions SET status = 'completed', post_flight_report_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?", (report_id, now, actor, pfr.mission_id))
+        await log_audit_event(
+            "post_flight_report", report_id, "submitted", actor,
+            {"mission_id": pfr.mission_id}, db=db,
+        )
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
     return PostFlightReportResponse(report_id=report_id, mission_id=pfr.mission_id, actual_duration_min=pfr.actual_duration_min, actual_max_altitude=pfr.actual_max_altitude, incidents=pfr.incidents, anomalies=pfr.anomalies, battery_cycles=pfr.battery_cycles, flight_hours=pfr.flight_hours, data_collected=pfr.data_collected, submitted_by=actor, submitted_at=now, status="submitted", created_at=now, updated_at=now)
@@ -1676,6 +1698,12 @@ async def create_audit_finding(finding: AuditFindingCreate, request: Request):
             {"audit_id": finding.audit_id, "finding_type": finding.finding_type}, db=db,
         )
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
     return AuditFindingResponse(finding_id=finding_id, audit_id=finding.audit_id, finding_type=finding.finding_type, description=finding.description, severity=finding.severity, root_cause=finding.root_cause, evidence=finding.evidence, status="open", created_at=now, updated_at=now)
@@ -1805,10 +1833,13 @@ async def verify_car(car_id: str, request: Request, verification: str = "", veri
                 detail="CAR owner cannot self-verify their own corrective action; independent auditor/quality review required (QM-KFL §2.10.6)",
             )
         await db.execute("UPDATE corrective_actions SET status = 'verified', verification = ?, verified_by = ?, verified_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?", (verification.strip(), actor, now, now, actor, car_id))
+        await log_audit_event("corrective_action", car_id, "verified", actor, {"verification": verification.strip(), "rule_ref": "QM-KFL §§2.10.4, 2.10.6"}, db=db)
         await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
-    await log_audit_event("corrective_action", car_id, "verified", actor, {"verification": verification.strip(), "rule_ref": "QM-KFL §§2.10.4, 2.10.6"})
     return {"status": "verified"}
 
 
@@ -1830,12 +1861,15 @@ async def close_corrective_action(car_id: str, request: Request):
             "UPDATE corrective_actions SET status = 'closed', closed_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?",
             (now, now, actor, car_id),
         )
+        await log_audit_event("corrective_action", car_id, "closed", actor, {"verified_by": current["verified_by"], "rule_ref": "QM-KFL §2.10.6"}, db=db)
         await db.commit()
         cursor = await db.execute("SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,))
         result = dict(await cursor.fetchone())
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
-    await log_audit_event("corrective_action", car_id, "closed", actor, {"verified_by": result["verified_by"], "rule_ref": "QM-KFL §2.10.6"})
     return CorrectiveActionResponse(**result)
 
 # ==================== DANGEROUS GOODS (P1 Phase 5) ====================
@@ -1863,6 +1897,7 @@ async def create_dg_shipment(shipment: DGShipmentCreate, request: Request):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (shipment_id, shipment.dg_class, shipment.un_number, shipment.proper_shipping_name, shipment.quantity, shipment.packaging_type, shipment.shipper, shipment.consignee, shipment.mission_id, shipment.aircraft_id, "pending", shipment.notes, now, now, actor, actor),
         )
+        await log_audit_event("dg_shipment", shipment_id, "created", actor, {"dg_class": shipment.dg_class}, db=db)
         await db.commit()
     finally:
         await db.close()
@@ -1977,10 +2012,10 @@ async def create_dg_acceptance_check(check: DGAcceptanceCheckCreate, request: Re
             ),
         )
         await db.execute("UPDATE dg_shipments SET status = ?, acceptance_check_id = ?, updated_at = ?, updated_by = ? WHERE shipment_id = ?", (result, check_id, now, actor, check.shipment_id))
+        await log_audit_event("dg_acceptance_check", check_id, result, actor, {"shipment_id": check.shipment_id, "rule_ref": "DGM-KFL §§2.1-2.8 / Appendix 3"}, db=db)
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("dg_acceptance_check", check_id, result, actor, {"shipment_id": check.shipment_id, "rule_ref": "DGM-KFL §§2.1-2.8 / Appendix 3"})
     return DGAcceptanceCheckResponse(
         check_id=check_id, shipment_id=check.shipment_id, checked_by=actor, checked_at=now,
         packaging_ok=check.packaging_ok, marking_ok=check.marking_ok, labeling_ok=check.labeling_ok,

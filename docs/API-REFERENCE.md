@@ -97,6 +97,6 @@ These rules are grounded in ICAO Annex 19 SMS §2.6 and KCAA SMS regulations.
 - Session cookies are HTTP-only, SameSite=Strict, secure in production
 - CSRF double-submit token required on all state-changing requests
 - Origin allow-listing via `CORS_ORIGINS` environment variable
-- Session TTL is configurable (`SESSION_TTL_SECONDS`, default 8 hours) and slides on each request
+- Session expiry uses a sliding `SESSION_TTL_SECONDS` (default 8 hours) capped by `SESSION_ABSOLUTE_MAX_SECONDS` (default 24 hours); requests cannot extend a session beyond the absolute maximum age.
 - Sessions are revoked on logout, role change, and user role assignment changes
 - Failed attempt rate limiting: 5 failures per 15-minute window triggers 15-minute lockout

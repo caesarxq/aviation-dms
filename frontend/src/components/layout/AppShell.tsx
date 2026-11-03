@@ -37,6 +37,7 @@ interface NavItem {
   icon: any;
   label: string;
   permission?: string;
+  anyPermissions?: string[];
   role?: string;
 }
 
@@ -45,6 +46,13 @@ interface SectionProps {
   icon: any;
   items: NavItem[];
   initiallyOpen?: boolean;
+}
+
+function canSeeNavItem(item: NavItem, activeRole: string | null | undefined, hasPermission: (permission: string) => boolean) {
+  if (item.role) return item.role === activeRole;
+  if (item.permission && !hasPermission(item.permission)) return false;
+  if (item.anyPermissions?.length && !item.anyPermissions.some(hasPermission)) return false;
+  return true;
 }
 
 function CollapsibleSection({ label, icon: Icon, items, initiallyOpen = false }: SectionProps) {
@@ -159,9 +167,9 @@ const sections: SectionProps[] = [
     label: "Document Control",
     icon: FileText,
     items: [
-      { to: "/documents", icon: FileText, label: "Documents", permission: "document:read" },
+      { to: "/documents", icon: FileText, label: "Documents", anyPermissions: ["document:read", "document:propose"] },
       { to: "/change-requests", icon: FileText, label: "Change Requests", permission: "document:read" },
-      { to: "/document-proposals", icon: KeyRound, label: "Document Proposals", permission: "document:read" },
+      { to: "/document-proposals", icon: KeyRound, label: "Document Proposals", anyPermissions: ["document:read", "document:propose"] },
       { to: "/version-diff", icon: Activity, label: "Version Diff", permission: "document:read" },
     ],
   },
@@ -201,7 +209,7 @@ export function AppShell() {
   const visibleSections = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => item.role ? item.role === profile?.active_role : !item.permission || hasPermission(item.permission)),
+      items: section.items.filter((item) => canSeeNavItem(item, profile?.active_role, hasPermission)),
     }))
     .filter((section) => section.items.length > 0);
 
@@ -271,8 +279,7 @@ export function AppShell() {
             // Single-item sections render as direct nav links instead of collapsible sections
             if (section.items.length === 1) {
               const item = section.items[0];
-              if (item.role && item.role !== profile?.active_role) return null;
-              if (item.permission && !hasPermission(item.permission)) return null;
+              if (!canSeeNavItem(item, profile?.active_role, hasPermission)) return null;
               return (
                 <NavLink
                   key={section.label}

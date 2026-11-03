@@ -41,6 +41,16 @@ def test_sod_creator_cannot_approve():
     assert check_sod("version", "approve", "u-quality", "u-lib")
 
 
+def test_risk_assessment_approval_permission_has_exact_existing_grants():
+    granted_roles = {
+        role for role, permissions in ROLE_PERMISSIONS.items()
+        if "risk_assessment:approve" in permissions
+    }
+    assert granted_roles == {
+        "system_admin", "accountable_manager", "head_safety", "head_operations", "chief_pilot",
+    }
+
+
 def test_unknown_role_no_permissions():
     assert not has_permission("nonexistent_role", "document:read")
     assert has_permission("nonexistent_role", "document:read") is False

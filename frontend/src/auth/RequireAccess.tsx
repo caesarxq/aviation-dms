@@ -25,17 +25,19 @@ export function RequireAccess({
   children,
   permission,
   permissions,
+  anyPermissions,
   role,
 }: {
   children: ReactNode;
   permission?: string;
   permissions?: string[];
+  anyPermissions?: string[];
   role?: string;
 }) {
   const { profile, state } = useAuth();
   if (state === "loading") return <AuthLoading />;
   if (state !== "authenticated") return <Navigate to="/login" replace />;
-  if (!canAccessScreen(profile, { permission, permissions, role })) {
+  if (!canAccessScreen(profile, { permission, permissions, anyPermissions, role })) {
     return (
       <main className="app-page" role="alert">
         <div className="app-surface border border-rose-200 bg-rose-50 p-6 text-sm text-rose-800">

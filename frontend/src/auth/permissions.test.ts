@@ -27,6 +27,37 @@ describe("authentication authorization policy", () => {
     expect(canAccessScreen(security, { permissions: ["security:read_sensitive", "security:manage"] })).toBe(false);
   });
 
+  it("allows access when all required permissions and at least one alternative are present", () => {
+    const proposalOnly = { role: "librarian", active_role: "librarian", permissions: ["document:read", "document:propose"] };
+    const readOnly = { role: "librarian", active_role: "librarian", permissions: ["document:read"] };
+    const proposeWithoutRead = { role: "librarian", active_role: "librarian", permissions: ["document:propose"] };
+
+    expect(canAccessScreen(proposalOnly, {
+      permissions: ["document:read"],
+      anyPermissions: ["document:update", "document:propose"],
+    })).toBe(true);
+    expect(canAccessScreen(readOnly, {
+      permissions: ["document:read"],
+      anyPermissions: ["document:update", "document:propose"],
+    })).toBe(false);
+    expect(canAccessScreen(proposeWithoutRead, {
+      permissions: ["document:read"],
+      anyPermissions: ["document:update", "document:propose"],
+    })).toBe(false);
+  });
+
+  it("routes proposal-only profiles to proposal-capable document screens after login", () => {
+    const proposalOnly = { role: "head_safety", active_role: "head_safety", permissions: ["document:propose"] };
+    const readOnly = { role: "records_custodian", active_role: "records_custodian", permissions: ["document:read"] };
+
+    expect(getPostLoginPath(proposalOnly)).toBe("/documents");
+    expect(getPostLoginPath(proposalOnly, "/documents")).toBe("/documents");
+    expect(getPostLoginPath(proposalOnly, "/document-proposals")).toBe("/document-proposals");
+    expect(getPostLoginPath(proposalOnly, "/documents/DOC-001/edit")).toBe("/documents/DOC-001/edit");
+    expect(getPostLoginPath(proposalOnly, "/documents/DOC-001/view")).toBe("/documents/DOC-001/view");
+    expect(getPostLoginPath(readOnly, "/documents/DOC-001/edit")).toBe("/documents");
+  });
+
   it("routes profiles without dashboard access to an accessible landing screen", () => {
     const recordsCustodian = { role: "records_custodian", active_role: "records_custodian", permissions: ["document:read", "audit:read"] };
     expect(getPostLoginPath(recordsCustodian)).toBe("/documents");

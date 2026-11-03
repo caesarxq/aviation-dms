@@ -24,7 +24,7 @@ from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
 
 router = APIRouter()
-TRUSTED_FRONTEND_IP = "172.31.254.3"
+TRUSTED_FRONTEND_IP = os.getenv("DMS_TRUSTED_FRONTEND_IP", "172.31.254.3")
 KCAA_EVIDENCE_DIR = Path(os.getenv("KCAA_EVIDENCE_DIR", str(Path(DB_PATH).parent / "kcaa-evidence")))
 MAX_KCAA_EVIDENCE_BYTES = 10 * 1024 * 1024
 
@@ -64,6 +64,15 @@ def _role(request: Request) -> str:
 def _check(request: Request, perm: str):
     if not has_permission(_role(request), perm):
         raise HTTPException(status_code=403, detail=f"Permission denied: {perm}")
+
+
+def _check_document_read(request: Request):
+    role = _role(request)
+    if not any(has_permission(role, permission) for permission in ("document:read", "document:update", "document:propose")):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: document:read, document:update, or document:propose",
+        )
 
 
 def _gen_id(prefix: str) -> str:
@@ -879,7 +888,7 @@ async def auth_logout(request: Request):
 # --- Documents ---
 @router.get("/documents", response_model=List[DocumentResponse])
 async def list_documents(request: Request, status: Optional[str] = None, doc_class: Optional[str] = None, limit: int = 50, offset: int = 0):
-    _check(request, "document:read")
+    _check_document_read(request)
     db = await get_db()
     try:
         conditions = []
@@ -919,7 +928,7 @@ async def create_document(doc: DocumentCreate, request: Request):
 
 @router.get("/documents/{doc_id}", response_model=DocumentResponse)
 async def get_document(doc_id: str, request: Request):
-    _check(request, "document:read")
+    _check_document_read(request)
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,))
@@ -964,11 +973,22 @@ async def update_document(doc_id: str, update: DocumentUpdate, request: Request)
 
 # --- Versions ---
 @router.get("/documents/{doc_id}/versions", response_model=List[DocumentVersionResponse])
-async def list_versions(doc_id: str, request: Request):
-    _check(request, "document:read")
+async def list_versions(doc_id: str, request: Request, include_draft: bool = False):
+    _check_document_read(request)
+    if include_draft:
+        _check(request, "document:update")
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC", (doc_id,))
+        if include_draft:
+            cursor = await db.execute(
+                "SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at DESC",
+                (doc_id,),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM document_versions WHERE document_id = ? AND state = 'published' ORDER BY created_at DESC",
+                (doc_id,),
+            )
         rows = await cursor.fetchall()
         return [DocumentVersionResponse(**dict(r)) for r in rows]
     finally:
@@ -1280,7 +1300,7 @@ async def transition_version_state(
 @router.get("/documents/{doc_id}/content", response_model=DocumentContentResponse)
 async def get_document_content(doc_id: str, request: Request, include_draft: bool = False):
     """Get the effective (current published) version content of a document."""
-    _check(request, "document:read")
+    _check_document_read(request)
     if include_draft:
         _check(request, "document:update")
     db = await get_db()

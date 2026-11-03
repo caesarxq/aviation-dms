@@ -17,7 +17,23 @@ class TestAtomicProposalBatch:
             headers=librarian_headers,
         )
         assert version.status_code == 201, version.text
-        return doc_id, version.json()["version_id"]
+        version_id = version.json()["version_id"]
+        in_review = client.patch(
+            f"/api/p0/versions/{version_id}/state?state=in_review",
+            headers=librarian_headers,
+        )
+        assert in_review.status_code == 200, in_review.text
+        approved = client.patch(
+            f"/api/p0/versions/{version_id}/state?state=approved",
+            headers=admin_headers,
+        )
+        assert approved.status_code == 200, approved.text
+        published = client.patch(
+            f"/api/p0/versions/{version_id}/state?state=published",
+            headers=admin_headers,
+        )
+        assert published.status_code == 200, published.text
+        return doc_id, version_id
 
     def test_preview_detects_section_targeted_atomic_change(self, client, admin_headers, librarian_headers):
         doc_id, version_id = self._create_document_with_version(client, admin_headers, librarian_headers)

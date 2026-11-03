@@ -20,6 +20,7 @@ from .rbac import ROLE_PERMISSIONS
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 KNOWN_ROLES = set(ROLE_PERMISSIONS)
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "28800"))
+SESSION_ABSOLUTE_MAX_SECONDS = max(1, int(os.getenv("SESSION_ABSOLUTE_MAX_SECONDS", "86400")))
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", str(not DEV_MODE)).lower() == "true"
 SESSION_COOKIE = "__Host-kfl_session" if SESSION_COOKIE_SECURE else "kfl_session"
 CSRF_COOKIE = "__Host-kfl_csrf" if SESSION_COOKIE_SECURE else "kfl_csrf"
@@ -114,7 +115,7 @@ class P0AuthMiddleware(BaseHTTPMiddleware):
         db = await get_db()
         try:
             cursor = await db.execute(
-                """SELECT s.session_id, s.user_id, s.active_role, s.csrf_token_hash, s.expires_at, s.revoked_at,
+                """SELECT s.session_id, s.user_id, s.active_role, s.csrf_token_hash, s.created_at, s.expires_at, s.revoked_at,
                           u.username, u.full_name, u.email, u.role AS primary_role, u.department, u.is_active
                      FROM auth_sessions s JOIN users u ON u.user_id = s.user_id
                      WHERE s.token_hash = ?""",
@@ -127,19 +128,24 @@ class P0AuthMiddleware(BaseHTTPMiddleware):
             expiry = datetime.fromisoformat(session["expires_at"])
             if expiry.tzinfo is None:
                 expiry = expiry.replace(tzinfo=timezone.utc)
-            if session["revoked_at"] or not session["is_active"] or expiry <= datetime.now(timezone.utc):
+            created_at = datetime.fromisoformat(session["created_at"])
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            auth_now = datetime.now(timezone.utc)
+            absolute_max = created_at + timedelta(seconds=SESSION_ABSOLUTE_MAX_SECONDS)
+            if session["revoked_at"] or not session["is_active"] or expiry <= auth_now or auth_now >= absolute_max:
                 await db.execute(
                     "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE session_id = ?",
-                    (datetime.now(timezone.utc).isoformat(), session["session_id"]),
+                    (auth_now.isoformat(), session["session_id"]),
                 )
                 await db.commit()
                 return None
 
-            # Sliding session expiration: extend TTL on each authenticated request
-            new_expiry = datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL_SECONDS)
+            # Sliding expiration can never extend a session beyond its creation-time cap.
+            new_expiry = min(auth_now + timedelta(seconds=SESSION_TTL_SECONDS), absolute_max)
             await db.execute(
                 "UPDATE auth_sessions SET last_seen_at = ?, expires_at = ? WHERE session_id = ?",
-                (datetime.now(timezone.utc).isoformat(), new_expiry.isoformat(), session["session_id"]),
+                (auth_now.isoformat(), new_expiry.isoformat(), session["session_id"]),
             )
             await db.commit()
 

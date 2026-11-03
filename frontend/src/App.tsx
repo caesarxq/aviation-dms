@@ -90,7 +90,7 @@ export default function App() {
             <Route element={<RequireAuth><OnboardingGate><AppShell /></OnboardingGate></RequireAuth>}>
               <Route path="/welcome" element={<WelcomePage />} />
               <Route path="/" element={<RequireAccess permission="safety:read"><Dashboard /></RequireAccess>} />
-              <Route path="/documents" element={<RequireAccess permission="document:read"><DocumentCatalogue /></RequireAccess>} />
+              <Route path="/documents" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><DocumentCatalogue /></RequireAccess>} />
               <Route path="/occurrences" element={<RequireAccess permission="safety:read"><Occurrences /></RequireAccess>} />
               <Route path="/occurrences/:occurrenceId" element={<RequireAccess permission="safety:read"><OccurrenceDetail /></RequireAccess>} />
               <Route path="/roc" element={<RequireAccess permission="roc:read"><ROCRegister /></RequireAccess>} />
@@ -115,11 +115,11 @@ export default function App() {
               <Route path="/safety-kpis" element={<RequireAccess permission="safety:read"><SafetyKPIs /></RequireAccess>} />
               <Route path="/security-reviews" element={<RequireAccess permission="security:read_sensitive"><SecurityReviews /></RequireAccess>} />
               <Route path="/dg-responsibility-matrix" element={<RequireAccess permission="safety:read"><DGResponsibilityMatrix /></RequireAccess>} />
-              <Route path="/documents/:docId/edit" element={<RequireAccess permission="document:read"><DocumentEditor /></RequireAccess>} />
-              <Route path="/documents/:docId/view" element={<RequireAccess permission="document:read"><DocumentViewer /></RequireAccess>} />
+              <Route path="/documents/:docId/edit" element={<RequireAccess anyPermissions={["document:update", "document:propose"]}><DocumentEditor /></RequireAccess>} />
+              <Route path="/documents/:docId/view" element={<RequireAccess anyPermissions={["document:read", "document:propose", "document:update"]}><DocumentViewer /></RequireAccess>} />
               <Route path="/personnel-licenses" element={<RequireAccess permission="personnel:read"><PersonnelLicenses /></RequireAccess>} />
               <Route path="/self-service-upload" element={<RequireAccess permission="personnel:view"><SelfServiceUpload /></RequireAccess>} />
-              <Route path="/document-proposals" element={<RequireAccess permission="document:read"><DocumentProposals /></RequireAccess>} />
+              <Route path="/document-proposals" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><DocumentProposals /></RequireAccess>} />
               <Route path="/renewal-progress" element={<RequireAccess permission="personnel:read"><RenewalProgress /></RequireAccess>} />
               <Route path="/version-diff" element={<RequireAccess permission="document:read"><VersionDiff /></RequireAccess>} />
               <Route path="/aircraft-insurance" element={<RequireAccess permission="aircraft:read"><AircraftInsurance /></RequireAccess>} />

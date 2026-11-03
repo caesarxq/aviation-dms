@@ -21,6 +21,7 @@ PERMISSIONS = [
     "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
     "audit_report:read", "audit_report:create",
     "safety:read", "safety:create", "safety:update", "safety:close",
+    "risk_assessment:approve",
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
     "roc:read", "roc:manage", "aircraft:read", "aircraft:manage",
     "aircraft:view", "flight:release", "security:read_sensitive", "security:manage",
@@ -35,7 +36,7 @@ ROLE_PERMISSIONS = {
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
-        "flight:release", "security:read_sensitive", "security:manage",
+        "flight:release", "risk_assessment:approve", "security:read_sensitive", "security:manage",
         "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
     },
     "librarian": {
@@ -52,7 +53,7 @@ ROLE_PERMISSIONS = {
     },
     "head_safety": {
         "document:read", "document:propose", "document:annotate", "safety:read", "safety:create",
-        "safety:update", "safety:close", "occurrence:acknowledge", "occurrence:investigate",
+        "safety:update", "safety:close", "risk_assessment:approve", "occurrence:acknowledge", "occurrence:investigate",
         "roc:read", "aircraft:read", "audit:read", "personnel:read", "personnel:view",
         "security:read_sensitive", "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
@@ -62,12 +63,12 @@ ROLE_PERMISSIONS = {
         "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
     "head_operations": {
-        "document:read", "safety:read", "safety:create", "safety:update", "flight:release", "roc:read", "roc:manage", "aircraft:read",
+        "document:read", "safety:read", "safety:create", "safety:update", "risk_assessment:approve", "flight:release", "roc:read", "roc:manage", "aircraft:read",
         "aircraft:manage", "aircraft:view", "compliance:read", "audit:read", "personnel:read",
         "personnel:view", "personnel:manage",
     },
     "chief_pilot": {
-        "document:read", "safety:read", "safety:create", "flight:release", "roc:read", "aircraft:read", "audit:read",
+        "document:read", "safety:read", "safety:create", "risk_assessment:approve", "flight:release", "roc:read", "aircraft:read", "audit:read",
         "personnel:read", "personnel:view",
     },
     "flight_ops_officer": {
@@ -142,6 +143,7 @@ ROLE_ACCESS_LEVELS = {
 SOD_RULES = {
     "change_request": {"proposer_cannot": ["approve", "reject", "publish"]},
     "version": {"proposer_cannot": ["approve", "publish"]},
+    "proposal": {"proposer_cannot": ["apply"]},
 }
 
 # Separation-of-duties basis:

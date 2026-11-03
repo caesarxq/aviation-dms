@@ -9,6 +9,7 @@ import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/D
 import { InlineSuggestionView } from "../components/documents/InlineSuggestionView";
 import { htmlToText } from "../utils/diff";
 import DOMPurify from "dompurify";
+import { useAuth } from "../auth/AuthContext";
 
 const DOCUMENT_ALLOWED_TAGS = [
   "a", "abbr", "address", "article", "b", "blockquote", "br", "caption", "cite", "code", "col", "colgroup",
@@ -58,6 +59,9 @@ export function DocumentEditor() {
 }
 
 function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (id: string) => void }) {
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission("document:update");
+  const canPropose = hasPermission("document:propose");
   const [searchParams] = useSearchParams();
   const targetSection = searchParams.get("section") ?? undefined;
   const qc = useQueryClient();
@@ -406,14 +410,17 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             >
               <Eye size={14} className="text-kfl-blue font-bold" />
             </button>
-            <button
-              onClick={() => setShowSubmit(true)}
-              disabled={highFidelityManual}
-              className="p-1.5 hover:bg-emerald-500/10 rounded transition text-emerald-600 font-bold disabled:cursor-not-allowed disabled:opacity-50"
-              title="Submit proposal for review"
-            >
-              <UserCheck size={14} />
-            </button>
+            {canPropose && (
+              <button
+                onClick={() => setShowSubmit(true)}
+                disabled={highFidelityManual}
+                className="p-1.5 hover:bg-emerald-500/10 rounded transition text-emerald-600 font-bold disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Submit proposal for review"
+                title="Submit proposal for review"
+              >
+                <UserCheck size={14} />
+              </button>
+            )}
             <button
               onClick={() => setShowOutline(!showOutline)}
               className={`p-1.5 hover:bg-kfl-blue/10 rounded transition ${showOutline ? "bg-kfl-blue/10" : ""}`}
@@ -453,13 +460,15 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
           >
             <Eye size={16} /> {showPreview ? "Hide suggestions" : "Show suggestions"}
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !dirty || highFidelityManual}
-            className="app-btn-primary px-4 py-2 flex items-center gap-1 text-sm"
-          >
-            <Save size={16} /> {saving ? "Saving…" : "Save as Draft"}
-          </button>
+          {canUpdate && (
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty || highFidelityManual}
+              className="app-btn-primary px-4 py-2 flex items-center gap-1 text-sm"
+            >
+              <Save size={16} /> {saving ? "Saving…" : "Save as Draft"}
+            </button>
+          )}
           <button
             onClick={() => setDocId("")}
             className="app-btn-secondary px-3 py-2 flex items-center gap-1 text-sm"
@@ -541,7 +550,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       </div>
 
       {/* Submit Proposal Dialog */}
-      {showSubmit && (
+      {canPropose && showSubmit && (
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl border border-white">
             <div className="flex justify-between items-center mb-4">

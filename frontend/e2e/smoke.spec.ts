@@ -64,6 +64,7 @@ test.describe("Document Catalogue", () => {
   });
 
   test("has view and edit links", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/documents");
     await expect(page.locator("text=View").first()).toBeVisible();
     await expect(page.locator("text=Edit").first()).toBeVisible();
@@ -134,6 +135,7 @@ test.describe("Navigation", () => {
   });
 
   test("document editor exposes a draggable toolbar", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/documents/DOC-001/edit");
     const grip = page.getByRole("button", { name: "Drag toolbar" });
     await expect(grip).toBeVisible();
@@ -145,6 +147,7 @@ test.describe("Navigation", () => {
   });
 
   test("tracks a typed change in real time", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/documents/DOC-001/edit");
     const editor = page.locator('[contenteditable="true"]');
     await editor.click();
@@ -155,6 +158,7 @@ test.describe("Navigation", () => {
   });
 
   test("opens the submit modal with auto-detected section references", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/documents/DOC-001/edit");
     const editor = page.locator('[contenteditable="true"]');
     await editor.click();
@@ -176,6 +180,7 @@ test.describe("Navigation", () => {
   });
 
   test("editor clearly reports when source content has no semantic headings", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/documents/DOC-001/edit");
     await page.getByTitle("Show document outline").click();
     await expect(page.getByRole("navigation", { name: "Document outline" })).toBeVisible();
@@ -470,6 +475,7 @@ test.describe("Change Requests", () => {
 test.describe("Accessibility", () => {
   for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
+      if (route === "/documents/DOC-001/edit") await loginAsAdmin(page);
       await page.goto(route);
       await page.waitForLoadState("networkidle");
       const results = await new AxeBuilder({ page })

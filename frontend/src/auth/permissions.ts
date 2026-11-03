@@ -7,6 +7,7 @@ export type AccessProfile = {
 export type ScreenRequirement = {
   permission?: string;
   permissions?: readonly string[];
+  anyPermissions?: readonly string[];
   role?: string;
 };
 
@@ -19,6 +20,7 @@ export function canAccessScreen(profile: AccessProfile, requirement: ScreenRequi
   if (requirement.role && profile.active_role !== requirement.role) return false;
   if (requirement.permission && !hasPermission(profile, requirement.permission)) return false;
   if (requirement.permissions?.some((permission) => !hasPermission(profile, permission))) return false;
+  if (requirement.anyPermissions?.length && !requirement.anyPermissions.some((permission) => hasPermission(profile, permission))) return false;
   return true;
 }
 
@@ -28,6 +30,7 @@ export function getPostLoginPath(profile: AccessProfile, returnTo?: string): str
   const defaultRoute = [
     { path: "/", permission: "safety:read" },
     { path: "/documents", permission: "document:read" },
+    { path: "/documents", permission: "document:propose" },
     { path: "/roc", permission: "roc:read" },
     { path: "/personnel-licenses", permission: "personnel:read" },
     { path: "/aircraft-insurance", permission: "aircraft:read" },
@@ -37,10 +40,24 @@ export function getPostLoginPath(profile: AccessProfile, returnTo?: string): str
     return defaultRoute;
   }
 
-  const pathname = returnTo.split(/[?#]/, 1)[0];
+  const pathname = returnTo.split(/[?#]/, 1)[0].replace(/\/+$/, "") || "/";
   if (pathname === "/account/security") return returnTo;
   if (pathname === "/admin/observability") {
     return profile.active_role === "system_admin" ? returnTo : defaultRoute;
+  }
+
+  if (pathname === "/documents" || pathname === "/document-proposals") {
+    return hasPermission(profile, "document:read") || hasPermission(profile, "document:propose") ? returnTo : defaultRoute;
+  }
+  if (/^\/documents\/[^/]+\/edit$/.test(pathname)) {
+    return hasPermission(profile, "document:update") || hasPermission(profile, "document:propose") ? returnTo : defaultRoute;
+  }
+  if (/^\/documents\/[^/]+\/view$/.test(pathname)) {
+    return hasPermission(profile, "document:read")
+      || hasPermission(profile, "document:propose")
+      || hasPermission(profile, "document:update")
+      ? returnTo
+      : defaultRoute;
   }
 
   const routePermissions: Array<[string, string]> = [

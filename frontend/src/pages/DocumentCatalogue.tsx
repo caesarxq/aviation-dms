@@ -9,9 +9,14 @@ import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useAuth } from "../auth/AuthContext";
 
 export function DocumentCatalogue() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission("document:create");
+  const canUpdate = hasPermission("document:update");
+  const canEdit = canUpdate || hasPermission("document:propose");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [showNewDoc, setShowNewDoc] = useState(false);
@@ -83,13 +88,13 @@ export function DocumentCatalogue() {
           <p className="app-subtitle">Find, review, and open the controlled documents that support safe operations.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowNewDoc(true)} className="app-btn-secondary flex items-center gap-1">
+          {canCreate && <button onClick={() => setShowNewDoc(true)} className="app-btn-secondary flex items-center gap-1">
             <Plus size={16} /> New Document
-          </button>
+          </button>}
           <button onClick={() => setShowVersionDiffModal(true)} className="app-btn-secondary">
             <Shuffle size={16} /> Version Diff
           </button>
-          <Link to="/documents/DOC-001/edit" className="app-btn-primary"><FileText size={16} /> Open editor <ArrowUpRight size={15} /></Link>
+          {canEdit && <Link to="/documents/DOC-001/edit" className="app-btn-primary"><FileText size={16} /> Open editor <ArrowUpRight size={15} /></Link>}
         </div>
       </header>
 
@@ -166,7 +171,7 @@ export function DocumentCatalogue() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.classification}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.kcaa_approval_required ? "Required" : "No"}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.review_due_date || "—"}</td>
-                    <td className="px-4 py-4 text-right text-sm"><div className="flex justify-end gap-3"><Link to={`/documents/${d.document_id}/view`} className="font-semibold text-kfl-blue hover:text-kfl-blue-ink">View</Link><Link to={`/documents/${d.document_id}/edit`} className="font-semibold text-kfl-blue hover:text-kfl-blue-ink">Edit</Link></div></td>
+                    <td className="px-4 py-4 text-right text-sm"><div className="flex justify-end gap-3"><Link to={`/documents/${d.document_id}/view`} className="font-semibold text-kfl-blue hover:text-kfl-blue-ink">View</Link>{canEdit && <Link to={`/documents/${d.document_id}/edit`} className="font-semibold text-kfl-blue hover:text-kfl-blue-ink">Edit</Link>}</div></td>
                   </tr>
                 ))}
               </tbody>

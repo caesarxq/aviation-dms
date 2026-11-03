@@ -1664,10 +1664,11 @@ async def _rebuild_external_audit_findings(db):
     await db.execute("DROP TABLE audit_findings__upgrade")
 
 
-async def migrate_audit_schema(db):
+async def migrate_audit_schema(db, *, manage_transaction=True):
     """Separate legacy audit records and validate all rebuilt audit foreign keys atomically."""
-    await db.execute("PRAGMA foreign_keys = OFF")
-    await db.execute("BEGIN IMMEDIATE")
+    if manage_transaction:
+        await db.execute("PRAGMA foreign_keys = OFF")
+        await db.execute("BEGIN IMMEDIATE")
     try:
         legacy_quality_table = await _migrate_legacy_quality_findings(db)
         await _rebuild_corrective_actions_finding_fk(db)
@@ -1679,12 +1680,15 @@ async def migrate_audit_schema(db):
             violations = await (await db.execute(f"PRAGMA foreign_key_check({table})")).fetchall()
             if violations:
                 raise RuntimeError(f"audit schema migration left invalid foreign keys in {table}: {tuple(violations[0])}")
-        await db.commit()
+        if manage_transaction:
+            await db.commit()
     except Exception:
-        await db.rollback()
+        if manage_transaction:
+            await db.rollback()
         raise
     finally:
-        await db.execute("PRAGMA foreign_keys = ON")
+        if manage_transaction:
+            await db.execute("PRAGMA foreign_keys = ON")
 
 
 async def _ensure_unique_mission_lifecycle_indexes(db: aiosqlite.Connection) -> None:
@@ -1711,18 +1715,59 @@ async def _ensure_unique_mission_lifecycle_indexes(db: aiosqlite.Connection) -> 
         )
 
 
+async def _ensure_unique_audit_report_index(db: aiosqlite.Connection) -> None:
+    """Require non-null, unique audit IDs, stopping for reconciliation when invalid."""
+    null_id = await (await db.execute(
+        "SELECT 1 FROM audit_reports WHERE audit_id IS NULL LIMIT 1"
+    )).fetchone()
+    if null_id:
+        raise RuntimeError(
+            "Cannot enforce unique audit_reports.audit_id: NULL audit ID found; "
+            "reconcile before startup"
+        )
+    duplicate = await (await db.execute(
+        "SELECT audit_id, COUNT(*) AS row_count FROM audit_reports "
+        "GROUP BY audit_id HAVING COUNT(*) > 1 LIMIT 1"
+    )).fetchone()
+    if duplicate:
+        raise RuntimeError(
+            "Cannot enforce unique audit_reports.audit_id: duplicate audit ID "
+            f"{duplicate['audit_id']} ({duplicate['row_count']} rows); reconcile before startup"
+        )
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_reports_audit_id ON audit_reports(audit_id)"
+    )
+
+
+async def _add_column_if_missing(db, table_name: str, column_name: str, column_type: str) -> None:
+    """Add a legacy migration column only when schema introspection shows it is absent."""
+    columns = {
+        row["name"]
+        for row in await (await db.execute(f'PRAGMA table_info("{table_name}")')).fetchall()
+    }
+    if column_name not in columns:
+        await db.execute(
+            f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_type}'
+        )
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = await get_db()
     try:
-        await db.executescript(SCHEMA)
+        # executescript commits any pending transaction before executing its input;
+        # start the transaction inside the script so all schema statements participate.
+        await db.execute("PRAGMA foreign_keys = OFF")
+        await db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        # Parent-key uniqueness must exist before the audit migration checks rebuilt FKs.
+        await _ensure_unique_audit_report_index(db)
         await _ensure_unique_mission_lifecycle_indexes(db)
         version_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(document_versions)")).fetchall()}
         if "kcaa_evidence_sha256" not in version_columns:
             await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_evidence_sha256 TEXT")
         if "kcaa_evidence_id" not in version_columns:
             await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_evidence_id TEXT")
-        await migrate_audit_schema(db)
+        await migrate_audit_schema(db, manage_transaction=False)
         quality_finding_columns = {row["name"] for row in await (await db.execute("PRAGMA table_info(quality_audit_findings)")).fetchall()}
         for column in ("created_by", "updated_by"):
             if column not in quality_finding_columns:
@@ -1736,34 +1781,24 @@ async def init_db():
         if "active_role" not in session_columns:
             await db.execute("ALTER TABLE auth_sessions ADD COLUMN active_role TEXT")
         await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     finally:
+        await db.execute("PRAGMA foreign_keys = ON")
         await db.close()
 
     # Migration: add new columns to existing tables
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         # documents: kcaa_approval_required, review_due_date
-        try:
-            await db.execute("ALTER TABLE documents ADD COLUMN kcaa_approval_required INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass  # Column already exists
-        try:
-            await db.execute("ALTER TABLE documents ADD COLUMN review_due_date TEXT")
-        except Exception:
-            pass  # Column already exists
+        await _add_column_if_missing(db, "documents", "kcaa_approval_required", "INTEGER NOT NULL DEFAULT 0")
+        await _add_column_if_missing(db, "documents", "review_due_date", "TEXT")
         # document_versions: kcaa_approved, kcaa_approved_by, kcaa_approved_at
-        try:
-            await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_approved INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_approved_by TEXT")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE document_versions ADD COLUMN kcaa_approved_at TEXT")
-        except Exception:
-            pass
+        await _add_column_if_missing(db, "document_versions", "kcaa_approved", "INTEGER NOT NULL DEFAULT 0")
+        await _add_column_if_missing(db, "document_versions", "kcaa_approved_by", "TEXT")
+        await _add_column_if_missing(db, "document_versions", "kcaa_approved_at", "TEXT")
         # document_proposals: atomic proposal location and excerpt metadata
         proposal_columns = {
             "change_set_id": "TEXT",
@@ -1783,10 +1818,7 @@ async def init_db():
             "grouping_reason": "TEXT",
         }
         for column, column_type in proposal_columns.items():
-            try:
-                await db.execute(f"ALTER TABLE document_proposals ADD COLUMN {column} {column_type}")
-            except Exception:
-                pass
+            await _add_column_if_missing(db, "document_proposals", column, column_type)
         occurrence_columns = {
             "mor_assessed_by": "TEXT",
             "mor_assessed_at": "TEXT",
@@ -1798,10 +1830,7 @@ async def init_db():
             "closed_at": "TEXT",
         }
         for column, column_type in occurrence_columns.items():
-            try:
-                await db.execute(f"ALTER TABLE occurrences ADD COLUMN {column} {column_type}")
-            except Exception:
-                pass
+            await _add_column_if_missing(db, "occurrences", column, column_type)
         doc_source_columns = {
             "source_pdf_filename": "TEXT",
             "source_sha256": "TEXT",
@@ -1812,18 +1841,9 @@ async def init_db():
             "parent_section_ref": "TEXT",
         }
         for column, column_type in doc_source_columns.items():
-            try:
-                await db.execute(f"ALTER TABLE documents ADD COLUMN {column} {column_type}")
-            except Exception:
-                pass
-        try:
-            await db.execute("ALTER TABLE roc_register ADD COLUMN authorized_registrations TEXT")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE aircraft ADD COLUMN opspec_authorized INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
+            await _add_column_if_missing(db, "documents", column, column_type)
+        await _add_column_if_missing(db, "roc_register", "authorized_registrations", "TEXT")
+        await _add_column_if_missing(db, "aircraft", "opspec_authorized", "INTEGER NOT NULL DEFAULT 0")
         ra_columns = {
             "risk_model": "TEXT NOT NULL DEFAULT 'sms_5x5'",
             "exposure": "TEXT",
@@ -1832,68 +1852,46 @@ async def init_db():
             "flight_cancelled": "INTEGER NOT NULL DEFAULT 0",
         }
         for column, column_type in ra_columns.items():
-            try:
-                await db.execute(f"ALTER TABLE risk_assessments ADD COLUMN {column} {column_type}")
-            except Exception:
-                pass
+            await _add_column_if_missing(db, "risk_assessments", column, column_type)
         # Migration: create risk_assessment_hazards junction table for existing databases
-        try:
-            await db.execute(
-                """CREATE TABLE IF NOT EXISTS risk_assessment_hazards (
-                    assessment_id TEXT NOT NULL,
-                    hazard_id TEXT NOT NULL,
-                    PRIMARY KEY (assessment_id, hazard_id),
-                    FOREIGN KEY (assessment_id) REFERENCES risk_assessments(assessment_id),
-                    FOREIGN KEY (hazard_id) REFERENCES hazards(hazard_id)
-                )"""
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_assessment ON risk_assessment_hazards(assessment_id)"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id)"
-            )
-        except Exception:
-            pass
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS risk_assessment_hazards (
+                assessment_id TEXT NOT NULL,
+                hazard_id TEXT NOT NULL,
+                PRIMARY KEY (assessment_id, hazard_id),
+                FOREIGN KEY (assessment_id) REFERENCES risk_assessments(assessment_id),
+                FOREIGN KEY (hazard_id) REFERENCES hazards(hazard_id)
+            )"""
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_assessment ON risk_assessment_hazards(assessment_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id)"
+        )
         # Migration: add missing columns to existing audit_findings table
-        for col_def in (
-            "finding_number TEXT",
-            "area TEXT",
-            "level INTEGER",
-            "title TEXT",
-            "regulatory_reference TEXT",
-            "corrective_action_id TEXT",
-            "due_date TEXT",
-            "closed_at TEXT",
-            "closed_by TEXT",
+        for column, column_type in (
+            ("finding_number", "TEXT"),
+            ("area", "TEXT"),
+            ("level", "INTEGER"),
+            ("title", "TEXT"),
+            ("regulatory_reference", "TEXT"),
+            ("corrective_action_id", "TEXT"),
+            ("due_date", "TEXT"),
+            ("closed_at", "TEXT"),
+            ("closed_by", "TEXT"),
         ):
-            try:
-                await db.execute(f"ALTER TABLE audit_findings ADD COLUMN {col_def}")
-            except Exception:
-                pass  # Column may already exist
-        # Ensure audit_reports.audit_id is unique so FK constraints work
-        try:
-            await db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_reports_audit_id ON audit_reports(audit_id)"
-            )
-        except Exception:
-            pass
-        try:
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_findings_audit ON audit_findings(audit_id)"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status)"
-            )
-            await db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_findings_level ON audit_findings(level)"
-            )
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE corrective_actions ADD COLUMN finding_level TEXT NOT NULL DEFAULT 'level_2'")
-        except Exception:
-            pass
+            await _add_column_if_missing(db, "audit_findings", column, column_type)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_findings_audit ON audit_findings(audit_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_findings_level ON audit_findings(level)"
+        )
+        await _add_column_if_missing(db, "corrective_actions", "finding_level", "TEXT NOT NULL DEFAULT 'level_2'")
         for col in (
             "triple_packaging_ok",
             "no_leakage_visual_ok",
@@ -1901,28 +1899,17 @@ async def init_db():
             "crew_layers_unopened_confirmed",
             "weight_within_limit_ok",
         ):
-            try:
-                await db.execute(f"ALTER TABLE dg_acceptance_checks ADD COLUMN {col} INTEGER NOT NULL DEFAULT 1")
-            except Exception:
-                pass
+            await _add_column_if_missing(db, "dg_acceptance_checks", col, "INTEGER NOT NULL DEFAULT 1")
         # Onboarding columns
-        try:
-            await db.execute("ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE auth_setup_tokens ADD COLUMN purpose TEXT NOT NULL DEFAULT 'setup'")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE auth_setup_tokens ADD COLUMN invite_code TEXT")
-        except Exception:
-            pass
-        try:
-            await db.execute("CREATE INDEX IF NOT EXISTS idx_auth_setup_invite ON auth_setup_tokens(invite_code)")
-        except Exception:
-            pass
+        await _add_column_if_missing(db, "users", "onboarding_completed", "INTEGER NOT NULL DEFAULT 0")
+        await _add_column_if_missing(db, "auth_setup_tokens", "purpose", "TEXT NOT NULL DEFAULT 'setup'")
+        await _add_column_if_missing(db, "auth_setup_tokens", "invite_code", "TEXT")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_auth_setup_invite ON auth_setup_tokens(invite_code)")
         await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 

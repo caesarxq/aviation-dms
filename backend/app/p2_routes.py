@@ -11,7 +11,7 @@ import hashlib
 
 from .database import get_db
 from .audit import log_audit_event
-from .rbac import has_permission
+from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
 
@@ -35,12 +35,24 @@ def _check(request: Request, perm: str):
         raise HTTPException(status_code=403, detail=f"Permission denied: {perm}")
 
 
+def _check_proposal_editor(request: Request):
+    _check(request, "document:propose")
+
+
 def _gen_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def now_iso() -> str:
     return datetime.now().isoformat()
+
+
+async def _rollback_safely(db):
+    """Best-effort rollback while preserving the original mutation/audit error."""
+    try:
+        await db.rollback()
+    except Exception:
+        pass
 
 
 async def _get_latest_version(db, doc_id: str):
@@ -54,17 +66,37 @@ async def _get_latest_version(db, doc_id: str):
     return row
 
 
+async def _get_proposal_source_version(db, doc_id: str):
+    """Prefer the effective published version; preserve draft-only legacy workflows."""
+    async with db.execute(
+        """SELECT v.* FROM documents d
+           JOIN document_versions v ON v.version_id = d.current_version_id
+           WHERE d.document_id = ? AND v.state = 'published'""",
+        (doc_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        async with db.execute(
+            "SELECT * FROM document_versions WHERE document_id = ? AND state = 'published' ORDER BY created_at DESC LIMIT 1",
+            (doc_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Effective published document version not found")
+    return row
+
+
 @router.post("/documents/{doc_id}/proposals/preview")
 async def preview_proposals(doc_id: str, request: Request):
     """Detect atomic changes without persisting proposal records."""
-    _check(request, "document:update")
+    _check_proposal_editor(request)
     body = await request.json()
     proposed_content = body.get("proposed_content")
     if not isinstance(proposed_content, str):
         raise HTTPException(status_code=422, detail="proposed_content is required")
     db = await get_db()
     try:
-        version = await _get_latest_version(db, doc_id)
+        version = await _get_proposal_source_version(db, doc_id)
         changes = detect_proposals(version["content"] or "", proposed_content, base_version_id=version["version_id"])
         return {"document_id": doc_id, "base_version_id": version["version_id"], "changes": changes, "change_count": len(changes)}
     finally:
@@ -74,14 +106,14 @@ async def preview_proposals(doc_id: str, request: Request):
 @router.post("/documents/{doc_id}/proposals/batch")
 async def create_proposal_batch(doc_id: str, request: Request):
     """Create one independently reviewable proposal for each detected change."""
-    _check(request, "document:update")
+    _check_proposal_editor(request)
     body = await request.json()
     proposed_content = body.get("proposed_content")
     if not isinstance(proposed_content, str):
         raise HTTPException(status_code=422, detail="proposed_content is required")
     db = await get_db()
     try:
-        version = await _get_latest_version(db, doc_id)
+        version = await _get_proposal_source_version(db, doc_id)
         requested_base = body.get("base_version_id")
         if requested_base and requested_base != version["version_id"]:
             raise HTTPException(status_code=409, detail="Document changed while the proposal was being prepared")
@@ -137,10 +169,16 @@ async def create_proposal_batch(doc_id: str, request: Request):
             )
             created.append({"proposal_id": proposal_id, **change, "change_fingerprint": fingerprint, "change_set_id": change_set_id, "status": "draft", "proposer_id": actor})
             audit_events.append((proposal_id, change["target_ref"]))
-        await db.commit()
         for proposal_id, target_ref in audit_events:
-            await log_audit_event("document_proposal", proposal_id, "created", actor, {"doc_id": doc_id, "change_set_id": change_set_id, "target_ref": target_ref})
+            await log_audit_event(
+                "document_proposal", proposal_id, "created", actor,
+                {"doc_id": doc_id, "change_set_id": change_set_id, "target_ref": target_ref}, db=db,
+            )
+        await db.commit()
         return {"document_id": doc_id, "base_version_id": version["version_id"], "change_set_id": change_set_id, "proposals": created, "created_count": len(created)}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -149,19 +187,14 @@ async def create_proposal_batch(doc_id: str, request: Request):
 
 @router.post("/documents/{doc_id}/proposals")
 async def create_proposal(doc_id: str, request: Request):
-    _check(request, "document:update")
+    _check_proposal_editor(request)
     body = await request.json()
     db = await get_db()
     try:
-        # Get current version
-        async with db.execute(
-            "SELECT version_id FROM document_versions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
-            (doc_id,),
-        ) as cur:
-            row = await cur.fetchone()
-        if not row:
+        version = await _get_proposal_source_version(db, doc_id)
+        if not version:
             raise HTTPException(status_code=404, detail="Document not found")
-        version_id = row["version_id"]
+        version_id = version["version_id"]
 
         proposal_id = _gen_id("PROP")
         now = now_iso()
@@ -180,21 +213,26 @@ async def create_proposal(doc_id: str, request: Request):
                 actor, now, now, actor, actor,
             ),
         )
+        await log_audit_event("document_proposal", proposal_id, "created", actor, {"doc_id": doc_id}, db=db)
         await db.commit()
-        await log_audit_event("document_proposal", proposal_id, "created", actor, {"doc_id": doc_id})
         # Return full proposal
         async with db.execute(
             "SELECT * FROM document_proposals WHERE proposal_id = ?", (proposal_id,)
         ) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"proposal_id": proposal_id, "status": "draft"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
 
 @router.get("/documents/{doc_id}/proposals")
 async def list_proposals(doc_id: str, request: Request, status: Optional[str] = None):
-    _check(request, "document:read")
+    role = _role(request)
+    if not (has_permission(role, "document:read") or has_permission(role, "document:propose")):
+        raise HTTPException(status_code=403, detail="Permission denied: document:read or document:propose")
     db = await get_db()
     try:
         query = "SELECT * FROM document_proposals WHERE document_id = ?"
@@ -212,10 +250,29 @@ async def list_proposals(doc_id: str, request: Request, status: Optional[str] = 
 
 @router.patch("/proposals/{proposal_id}")
 async def update_proposal(proposal_id: str, request: Request):
-    role = _role(request)
-    if not (has_permission(role, "document:update") or has_permission(role, "document:approve")):
-        raise HTTPException(status_code=403, detail="Permission denied: document:update or document:approve")
     body = await request.json()
+    role = _role(request)
+    status = body.get("status")
+    valid_statuses = {"submitted", "under_review", "approved", "rejected", "deferred"}
+    if "status" in body and status not in valid_statuses:
+        raise HTTPException(status_code=422, detail="Invalid proposal status")
+    if "reviewer_id" in body:
+        raise HTTPException(status_code=403, detail="reviewer_id is assigned by the system")
+
+    review_status = status in {"under_review", "approved", "rejected", "deferred"}
+    has_content_edits = bool({"proposed_text", "rationale", "severity"} & set(body))
+    has_review_metadata = "disposition" in body
+    if has_review_metadata and not review_status:
+        raise HTTPException(status_code=400, detail="Review disposition requires a review status")
+    if has_content_edits and review_status:
+        raise HTTPException(status_code=400, detail="Proposal content cannot be edited during review")
+    if review_status or has_review_metadata:
+        if not (has_permission(role, "document:update") or has_permission(role, "document:approve")):
+            raise HTTPException(status_code=403, detail="Permission denied: document:update or document:approve")
+    if has_content_edits or status == "submitted":
+        _check_proposal_editor(request)
+    if not ("status" in body or has_content_edits or has_review_metadata):
+        raise HTTPException(status_code=400, detail="No fields to update")
     db = await get_db()
     try:
         async with db.execute(
@@ -224,20 +281,26 @@ async def update_proposal(proposal_id: str, request: Request):
             row = await cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Proposal not found")
+        if has_content_edits and row["status"] != "draft":
+            raise HTTPException(status_code=400, detail="Only draft proposals can be edited")
+        if status == "submitted" and row["status"] != "draft":
+            raise HTTPException(status_code=409, detail="Only draft proposals can be submitted")
+        if review_status and row["status"] not in ("submitted", "under_review"):
+            raise HTTPException(status_code=409, detail="Proposal is not awaiting review")
 
         actor = _actor(request)
-        # SoD: proposer cannot approve/reject/defer their own proposal
-        if "status" in body and body["status"] in ("approved", "rejected", "deferred"):
+        # SoD: proposer cannot claim review or make a final decision on their own proposal.
+        if status in ("under_review", "approved", "rejected", "deferred"):
             if same_principal(request, dict(row)["proposer_id"]):
                 raise HTTPException(status_code=403, detail="SoD: proposer cannot review own proposal")
         now = now_iso()
         updates = []
         params = []
-        for field in ["status", "proposed_text", "rationale", "severity", "reviewer_id", "disposition"]:
+        for field in ["status", "proposed_text", "rationale", "severity", "disposition"]:
             if field in body:
                 updates.append(f"{field} = ?")
                 params.append(body[field])
-        if "status" in body and body["status"] in ("approved", "rejected", "deferred"):
+        if review_status:
             updates.append("reviewed_at = ?")
             params.append(now)
             updates.append("reviewer_id = ?")
@@ -252,17 +315,19 @@ async def update_proposal(proposal_id: str, request: Request):
         await db.execute(
             f"UPDATE document_proposals SET {', '.join(updates)} WHERE proposal_id = ?", params
         )
-        await db.commit()
-        await log_audit_event("document_proposal", proposal_id, "updated", actor, body)
+        await log_audit_event("document_proposal", proposal_id, "updated", actor, body, db=db)
         await db.commit()
         return {"proposal_id": proposal_id, "status": body.get("status", row["status"])}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
 
 @router.delete("/proposals/{proposal_id}")
 async def delete_proposal(proposal_id: str, request: Request):
-    _check(request, "document:update")
+    _check_proposal_editor(request)
     db = await get_db()
     try:
         async with db.execute("SELECT * FROM document_proposals WHERE proposal_id = ?", (proposal_id,)) as cur:
@@ -272,9 +337,12 @@ async def delete_proposal(proposal_id: str, request: Request):
         if row["status"] not in ("draft",):
             raise HTTPException(status_code=400, detail="Only draft proposals can be deleted")
         await db.execute("DELETE FROM document_proposals WHERE proposal_id = ?", (proposal_id,))
+        await log_audit_event("document_proposal", proposal_id, "deleted", _actor(request), {}, db=db)
         await db.commit()
-        await log_audit_event("document_proposal", proposal_id, "deleted", _actor(request), {})
         return {"deleted": True}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -297,6 +365,10 @@ async def apply_proposal(proposal_id: str, request: Request):
         actor = _actor(request)
         now = now_iso()
         doc_id = prop["document_id"]
+
+        # SoD: proposer cannot apply their own proposal, even if its base is stale.
+        if not check_sod("proposal", "apply", actor, prop["proposer_id"], getattr(request.state, "actor_aliases", None)):
+            raise HTTPException(status_code=403, detail="Cannot apply own proposal (SoD)")
 
         # Get current version content and reject stale proposals rather than applying to the wrong text.
         ver = await _get_latest_version(db, doc_id)
@@ -337,10 +409,12 @@ async def apply_proposal(proposal_id: str, request: Request):
             "UPDATE document_proposals SET status = 'applied', applied_at = ?, applied_version_id = ? WHERE proposal_id = ?",
             (now, new_version_id, proposal_id),
         )
-        await db.commit()
-        await log_audit_event("document_proposal", proposal_id, "applied", actor, {"new_version_id": new_version_id})
+        await log_audit_event("document_proposal", proposal_id, "applied", actor, {"new_version_id": new_version_id}, db=db)
         await db.commit()
         return {"proposal_id": proposal_id, "new_version_id": new_version_id, "status": "applied"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -349,7 +423,7 @@ async def apply_proposal(proposal_id: str, request: Request):
 
 @router.post("/documents/{doc_id}/annotations")
 async def create_annotation(doc_id: str, request: Request):
-    _check(request, "document:read")
+    _check(request, "document:annotate")
     body = await request.json()
     db = await get_db()
     try:
@@ -374,17 +448,21 @@ async def create_annotation(doc_id: str, request: Request):
              body["target_ref"], body.get("selected_text"), body["content"],
              actor, "open", now, now, actor, actor),
         )
+        await log_audit_event("document_annotation", ann_id, "created", actor, {"document_id": doc_id}, db=db)
         await db.commit()
         async with db.execute("SELECT * FROM document_annotations WHERE annotation_id = ?", (ann_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"annotation_id": ann_id, "status": "open"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
 
 @router.get("/documents/{doc_id}/annotations")
 async def list_annotations(doc_id: str, request: Request, status: Optional[str] = None):
-    _check(request, "document:read")
+    _check(request, "document:annotate")
     db = await get_db()
     try:
         query = "SELECT * FROM document_annotations WHERE document_id = ?"
@@ -402,7 +480,7 @@ async def list_annotations(doc_id: str, request: Request, status: Optional[str] 
 
 @router.patch("/annotations/{annotation_id}")
 async def update_annotation(annotation_id: str, request: Request):
-    _check(request, "document:read")
+    _check(request, "document:annotate")
     body = await request.json()
     db = await get_db()
     try:
@@ -436,8 +514,12 @@ async def update_annotation(annotation_id: str, request: Request):
         await db.execute(
             f"UPDATE document_annotations SET {', '.join(updates)} WHERE annotation_id = ?", params
         )
+        await log_audit_event("document_annotation", annotation_id, "updated", actor, body, db=db)
         await db.commit()
         return {"annotation_id": annotation_id, "status": body.get("status", row["status"])}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -465,11 +547,17 @@ async def create_license(request: Request):
              body.get("notes"), body.get("verified_by"), body.get("verified_at", now if body.get("verified_by") else None),
              now, now, actor, actor),
         )
+        await log_audit_event(
+            "personnel_license", lic_id, "created", actor,
+            {"person_id": body["person_id"], "license_type": body["license_type"]}, db=db,
+        )
         await db.commit()
-        await log_audit_event("personnel_license", lic_id, "created", actor, {"person_id": body["person_id"], "license_type": body["license_type"]})
         async with db.execute("SELECT * FROM personnel_licenses WHERE license_id = ?", (lic_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"license_id": lic_id, "status": "valid"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -558,12 +646,14 @@ async def update_license(license_id: str, request: Request):
                 (renewal_id, license_id, row["expiry_date"], body["expiry_date"], now, body.get("document_ref"), actor, body.get("notes"), now),
             )
 
-        await db.commit()
-        await log_audit_event("personnel_license", license_id, "updated", actor, body)
+        await log_audit_event("personnel_license", license_id, "updated", actor, body, db=db)
         await db.commit()
         async with db.execute("SELECT * FROM personnel_licenses WHERE license_id = ?", (license_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"license_id": license_id}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -578,9 +668,12 @@ async def delete_license(license_id: str, request: Request):
         if not row:
             raise HTTPException(status_code=404, detail="License not found")
         await db.execute("DELETE FROM personnel_licenses WHERE license_id = ?", (license_id,))
+        await log_audit_event("personnel_license", license_id, "deleted", _actor(request), {}, db=db)
         await db.commit()
-        await log_audit_event("personnel_license", license_id, "deleted", _actor(request), {})
         return {"deleted": True}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -636,12 +729,17 @@ async def create_insurance(aircraft_id: str, request: Request):
              body.get("renewal_notes"), body.get("verified_by"),
              now if body.get("verified_by") else None, now, now, actor, actor),
         )
-        await db.commit()
-        await log_audit_event("aircraft_insurance", ins_id, "created", actor, {"aircraft_id": aircraft_id, "insurance_type": body["insurance_type"]})
+        await log_audit_event(
+            "aircraft_insurance", ins_id, "created", actor,
+            {"aircraft_id": aircraft_id, "insurance_type": body["insurance_type"]}, db=db,
+        )
         await db.commit()
         async with db.execute("SELECT * FROM aircraft_insurance WHERE insurance_id = ?", (ins_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"insurance_id": ins_id, "status": "active"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -702,10 +800,12 @@ async def update_insurance(insurance_id: str, request: Request):
                 (renewal_id, insurance_id, row["expiry_date"], body["expiry_date"], now, body.get("document_ref"), actor, body.get("renewal_notes"), now),
             )
 
-        await db.commit()
-        await log_audit_event("aircraft_insurance", insurance_id, "updated", actor, body)
+        await log_audit_event("aircraft_insurance", insurance_id, "updated", actor, body, db=db)
         await db.commit()
         return {"insurance_id": insurance_id, "status": body.get("status", row["status"])}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -758,12 +858,17 @@ async def create_aircraft_document(aircraft_id: str, request: Request):
              body.get("verified_by"), now if body.get("verified_by") else None,
              now, now, actor, actor),
         )
-        await db.commit()
-        await log_audit_event("aircraft_document", doc_id, "created", actor, {"aircraft_id": aircraft_id, "document_type": body["document_type"]})
+        await log_audit_event(
+            "aircraft_document", doc_id, "created", actor,
+            {"aircraft_id": aircraft_id, "document_type": body["document_type"]}, db=db,
+        )
         await db.commit()
         async with db.execute("SELECT * FROM aircraft_documents WHERE doc_id = ?", (doc_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"doc_id": doc_id, "status": "valid"}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -817,10 +922,12 @@ async def update_aircraft_document(doc_id: str, request: Request):
         params.append(actor)
         params.append(doc_id)
         await db.execute(f"UPDATE aircraft_documents SET {', '.join(updates)} WHERE doc_id = ?", params)
-        await db.commit()
-        await log_audit_event("aircraft_document", doc_id, "updated", actor, body)
+        await log_audit_event("aircraft_document", doc_id, "updated", actor, body, db=db)
         await db.commit()
         return {"doc_id": doc_id, "status": body.get("status", row["status"])}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -856,9 +963,12 @@ async def delete_annotation(annotation_id: str, request: Request):
         if not row:
             raise HTTPException(status_code=404, detail="Annotation not found")
         await db.execute("DELETE FROM document_annotations WHERE annotation_id = ?", (annotation_id,))
+        await log_audit_event("document_annotation", annotation_id, "deleted", _actor(request), {}, db=db)
         await db.commit()
-        await log_audit_event("document_annotation", annotation_id, "deleted", _actor(request), {})
         return {"deleted": True}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()
 
@@ -1031,6 +1141,8 @@ async def create_personnel_upload_file(request: Request):
                 row = await cur.fetchone()
             return dict(row) if row else {"upload_id": upload_id}
         except Exception:
+            if not row_committed:
+                await _rollback_safely(db)
             if not row_committed and saved_path and saved_path.exists():
                 saved_path.unlink()
             raise
@@ -1102,12 +1214,15 @@ async def verify_personnel_upload(upload_id: str, request: Request):
             f"UPDATE personnel_uploads SET {', '.join(updates)} WHERE upload_id = ?",
             params,
         )
-        await db.commit()
         await log_audit_event("personnel_upload", upload_id, status, actor, {
             "rejection_reason": body.get("rejection_reason"),
-        })
+        }, db=db)
+        await db.commit()
         async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else {"upload_id": upload_id}
+    except Exception:
+        await _rollback_safely(db)
+        raise
     finally:
         await db.close()

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../api/client";
+import { AuthContext } from "../auth/AuthContext";
 import { ToastProvider } from "../components/ui/Toast";
 import { DocumentEditor } from "./DocumentEditor";
 
@@ -18,14 +19,34 @@ const hostileDocument = `<h1>Controlled proposal</h1><p onclick="window.appXss =
 
 function renderEditor() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const permissions = ["document:read", "document:update", "document:propose"];
+  const profile = {
+    user: { user_id: "u1", username: "user", email: "u@example.test", full_name: "User", role: "librarian", active_role: "librarian", roles: ["librarian"] },
+    role: "librarian",
+    active_role: "librarian",
+    roles: ["librarian"],
+    authenticated_via: "session_cookie",
+    onboarding_completed: true,
+    permissions,
+  };
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={["/documents/DOC-1/edit"]}>
-          <Routes>
-            <Route path="/documents/:docId/edit" element={<DocumentEditor />} />
-          </Routes>
-        </MemoryRouter>
+        <AuthContext.Provider value={{
+          profile,
+          state: "authenticated",
+          login: async () => profile,
+          switchRole: async () => profile,
+          logout: async () => {},
+          refreshProfile: async () => profile,
+          hasPermission: (permission) => permissions.includes(permission),
+        }}>
+          <MemoryRouter initialEntries={["/documents/DOC-1/edit"]}>
+            <Routes>
+              <Route path="/documents/:docId/edit" element={<DocumentEditor />} />
+            </Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
       </ToastProvider>
     </QueryClientProvider>,
   );

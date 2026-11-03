@@ -27,6 +27,16 @@ def setup_db():
         pass
 
 
+@pytest.fixture(autouse=True)
+def clear_rate_limit_buckets_after_each_test():
+    """Prevent the process-local API limiter leaking state across tests."""
+    yield
+    from app import rate_limiter
+
+    with rate_limiter._limiter._lock:
+        rate_limiter._limiter._buckets.clear()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
