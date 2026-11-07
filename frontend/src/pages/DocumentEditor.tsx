@@ -379,7 +379,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             >
               <GripVertical size={14} />
             </button>
-            <span className="text-[10px] font-semibold text-kfl-text" title="Mode">✎ Suggest</span>
+            <span className="text-[10px] font-semibold text-kfl-text" title="Mode">Suggest</span>
             {toolbarPosition && (
               <button
                 type="button"

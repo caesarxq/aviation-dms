@@ -1,5 +1,37 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification, ChangeRequest, ReviewComment } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, RiskAssessmentSummary, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification, ChangeRequest, ReviewComment } from "../types";
+
+export interface OrganizationOverviewData {
+  trends: {
+    occurrences_by_type: Record<string, number>;
+    occurrences_by_severity: Record<string, number>;
+    safety_actions_by_status: Record<string, number>;
+    hazards_by_risk_level: Record<string, number>;
+    occurrences_last_30_days: number;
+  };
+  deadlines: {
+    total: number;
+    overdue_count: number;
+    upcoming_count: number;
+    overdue: Array<{ entity_type: string; entity_id: string; title: string; due_date: string; priority: string }>;
+    upcoming: Array<{ entity_type: string; entity_id: string; title: string; due_date: string; priority: string }>;
+  };
+  operations: {
+    total: number;
+    planned: number;
+    released: number;
+    in_progress: number;
+    completed: number;
+    cancelled: number;
+    aborted: number;
+  };
+  fleet: {
+    total: number;
+    status_counts: Record<string, number>;
+    opspec_authorized: number;
+    not_opspec_authorized: number;
+  };
+}
 
 export const safetyApi = {
   listOccurrences: (params?: Record<string, any>) =>
@@ -22,10 +54,16 @@ export const safetyApi = {
 
   listRiskAssessments: (params?: Record<string, any>) =>
     api.get<RiskAssessment[]>("/p1/risk-assessments", { params }).then((r: any) => r.data),
+  getRiskAssessmentSummary: () =>
+    api.get<RiskAssessmentSummary>("/p1/risk-assessments/summary").then((r: any) => r.data),
   createRiskAssessment: (data: any) =>
     api.post<RiskAssessment>("/p1/risk-assessments", data).then((r: any) => r.data),
   updateRiskAssessment: (id: string, data: any) =>
     api.patch<RiskAssessment>(`/p1/risk-assessments/${id}`, data).then((r: any) => r.data),
+  approveRiskAssessment: (id: string) =>
+    api.post<RiskAssessment>(`/p1/risk-assessments/${encodeURIComponent(id)}/approve`).then((r: any) => r.data),
+  listMissions: (params?: Record<string, any>) =>
+    api.get<Array<{ mission_id: string; title: string; status: string }>>("/p1/missions", { params }).then((r: any) => r.data),
 
   listInvestigations: (params?: Record<string, any>) =>
     api.get<Investigation[]>("/p1/investigations", { params }).then((r: any) => r.data),
@@ -48,6 +86,8 @@ export const safetyApi = {
     api.get("/p1/safety/trends").then((r: any) => r.data),
   getDeadlines: (daysAhead?: number) =>
     api.get("/p1/deadlines", { params: { days_ahead: daysAhead ?? 30 } }).then((r: any) => r.data),
+  getOrganizationOverview: () =>
+    api.get<OrganizationOverviewData>("/p1/organization/overview").then((response) => response.data),
   getNotificationStatus: () =>
     api.get("/p1/notifications/status").then((r: any) => r.data),
   listNotifications: (params?: Record<string, any>) =>

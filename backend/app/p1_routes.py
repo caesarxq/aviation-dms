@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 from typing import Optional, List
 from datetime import datetime, timedelta
+import os
 import uuid
 import json
 from collections import Counter
@@ -13,8 +14,14 @@ from .audit import log_audit_event
 from .rbac import has_permission
 from .p0_auth import same_principal
 from .p1_models import *
+from .p1_models import _validate_canonical_date
 
 router = APIRouter()
+FLIGHT_RELEASE_ENABLED = os.getenv("FLIGHT_RELEASE_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
+class ROCRegisterUpdateWithScope(ROCRegisterUpdate):
+    authorized_registrations: Optional[str] = None
 
 
 def _actor(request: Request) -> str:
@@ -535,6 +542,14 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
     hazard_ids = ra.hazard_ids or []
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        if ra.mission_id:
+            mission_cursor = await db.execute("SELECT status, release_id FROM missions WHERE mission_id = ?", (ra.mission_id,))
+            mission_row = await mission_cursor.fetchone()
+            if not mission_row:
+                raise HTTPException(status_code=404, detail="Mission not found for risk assessment")
+            if mission_row["status"] != "planned" or mission_row["release_id"]:
+                raise HTTPException(status_code=409, detail="Risk assessment cannot be linked after the mission lifecycle has advanced")
         for hazard_id in hazard_ids:
             cursor = await db.execute("SELECT 1 FROM hazards WHERE hazard_id = ?", (hazard_id,))
             if not await cursor.fetchone():
@@ -560,7 +575,20 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
                 (ra_id, hid),
             )
         await log_audit_event("risk_assessment", ra_id, "created", actor, {"risk_model": ra.risk_model, "status": initial_status}, db=db)
+        if ra.mission_id:
+            await db.execute(
+                "UPDATE missions SET risk_assessment_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ? AND status = 'planned' AND release_id IS NULL",
+                (ra_id, now, actor, ra.mission_id),
+            )
+            await log_audit_event(
+                "mission", ra.mission_id, "risk_assessment_linked", actor,
+                {"assessment_id": ra_id}, db=db,
+            )
         await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
     return RiskAssessmentResponse(
@@ -574,8 +602,24 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
 
 
 @router.get("/risk-assessments", response_model=List[RiskAssessmentResponse])
-async def list_risk_assessments(request: Request, hazard_id: Optional[str] = None, occurrence_id: Optional[str] = None, status: Optional[str] = None, limit: int = 50, offset: int = 0):
+async def list_risk_assessments(
+    request: Request,
+    hazard_id: Optional[str] = None,
+    occurrence_id: Optional[str] = None,
+    status: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
     _check(request, "safety:read")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    if offset < 0 or offset > 1_000_000:
+        raise HTTPException(status_code=422, detail="offset must be between 0 and 1000000")
+    if status is not None and status not in {"draft", "scrutiny_required", "approved", "cancelled"}:
+        raise HTTPException(status_code=422, detail="Unknown risk assessment status")
+    if risk_level is not None and risk_level not in {"low", "medium", "high", "critical"}:
+        raise HTTPException(status_code=422, detail="Unknown risk level")
     db = await get_db()
     try:
         conditions = []
@@ -592,10 +636,17 @@ async def list_risk_assessments(request: Request, hazard_id: Optional[str] = Non
         if status:
             conditions.append("status = ?")
             params.append(status)
+        if risk_level:
+            conditions.append("risk_level = ?")
+            params.append(risk_level)
         where = " AND ".join(conditions) if conditions else "1=1"
-        cursor = await db.execute(f"SELECT * FROM risk_assessments WHERE {where} ORDER BY assessed_at DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        cursor = await db.execute(
+            f"SELECT * FROM risk_assessments WHERE {where} ORDER BY assessed_at DESC, assessment_id ASC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
         rows = await cursor.fetchall()
         results = []
+        can_approve_permission = has_permission(_role(request), "risk_assessment:approve")
         for r in rows:
             row = dict(r)
             # Load linked hazard IDs from junction table
@@ -604,8 +655,38 @@ async def list_risk_assessments(request: Request, hazard_id: Optional[str] = Non
                 (row["assessment_id"],),
             )
             row["hazard_ids"] = [h["hazard_id"] for h in await hz_cursor.fetchall()]
+            assessor_id = row.get("assessor_id")
+            row["can_approve_for_current_user"] = bool(
+                can_approve_permission
+                and row.get("status") in {"draft", "scrutiny_required"}
+                and not row.get("flight_cancelled")
+                and isinstance(assessor_id, str)
+                and assessor_id.strip()
+                and not same_principal(request, assessor_id)
+            )
             results.append(RiskAssessmentResponse(**row))
         return results
+    finally:
+        await db.close()
+
+
+@router.get("/risk-assessments/summary")
+async def get_risk_assessment_summary(request: Request):
+    _check(request, "safety:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+                      SUM(CASE WHEN status = 'scrutiny_required' THEN 1 ELSE 0 END) AS scrutiny_required,
+                      SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                      SUM(CASE WHEN status = 'cancelled' OR flight_cancelled = 1 THEN 1 ELSE 0 END) AS cancelled,
+                      SUM(CASE WHEN risk_level IN ('high', 'critical') THEN 1 ELSE 0 END) AS high_or_critical
+               FROM risk_assessments"""
+        )
+        row = await cursor.fetchone()
+        keys = ("total", "draft", "scrutiny_required", "approved", "cancelled", "high_or_critical")
+        return {key: (row[key] or 0) for key in keys} if row else {key: 0 for key in keys}
     finally:
         await db.close()
 
@@ -616,9 +697,19 @@ async def update_risk_assessment(assessment_id: str, update: RiskAssessmentUpdat
     actor = _actor(request)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
-        if not await cursor.fetchone():
+        existing_row = await cursor.fetchone()
+        if not existing_row:
             raise HTTPException(status_code=404, detail="Risk assessment not found")
+        existing = dict(existing_row)
+        if existing.get("status") in {"approved", "cancelled"} or existing.get("flight_cancelled"):
+            changed_after_review = any(value is not None for value in (
+                update.title, update.description, update.mitigation_measures,
+                update.residual_risk, update.hazard_ids,
+            ))
+            if changed_after_review:
+                raise HTTPException(status_code=409, detail="Approved or cancelled risk assessments are immutable; create a new assessment")
         if update.hazard_ids is not None:
             if len(update.hazard_ids) != len(set(update.hazard_ids)):
                 raise HTTPException(status_code=422, detail="Duplicate hazard IDs are not allowed")
@@ -670,6 +761,10 @@ async def update_risk_assessment(assessment_id: str, update: RiskAssessmentUpdat
         )
         row["hazard_ids"] = [hazard["hazard_id"] for hazard in await hz_cursor.fetchall()]
         return RiskAssessmentResponse(**row)
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
@@ -681,23 +776,37 @@ async def approve_risk_assessment(assessment_id: str, request: Request):
     now = now_iso()
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Risk assessment not found")
         current = dict(row)
+        assessor_id = current.get("assessor_id")
+        if not isinstance(assessor_id, str) or not assessor_id.strip():
+            raise HTTPException(status_code=409, detail="Risk assessment has no recorded assessor and cannot be approved")
+        if same_principal(request, assessor_id):
+            raise HTTPException(status_code=403, detail="The assessor cannot approve their own risk assessment")
         if current.get("status") == "cancelled" or current.get("flight_cancelled"):
             raise HTTPException(status_code=400, detail="Cancelled risk assessments cannot be approved for flight")
-        await db.execute(
-            "UPDATE risk_assessments SET status = 'approved', reviewed_by = ?, updated_at = ? WHERE assessment_id = ?",
-            (actor, now, assessment_id),
+        if current.get("status") not in {"draft", "scrutiny_required"}:
+            raise HTTPException(status_code=409, detail="Only draft or scrutiny-required risk assessments can be approved")
+        updated = await db.execute(
+            "UPDATE risk_assessments SET status = 'approved', reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE assessment_id = ? AND status = ?",
+            (actor, now, now, assessment_id, current["status"]),
         )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Risk assessment changed during approval; reload and retry")
         await log_audit_event("risk_assessment", assessment_id, "approved", actor, {"rule_ref": "SMS-KFL §2.6 / OM-KFL §2.6"}, db=db)
         await db.commit()
         cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,))
         result = dict(await cursor.fetchone())
         hz_cursor = await db.execute("SELECT hazard_id FROM risk_assessment_hazards WHERE assessment_id = ? ORDER BY hazard_id", (assessment_id,))
         result["hazard_ids"] = [h["hazard_id"] for h in await hz_cursor.fetchall()]
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
     return RiskAssessmentResponse(**result)
@@ -890,21 +999,29 @@ async def get_safety_trends(request: Request):
 @router.post("/roc", response_model=ROCRegisterResponse, status_code=201)
 async def create_roc(roc: ROCRegisterCreate, request: Request):
     _check(request, "roc:manage")
+    for field, value in (("issue_date", roc.issue_date), ("expiry_date", roc.expiry_date)):
+        try:
+            _validate_canonical_date(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"{field} must use YYYY-MM-DD format") from exc
     actor = _actor(request)
     roc_id = _gen_id("ROC")
     now = now_iso()
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO roc_register (roc_id, roc_number, serial_number, kcaa_reference, issue_date, expiry_date, status, categories, bvlos_authorized, night_authorized, max_altitude_agl, evlos_authorized, dg_category, notes, created_at, updated_at, created_by, updated_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (roc_id, roc.roc_number, roc.serial_number, roc.kcaa_reference, roc.issue_date, roc.expiry_date, "active", roc.categories, 1 if roc.bvlos_authorized else 0, 1 if roc.night_authorized else 0, roc.max_altitude_agl, 1 if roc.evlos_authorized else 0, roc.dg_category, roc.notes, now, now, actor, actor),
+            """INSERT INTO roc_register (roc_id, roc_number, serial_number, kcaa_reference, issue_date, expiry_date, status, categories, bvlos_authorized, night_authorized, max_altitude_agl, evlos_authorized, dg_category, authorized_registrations, notes, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (roc_id, roc.roc_number, roc.serial_number, roc.kcaa_reference, roc.issue_date, roc.expiry_date, "active", roc.categories, 1 if roc.bvlos_authorized else 0, 1 if roc.night_authorized else 0, roc.max_altitude_agl, 1 if roc.evlos_authorized else 0, roc.dg_category, roc.authorized_registrations, roc.notes, now, now, actor, actor),
         )
-        await log_audit_event("roc", roc_id, "created", actor, {"roc_number": roc.roc_number}, db=db)
+        await log_audit_event("roc", roc_id, "created", actor, {
+            "roc_number": roc.roc_number,
+            "authorized_registrations": roc.authorized_registrations,
+        }, db=db)
         await db.commit()
     finally:
         await db.close()
-    return ROCRegisterResponse(roc_id=roc_id, roc_number=roc.roc_number, serial_number=roc.serial_number, kcaa_reference=roc.kcaa_reference, issue_date=roc.issue_date, expiry_date=roc.expiry_date, status="active", categories=roc.categories, bvlos_authorized=roc.bvlos_authorized, night_authorized=roc.night_authorized, max_altitude_agl=roc.max_altitude_agl, evlos_authorized=roc.evlos_authorized, dg_category=roc.dg_category, notes=roc.notes, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
+    return ROCRegisterResponse(roc_id=roc_id, roc_number=roc.roc_number, serial_number=roc.serial_number, kcaa_reference=roc.kcaa_reference, issue_date=roc.issue_date, expiry_date=roc.expiry_date, status="active", categories=roc.categories, bvlos_authorized=roc.bvlos_authorized, night_authorized=roc.night_authorized, max_altitude_agl=roc.max_altitude_agl, evlos_authorized=roc.evlos_authorized, dg_category=roc.dg_category, authorized_registrations=roc.authorized_registrations, notes=roc.notes, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
 @router.get("/roc", response_model=List[ROCRegisterResponse])
@@ -937,17 +1054,27 @@ async def get_roc(roc_id: str, request: Request):
 
 
 @router.patch("/roc/{roc_id}", response_model=ROCRegisterResponse)
-async def update_roc(roc_id: str, update: ROCRegisterUpdate, request: Request):
+async def update_roc(roc_id: str, update: ROCRegisterUpdateWithScope, request: Request):
     _check(request, "roc:manage")
+    for field in ("issue_date", "expiry_date"):
+        value = getattr(update, field)
+        if value is not None:
+            try:
+                _validate_canonical_date(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"{field} must use YYYY-MM-DD format") from exc
     actor = _actor(request)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM roc_register WHERE roc_id = ?", (roc_id,))
-        if not await cursor.fetchone():
+        current_row = await cursor.fetchone()
+        if not current_row:
             raise HTTPException(status_code=404, detail="ROC not found")
+        current = dict(current_row)
         updates = []
         params = []
-        field_map = {"roc_number": update.roc_number, "serial_number": update.serial_number, "kcaa_reference": update.kcaa_reference, "issue_date": update.issue_date, "expiry_date": update.expiry_date, "status": update.status, "categories": update.categories, "max_altitude_agl": update.max_altitude_agl, "dg_category": update.dg_category, "notes": update.notes}
+        field_map = {"roc_number": update.roc_number, "serial_number": update.serial_number, "kcaa_reference": update.kcaa_reference, "issue_date": update.issue_date, "expiry_date": update.expiry_date, "status": update.status, "categories": update.categories, "max_altitude_agl": update.max_altitude_agl, "dg_category": update.dg_category, "authorized_registrations": update.authorized_registrations, "notes": update.notes}
         bool_fields = {"bvlos_authorized": update.bvlos_authorized, "night_authorized": update.night_authorized, "evlos_authorized": update.evlos_authorized}
         for col, val in field_map.items():
             if val is not None:
@@ -958,16 +1085,70 @@ async def update_roc(roc_id: str, update: ROCRegisterUpdate, request: Request):
                 updates.append(f"{col} = ?")
                 params.append(1 if val else 0)
         if updates:
+            updated_at = now_iso()
             updates.append("updated_at = ?")
-            params.append(now_iso())
+            params.append(updated_at)
             updates.append("updated_by = ?")
             params.append(actor)
             params.append(roc_id)
             await db.execute(f"UPDATE roc_register SET {', '.join(updates)} WHERE roc_id = ?", params)
-            await db.commit()
+            changed = {field: value for field, value in field_map.items() if value is not None}
+            for field, value in bool_fields.items():
+                if value is not None and bool(value) != bool(current.get(field)):
+                    changed[field] = {"from": bool(current.get(field)), "to": bool(value)}
+            if update.authorized_registrations is not None:
+                previous_scope = {
+                    registration.strip().upper()
+                    for registration in (current.get("authorized_registrations") or "").split(",")
+                    if registration.strip()
+                }
+                requested_scope = {
+                    registration.strip().upper()
+                    for registration in update.authorized_registrations.split(",")
+                    if registration.strip()
+                }
+                invalidated_registrations = sorted(previous_scope.symmetric_difference(requested_scope))
+                if invalidated_registrations:
+                    placeholders = ",".join("?" for _ in invalidated_registrations)
+                    aircraft_rows = await (await db.execute(
+                        f"""SELECT aircraft_id, registration FROM aircraft
+                            WHERE roc_id = ? AND opspec_authorized = 1
+                              AND UPPER(TRIM(registration)) IN ({placeholders})""",
+                        (roc_id, *invalidated_registrations),
+                    )).fetchall()
+                    if aircraft_rows:
+                        await db.execute(
+                            f"""UPDATE aircraft SET opspec_authorized = 0, updated_at = ?, updated_by = ?
+                                WHERE roc_id = ? AND opspec_authorized = 1
+                                  AND UPPER(TRIM(registration)) IN ({placeholders})""",
+                            (updated_at, actor, roc_id, *invalidated_registrations),
+                        )
+                        for aircraft_row in aircraft_rows:
+                            await log_audit_event(
+                                "aircraft",
+                                aircraft_row["aircraft_id"],
+                                "opspec_authorization_revoked",
+                                actor,
+                                {
+                                    "roc_id": roc_id,
+                                    "registration": aircraft_row["registration"],
+                                    "reason": "ROC registration scope changed",
+                                },
+                                db=db,
+                            )
+                changed["authorized_registrations"] = {
+                    "from": current.get("authorized_registrations"),
+                    "to": update.authorized_registrations,
+                }
+            await log_audit_event("roc", roc_id, "updated", actor, {"changed": changed}, db=db)
+        await db.commit()
         cursor = await db.execute("SELECT * FROM roc_register WHERE roc_id = ?", (roc_id,))
         row = await cursor.fetchone()
         return ROCRegisterResponse(**dict(row))
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
@@ -1018,6 +1199,32 @@ async def list_aircraft(request: Request, roc_id: Optional[str] = None, status: 
         await db.close()
 
 
+@router.get("/aircraft/summary")
+async def summarize_aircraft(request: Request):
+    """Return full-table fleet counts for authorized overview screens."""
+    _check(request, "aircraft:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT status, COUNT(*) AS count FROM aircraft GROUP BY status")
+        status_counts = {row["status"]: row["count"] for row in await cursor.fetchall()}
+        cursor = await db.execute(
+            """SELECT COUNT(*) AS total,
+                      COALESCE(SUM(CASE WHEN COALESCE(opspec_authorized, 0) = 1 THEN 1 ELSE 0 END), 0) AS authorized
+               FROM aircraft"""
+        )
+        row = await cursor.fetchone()
+        total = int(row["total"] or 0) if row else 0
+        authorized = int(row["authorized"] or 0) if row else 0
+        return {
+            "total": total,
+            "status_counts": status_counts,
+            "opspec_authorized": authorized,
+            "not_opspec_authorized": total - authorized,
+        }
+    finally:
+        await db.close()
+
+
 @router.get("/aircraft/{ac_id}", response_model=AircraftResponse)
 async def get_aircraft(ac_id: str, request: Request):
     _check(request, "aircraft:read")
@@ -1038,9 +1245,12 @@ async def update_aircraft(ac_id: str, update: AircraftUpdate, request: Request):
     actor = _actor(request)
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (ac_id,))
-        if not await cursor.fetchone():
+        current_row = await cursor.fetchone()
+        if not current_row:
             raise HTTPException(status_code=404, detail="Aircraft not found")
+        current = dict(current_row)
         updates = []
         params = []
         field_map = {"registration": update.registration, "model": update.model, "manufacturer": update.manufacturer, "serial_number": update.serial_number, "roc_id": update.roc_id, "status": update.status, "category": update.category, "weight_class": update.weight_class, "max_takeoff_weight_kg": update.max_takeoff_weight_kg, "acquired_date": update.acquired_date, "notes": update.notes}
@@ -1048,17 +1258,51 @@ async def update_aircraft(ac_id: str, update: AircraftUpdate, request: Request):
             if val is not None:
                 updates.append(f"{col} = ?")
                 params.append(val)
+        authorization_fields = (
+            "registration", "model", "manufacturer", "serial_number", "roc_id",
+            "category", "weight_class", "max_takeoff_weight_kg",
+        )
+        identity_changed = any(
+            field_map[field] is not None and field_map[field] != current.get(field)
+            for field in authorization_fields
+        )
+        authorization_revoked = bool(current.get("opspec_authorized") and identity_changed)
+        if authorization_revoked:
+            updates.append("opspec_authorized = 0")
         if updates:
+            updated_at = now_iso()
             updates.append("updated_at = ?")
-            params.append(now_iso())
+            params.append(updated_at)
             updates.append("updated_by = ?")
             params.append(actor)
             params.append(ac_id)
             await db.execute(f"UPDATE aircraft SET {', '.join(updates)} WHERE aircraft_id = ?", params)
-            await db.commit()
+            if authorization_revoked:
+                await log_audit_event(
+                    "aircraft",
+                    ac_id,
+                    "opspec_authorization_revoked",
+                    actor,
+                    {
+                        "reason": "aircraft identity/configuration changed",
+                        "previous_registration": current.get("registration"),
+                        "previous_roc_id": current.get("roc_id"),
+                        "changed_fields": {
+                            field: {"from": current.get(field), "to": field_map[field]}
+                            for field in authorization_fields
+                            if field_map[field] is not None and field_map[field] != current.get(field)
+                        },
+                    },
+                    db=db,
+                )
+        await db.commit()
         cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (ac_id,))
         row = await cursor.fetchone()
         return AircraftResponse(**dict(row))
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
@@ -1203,6 +1447,16 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
                     detail="Mission is locked because its lifecycle has advanced; post-release amendments are not supported: "
                     + ", ".join(changed_fields),
                 )
+        if update.risk_assessment_id is not None:
+            risk_cursor = await db.execute(
+                "SELECT mission_id FROM risk_assessments WHERE assessment_id = ?",
+                (update.risk_assessment_id,),
+            )
+            risk_row = await risk_cursor.fetchone()
+            if not risk_row:
+                raise HTTPException(status_code=422, detail="Risk assessment not found")
+            if risk_row["mission_id"] != mission_id:
+                raise HTTPException(status_code=422, detail="Risk assessment belongs to a different mission")
         # Hard-block on expiry when aircraft or crew is being changed
         if update.aircraft_id is not None or update.rpas_pilot_id is not None or update.visual_observer_id is not None:
             aid = update.aircraft_id if update.aircraft_id is not None else mission.get("aircraft_id")
@@ -1211,6 +1465,7 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
             await _check_mission_eligibility(db, aid, pid, vid)
         updates = []
         params = []
+        changed_fields = [col for col, value in field_map.items() if value is not None and value != mission.get(col)]
         for col, val in field_map.items():
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -1228,6 +1483,11 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
             if cursor.rowcount != 1:
                 await db.rollback()
                 raise HTTPException(status_code=409, detail="Mission state changed during update; reload and retry")
+            if changed_fields:
+                await log_audit_event(
+                    "mission", mission_id, "updated", actor,
+                    {"fields": changed_fields}, db=db,
+                )
             await db.commit()
         cursor = await db.execute("SELECT * FROM missions WHERE mission_id = ?", (mission_id,))
         row = await cursor.fetchone()
@@ -1314,13 +1574,32 @@ async def create_flight_plan(fp: FlightPlanCreate, request: Request):
     now = now_iso()
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
+        mission_cursor = await db.execute(
+            "SELECT status, release_id FROM missions WHERE mission_id = ?", (fp.mission_id,)
+        )
+        mission = await mission_cursor.fetchone()
+        if not mission:
+            raise HTTPException(status_code=404, detail="Mission not found for flight plan")
+        if mission["status"] != "planned" or mission["release_id"]:
+            raise HTTPException(status_code=409, detail="Flight plans can only be created for unreleased planned missions")
         await db.execute(
             """INSERT INTO flight_plans (plan_id, mission_id, route_description, waypoints, max_altitude_agl, estimated_duration_min, fuel_battery_plan, weather_minima, contingency_plan, status, created_at, updated_at, created_by, updated_by)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (plan_id, fp.mission_id, fp.route_description, fp.waypoints, fp.max_altitude_agl, fp.estimated_duration_min, fp.fuel_battery_plan, fp.weather_minima, fp.contingency_plan, "draft", now, now, actor, actor),
         )
-        await db.execute("UPDATE missions SET flight_plan_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?", (plan_id, now, actor, fp.mission_id))
+        updated = await db.execute(
+            "UPDATE missions SET flight_plan_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ? AND status = 'planned' AND release_id IS NULL",
+            (plan_id, now, actor, fp.mission_id),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Mission state changed while creating the flight plan")
+        await log_audit_event("flight_plan", plan_id, "created", actor, {"mission_id": fp.mission_id, "status": "draft"}, db=db)
         await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
     return FlightPlanResponse(plan_id=plan_id, mission_id=fp.mission_id, route_description=fp.route_description, waypoints=fp.waypoints, max_altitude_agl=fp.max_altitude_agl, estimated_duration_min=fp.estimated_duration_min, fuel_battery_plan=fp.fuel_battery_plan, weather_minima=fp.weather_minima, contingency_plan=fp.contingency_plan, status="draft", created_at=now, updated_at=now, created_by=actor, updated_by=actor)
@@ -1348,12 +1627,37 @@ async def approve_flight_plan(plan_id: str, request: Request):
     now = now_iso()
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT plan_id FROM flight_plans WHERE plan_id = ?", (plan_id,))
-        if not await cursor.fetchone():
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT * FROM flight_plans WHERE plan_id = ?", (plan_id,))
+        plan_row = await cursor.fetchone()
+        if not plan_row:
             raise HTTPException(status_code=404, detail="Flight plan not found")
-        await db.execute("UPDATE flight_plans SET status = 'approved', approved_by = ?, approved_at = ?, updated_at = ?, updated_by = ? WHERE plan_id = ?", (actor, now, now, actor, plan_id))
+        plan = dict(plan_row)
+        cursor = await db.execute("SELECT status, release_id, flight_plan_id FROM missions WHERE mission_id = ?", (plan["mission_id"],))
+        mission_row = await cursor.fetchone()
+        if not mission_row:
+            raise HTTPException(status_code=404, detail="Mission not found for flight plan")
+        mission = dict(mission_row)
+        if mission["status"] != "planned" or mission["release_id"]:
+            raise HTTPException(status_code=409, detail="Flight plans can only be approved for unreleased planned missions")
+        if mission["flight_plan_id"] != plan_id:
+            raise HTTPException(status_code=409, detail="Only the current flight plan can be approved")
+        if same_principal(request, plan.get("created_by")):
+            raise HTTPException(status_code=403, detail="Flight plan creator cannot approve their own plan")
+        if plan["status"] != "draft":
+            raise HTTPException(status_code=409, detail="Only a draft flight plan can be approved")
+        updated = await db.execute(
+            "UPDATE flight_plans SET status = 'approved', approved_by = ?, approved_at = ?, updated_at = ?, updated_by = ? WHERE plan_id = ? AND status = 'draft'",
+            (actor, now, now, actor, plan_id),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Flight plan changed during approval; reload and retry")
         await log_audit_event("flight_plan", plan_id, "approved", actor, {"rule_ref": "OM-KFL §2.3.1 / §3.3"}, db=db)
         await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
     return {"status": "approved"}
@@ -1373,9 +1677,29 @@ def _flight_release_response_data(row):
     return data
 
 
+async def _has_independent_approval(db, author_id, reviewer_id):
+    """Require two distinct, non-empty principals after resolving legacy aliases."""
+    first_id, second_id = author_id, reviewer_id
+    if not isinstance(first_id, str) or not first_id.strip():
+        return False
+    if not isinstance(second_id, str) or not second_id.strip():
+        return False
+    canonical_ids = []
+    for actor_id in (first_id, second_id):
+        cursor = await db.execute(
+            "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?",
+            (actor_id,),
+        )
+        alias = await cursor.fetchone()
+        canonical_ids.append(alias["canonical_user_id"] if alias else actor_id)
+    return canonical_ids[0] != canonical_ids[1]
+
+
 @router.post("/flight-releases", response_model=FlightReleaseResponse, status_code=201)
 async def create_flight_release(fr: FlightReleaseCreate, request: Request):
     _check(request, "flight:release")
+    if not FLIGHT_RELEASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Flight release is disabled pending source and postholder validation")
     actor = _actor(request)
     release_id = _gen_id("REL")
     now = now_iso()
@@ -1408,11 +1732,17 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
         plan = dict(plan_row)
         if plan["mission_id"] != fr.mission_id:
             raise HTTPException(status_code=400, detail="Flight plan does not belong to the specified mission")
+        if mission.get("flight_plan_id") != fr.plan_id:
+            raise HTTPException(status_code=400, detail="Flight release blocked: specified flight plan is not the mission's current plan")
         if plan["status"] != "approved":
             raise HTTPException(status_code=400, detail="Flight plan must be approved before flight release (OM-KFL §3.3)")
+        if not await _has_independent_approval(db, plan.get("created_by"), plan.get("approved_by")):
+            raise HTTPException(status_code=400, detail="Flight plan requires an independent approval before release")
 
         # Enforce current ROC and OpSpec privileges at the moment of release.
-        roc_id = mission.get("roc_id") or "ROC-001"
+        roc_id = str(mission.get("roc_id") or "").strip()
+        if not roc_id:
+            raise HTTPException(status_code=400, detail="Flight release requires an explicit mission ROC assignment")
         cursor = await db.execute("SELECT * FROM roc_register WHERE roc_id = ?", (roc_id,))
         roc_row = await cursor.fetchone()
         if not roc_row:
@@ -1426,16 +1756,29 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
             raise HTTPException(status_code=400, detail=f"ROC {roc_id} has invalid validity dates")
         if roc.get("status") != "active" or roc_issue > today or roc_expiry < today:
             raise HTTPException(status_code=400, detail=f"ROC {roc_id} is inactive or outside its validity period")
+        authorized_registrations = {
+            registration.strip().upper()
+            for registration in (roc.get("authorized_registrations") or "").split(",")
+            if registration.strip()
+        }
+        if not authorized_registrations:
+            raise HTTPException(status_code=400, detail=f"ROC {roc_id} has no verified authorized aircraft registrations")
         if mission.get("bvlos_required") and not roc.get("bvlos_authorized"):
             raise HTTPException(status_code=400, detail=f"BVLOS operations are not authorized under {roc_id} OpSpec")
         if mission.get("night_required") and not roc.get("night_authorized"):
             raise HTTPException(status_code=400, detail=f"Night operations are not authorized under {roc_id} OpSpec (OM-KFL §3.5)")
         roc_max_alt = roc.get("max_altitude_agl")
-        mission_alt = mission.get("max_altitude_agl") or plan.get("max_altitude_agl")
-        if roc_max_alt is not None and mission_alt is not None and mission_alt > roc_max_alt:
+        mission_alt = mission.get("max_altitude_agl")
+        plan_alt = plan.get("max_altitude_agl")
+        if mission_alt is None or plan_alt is None:
+            raise HTTPException(status_code=400, detail="Flight release blocked: both mission and approved flight-plan altitudes are required")
+        if mission_alt != plan_alt:
+            raise HTTPException(status_code=400, detail="Flight release blocked: mission altitude and approved flight-plan altitude do not match")
+        release_altitude = plan_alt
+        if roc_max_alt is not None and release_altitude is not None and release_altitude > roc_max_alt:
             raise HTTPException(
                 status_code=400,
-                detail=f"Planned altitude ({mission_alt} ft AGL) exceeds {roc_id} OpSpec maximum of {roc_max_alt} ft AGL",
+                detail=f"Planned altitude ({release_altitude} ft AGL) exceeds {roc_id} OpSpec maximum of {roc_max_alt} ft AGL",
             )
 
         aircraft_id = mission.get("aircraft_id")
@@ -1448,13 +1791,16 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
         ac = dict(ac_row)
         if ac.get("status") != "active":
             raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not active")
+        if ac.get("roc_id") != roc_id:
+            raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not assigned to ROC {roc_id}")
         if not ac.get("opspec_authorized"):
             raise HTTPException(
                 status_code=400,
                 detail=f"Aircraft {ac['registration']} is in the 20-aircraft master fleet but is not listed on the active ROC/OpSpec authorization",
             )
-        if ac.get("roc_id") and ac["roc_id"] != roc_id:
-            raise HTTPException(status_code=400, detail=f"Aircraft {ac['registration']} is not assigned to ROC {roc_id}")
+        registration = str(ac.get("registration") or "").strip().upper()
+        if registration not in authorized_registrations:
+            raise HTTPException(status_code=400, detail=f"Aircraft registration {registration or '(missing)'} is not in ROC {roc_id}'s authorized registration list")
         await _check_mission_eligibility(
             db,
             aircraft_id=aircraft_id,
@@ -1463,39 +1809,44 @@ async def create_flight_release(fr: FlightReleaseCreate, request: Request):
             require_pilot=True,
         )
 
-        if mission.get("risk_assessment_id"):
-            cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (mission["risk_assessment_id"],))
-            ra_row = await cursor.fetchone()
-            if not ra_row:
-                raise HTTPException(status_code=400, detail="Flight release blocked: linked risk assessment is missing")
-            ra = dict(ra_row)
-            risk_model = ra.get("risk_model")
-            try:
-                stored_risk = RiskAssessmentCreate.model_validate({
-                    "title": ra.get("title") or "Stored flight risk",
-                    "likelihood": ra.get("likelihood"),
-                    "severity": ra.get("severity"),
-                    "risk_level": ra.get("risk_level"),
-                    "risk_model": ra.get("risk_model"),
-                    "exposure": ra.get("exposure"),
-                })
-                calculated_level, calculated_score, calculated_scrutiny, calculated_cancelled, _ = _evaluate_risk_assessment(stored_risk)
-            except (ValidationError, HTTPException, KeyError, TypeError, AttributeError):
-                raise HTTPException(status_code=400, detail="Flight release blocked: unsupported risk model or assessment inputs")
-            if (
-                ra.get("risk_score") != calculated_score
-                or ra.get("risk_level") != calculated_level
-                or bool(ra.get("scrutiny_required")) != calculated_scrutiny
-                or bool(ra.get("flight_cancelled")) != calculated_cancelled
-            ):
-                raise HTTPException(status_code=400, detail="Flight release blocked: stored risk assessment values are inconsistent with validated inputs")
-            if risk_model == "om_flight_26":
-                if calculated_cancelled or calculated_score > 25:
-                    raise HTTPException(status_code=400, detail="Flight release blocked: OM §2.6 flight risk score exceeds 25 (cancel flight)")
-                if calculated_scrutiny and ra.get("status") != "approved":
-                    raise HTTPException(status_code=400, detail="Flight release blocked: Manager approval required for OM §2.6 flight risk requiring scrutiny")
-            elif calculated_level in ("medium", "high", "critical") and ra.get("status") != "approved":
-                raise HTTPException(status_code=400, detail="Flight release blocked: Manager approval required for Medium/High SMS risk assessment")
+        risk_assessment_id = mission.get("risk_assessment_id")
+        if not risk_assessment_id:
+            raise HTTPException(status_code=400, detail="Flight release blocked: a linked risk assessment is required")
+        cursor = await db.execute("SELECT * FROM risk_assessments WHERE assessment_id = ?", (risk_assessment_id,))
+        ra_row = await cursor.fetchone()
+        if not ra_row:
+            raise HTTPException(status_code=400, detail="Flight release blocked: linked risk assessment is missing")
+        ra = dict(ra_row)
+        if ra.get("mission_id") != fr.mission_id:
+            raise HTTPException(status_code=400, detail="Flight release blocked: linked risk assessment must belong to this mission")
+        if ra.get("status") != "approved":
+            raise HTTPException(status_code=400, detail="Flight release blocked: linked risk assessment must be approved")
+        if not await _has_independent_approval(db, ra.get("assessor_id"), ra.get("reviewed_by")):
+            raise HTTPException(status_code=400, detail="Flight release blocked: risk assessment requires an independent reviewer")
+        risk_model = ra.get("risk_model")
+        if risk_model != "om_flight_26":
+            raise HTTPException(status_code=400, detail="Flight release blocked: an approved OM §2.6 flight risk model is required")
+        try:
+            stored_risk = RiskAssessmentCreate.model_validate({
+                "title": ra.get("title") or "Stored flight risk",
+                "likelihood": ra.get("likelihood"),
+                "severity": ra.get("severity"),
+                "risk_level": ra.get("risk_level"),
+                "risk_model": ra.get("risk_model"),
+                "exposure": ra.get("exposure"),
+            })
+            calculated_level, calculated_score, calculated_scrutiny, calculated_cancelled, _ = _evaluate_risk_assessment(stored_risk)
+        except (ValidationError, HTTPException, KeyError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="Flight release blocked: unsupported risk model or assessment inputs")
+        if (
+            ra.get("risk_score") != calculated_score
+            or ra.get("risk_level") != calculated_level
+            or bool(ra.get("scrutiny_required")) != calculated_scrutiny
+            or bool(ra.get("flight_cancelled")) != calculated_cancelled
+        ):
+            raise HTTPException(status_code=400, detail="Flight release blocked: stored risk assessment values are inconsistent with validated inputs")
+        if risk_model == "om_flight_26" and (calculated_cancelled or calculated_score > 25):
+            raise HTTPException(status_code=400, detail="Flight release blocked: OM §2.6 flight risk score exceeds 25 (cancel flight)")
 
         release_notes = json.dumps({"operator_notes": fr.notes, "release_evidence": evidence}, ensure_ascii=False)
         await db.execute(
@@ -1550,8 +1901,8 @@ async def create_post_flight_report(pfr: PostFlightReportCreate, request: Reques
         mission = dict(mission_row)
         if mission.get("post_flight_report_id"):
             raise HTTPException(status_code=409, detail="Post-flight report already submitted for this mission")
-        if mission.get("status") not in ("released", "in_progress") or not mission.get("release_id"):
-            raise HTTPException(status_code=400, detail="Post-flight completion requires a released mission")
+        if mission.get("status") != "in_progress" or not mission.get("release_id"):
+            raise HTTPException(status_code=400, detail="Post-flight report requires an in-progress mission with a release record")
         release_cursor = await db.execute(
             "SELECT release_id, status FROM flight_releases WHERE release_id = ? AND mission_id = ?",
             (mission["release_id"], pfr.mission_id),
@@ -1559,12 +1910,23 @@ async def create_post_flight_report(pfr: PostFlightReportCreate, request: Reques
         release = await release_cursor.fetchone()
         if not release or release["status"] != "released":
             raise HTTPException(status_code=400, detail="Post-flight completion requires a valid released flight authorization")
+        report_values = (
+            pfr.actual_duration_min, pfr.actual_max_altitude, pfr.incidents, pfr.anomalies,
+            pfr.battery_cycles, pfr.flight_hours, pfr.data_collected,
+        )
+        if not any(value is not None and (not isinstance(value, str) or value.strip()) for value in report_values):
+            raise HTTPException(status_code=422, detail="At least one substantive post-flight report detail is required")
         await db.execute(
             """INSERT INTO post_flight_reports (report_id, mission_id, actual_duration_min, actual_max_altitude, incidents, anomalies, battery_cycles, flight_hours, data_collected, submitted_by, submitted_at, status, created_at, updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (report_id, pfr.mission_id, pfr.actual_duration_min, pfr.actual_max_altitude, pfr.incidents, pfr.anomalies, pfr.battery_cycles, pfr.flight_hours, pfr.data_collected, actor, now, "submitted", now, now),
         )
-        await db.execute("UPDATE missions SET status = 'completed', post_flight_report_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ?", (report_id, now, actor, pfr.mission_id))
+        updated = await db.execute(
+            "UPDATE missions SET status = 'completed', post_flight_report_id = ?, updated_at = ?, updated_by = ? WHERE mission_id = ? AND status = 'in_progress' AND release_id = ? AND post_flight_report_id IS NULL",
+            (report_id, now, actor, pfr.mission_id, mission["release_id"]),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Mission state changed while submitting the post-flight report")
         await log_audit_event(
             "post_flight_report", report_id, "submitted", actor,
             {"mission_id": pfr.mission_id}, db=db,
@@ -3554,6 +3916,20 @@ async def get_deadlines(request: Request, days_ahead: int = 30):
         }
     finally:
         await db.close()
+
+
+# ==================== ORGANIZATION OVERVIEW ====================
+
+@router.get("/organization/overview")
+async def organization_overview(request: Request):
+    """Aggregate organization-wide summaries for the accountable manager."""
+    _check(request, "organization:overview")
+    return {
+        "trends": await get_safety_trends(request),
+        "deadlines": await get_deadlines(request, days_ahead=30),
+        "operations": await summarize_missions(request),
+        "fleet": await summarize_aircraft(request),
+    }
 
 
 # ==================== NOTIFICATION ENDPOINTS ====================

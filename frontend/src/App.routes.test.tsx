@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import api from "./api/client";
+import { safetyApi } from "./api/safety";
 import App from "./App";
 
 const { mockAuth } = vi.hoisted(() => ({ mockAuth: { current: null as any } }));
@@ -31,6 +32,10 @@ vi.mock("./pages/DocumentProposals", () => ({
 
 vi.mock("./pages/DocumentViewer", () => ({
   DocumentViewer: () => <h1>Document Viewer</h1>,
+}));
+
+vi.mock("./pages/Notifications", () => ({
+  Notifications: () => <h1>Notifications Page</h1>,
 }));
 
 function renderEditRoute(permissions: string[], path = "/documents/DOC-1/edit") {
@@ -126,5 +131,15 @@ describe("document editor route access", () => {
     renderEditRoute(["document:read", "document:propose"]);
 
     expect(await screen.findByRole("heading", { name: "Document Editor" })).toBeInTheDocument();
+  });
+
+  it("requires compliance read permission to open notifications", async () => {
+    vi.spyOn(safetyApi, "getUnreadCount").mockResolvedValue({ unread_count: 0 });
+    const denied = renderEditRoute(["safety:read"], "/notifications");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Access to this area is not included");
+    denied.unmount();
+
+    renderEditRoute(["compliance:read"], "/notifications");
+    expect(await screen.findByRole("heading", { name: "Notifications Page" })).toBeInTheDocument();
   });
 });

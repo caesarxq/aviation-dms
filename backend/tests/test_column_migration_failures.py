@@ -119,7 +119,7 @@ def test_audit_report_unique_index_fails_with_null_data_message(tmp_path):
 
 def test_init_db_migrates_legacy_audit_report_key_before_audit_findings_fk_check(tmp_path, monkeypatch):
     path = tmp_path / "legacy-audit-report-key.db"
-    legacy_schema = database.SCHEMA.replace(
+    legacy_schema = database.SCHEMA.replace("    evidence_sha256 TEXT,\n", "", 1).replace(
         "CREATE TABLE IF NOT EXISTS audit_reports (\n    audit_id TEXT PRIMARY KEY,",
         "CREATE TABLE IF NOT EXISTS audit_reports (\n    audit_id TEXT,",
         1,
@@ -146,10 +146,12 @@ def test_init_db_migrates_legacy_audit_report_key_before_audit_findings_fk_check
             row[1]: row[2]
             for row in conn.execute("PRAGMA index_list(audit_reports)")
         }
+        audit_report_columns = {row[1] for row in conn.execute("PRAGMA table_info(audit_reports)")}
         finding = conn.execute(
             "SELECT finding_id, audit_id FROM audit_findings WHERE finding_id = 'F-LEGACY'"
         ).fetchone()
         violations = conn.execute("PRAGMA foreign_key_check(audit_findings)").fetchall()
     assert indexes.get("idx_audit_reports_audit_id") == 1
+    assert "evidence_sha256" in audit_report_columns
     assert finding == ("F-LEGACY", "AUD-LEGACY")
     assert violations == []

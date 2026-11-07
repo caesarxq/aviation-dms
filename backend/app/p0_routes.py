@@ -110,8 +110,22 @@ def _safe_user(row, roles: list[str] | None = None, active_role: str | None = No
         "email": row["email"],
         "full_name": row["full_name"],
         "role": active_role or row["role"],
+        "active_role": active_role or row["role"],
         "roles": roles or [],
         "department": row["department"],
+    }
+
+
+def _auth_profile_payload(row, roles: list[str], active_role: str, authenticated_via: str) -> dict:
+    """Serialize the same complete, session-scoped profile for every auth entry point."""
+    return {
+        "user": _safe_user(row, roles, active_role),
+        "role": active_role,
+        "active_role": active_role,
+        "roles": roles,
+        "authenticated_via": authenticated_via,
+        "permissions": sorted(ROLE_PERMISSIONS[active_role]),
+        "onboarding_completed": bool(row["onboarding_completed"]),
     }
 
 
@@ -206,21 +220,16 @@ async def current_auth_profile(request: Request):
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT user_id, username, email, full_name, role, department, is_active FROM users WHERE user_id = ?",
+            "SELECT user_id, username, email, full_name, role, department, is_active, onboarding_completed "
+            "FROM users WHERE user_id = ?",
             (actor,),
         )
         row = await cursor.fetchone()
         if not row or not row["is_active"]:
             raise HTTPException(status_code=401, detail="Authenticated user profile not found or disabled")
-        profile = dict(row)
-        return {
-            "user": _safe_user(profile, roles, role),
-            "role": role,
-            "active_role": role,
-            "roles": roles,
-            "authenticated_via": getattr(request.state, "authenticated_via", "unknown"),
-            "permissions": sorted(ROLE_PERMISSIONS[role]),
-        }
+        return _auth_profile_payload(
+            dict(row), roles, role, getattr(request.state, "authenticated_via", "unknown")
+        )
     finally:
         await db.close()
 
@@ -232,6 +241,8 @@ async def switch_active_role(body: AuthActiveRoleRequest, request: Request):
         raise HTTPException(status_code=401, detail="An authenticated browser session is required")
     actor = _actor(request)
     session_id = getattr(request.state, "session_id", None)
+    if not isinstance(session_id, str) or not session_id:
+        raise HTTPException(status_code=401, detail="An active browser session is required")
     current_role = _role(request)
     assigned_roles = getattr(request.state, "roles", [])
     if body.active_role not in ROLE_PERMISSIONS:
@@ -241,22 +252,28 @@ async def switch_active_role(body: AuthActiveRoleRequest, request: Request):
 
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
             "UPDATE auth_sessions SET active_role = ? WHERE session_id = ? AND user_id = ? AND revoked_at IS NULL",
             (body.active_role, session_id, actor),
         )
         if cursor.rowcount != 1:
             raise HTTPException(status_code=401, detail="Session is no longer active")
+        await log_audit_event(
+            "auth_session", session_id, "active_role_switched", actor,
+            {"from_role": current_role, "to_role": body.active_role},
+            db=db,
+        )
         await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
     finally:
         await db.close()
 
     request.state.role = body.active_role
     request.state.active_role = body.active_role
-    await log_audit_event(
-        "auth_session", session_id, "active_role_switched", actor,
-        {"from_role": current_role, "to_role": body.active_role},
-    )
     return await current_auth_profile(request)
 
 
@@ -281,7 +298,7 @@ async def list_auth_users(request: Request):
         await db.close()
 
 
-@router.put("/auth/users/{user_id}/roles")
+@router.put("/auth/users/{user_id:path}/roles")
 async def update_user_roles(user_id: str, body: AuthUserRolesUpdate, request: Request):
     """Replace a canonical account's role assignments; invalidate sessions after changes."""
     _check(request, "settings:manage")
@@ -367,7 +384,8 @@ async def auth_login(body: AuthLoginRequest, request: Request):
                 attempt = None
 
         cursor = await db.execute(
-            """SELECT user_id, username, email, full_name, role, department, is_active, password_hash
+            """SELECT user_id, username, email, full_name, role, department, is_active, password_hash,
+                      onboarding_completed
                FROM users WHERE lower(username) = ?""",
             (username,),
         )
@@ -405,13 +423,8 @@ async def auth_login(body: AuthLoginRequest, request: Request):
     finally:
         await db.close()
     await log_audit_event("auth_session", user["user_id"], "login", user["user_id"], {"auth_method": "password", "active_role": active_role})
-    payload = {
-        "user": _safe_user(user, roles, active_role),
-        "role": active_role,
-        "active_role": active_role,
-        "roles": roles,
-        "message": "Login successful",
-    }
+    payload = _auth_profile_payload(user, roles, active_role, "session_cookie")
+    payload["message"] = "Login successful"
     return _session_response(payload, token, csrf_token)
 
 
@@ -452,7 +465,8 @@ async def auth_bootstrap(body: AuthBootstrapRequest, request: Request):
             await db.rollback()
             raise HTTPException(status_code=409, detail="Initial administrator setup has already been completed")
         cursor = await db.execute(
-            "SELECT user_id, username, email, full_name, role, department, is_active, password_hash FROM users WHERE user_id = 'u-admin'"
+            """SELECT user_id, username, email, full_name, role, department, is_active, password_hash,
+                      onboarding_completed FROM users WHERE user_id = 'u-admin'"""
         )
         user_row = await cursor.fetchone()
         if not user_row or not user_row["is_active"] or user_row["password_hash"]:
@@ -476,20 +490,12 @@ async def auth_bootstrap(body: AuthBootstrapRequest, request: Request):
     finally:
         await db.close()
     await log_audit_event("auth_session", user["user_id"], "initial_admin_password_set", user["user_id"], {"active_role": active_role})
-    return _session_response(
-        {
-            "user": _safe_user(user, roles, active_role),
-            "role": active_role,
-            "active_role": active_role,
-            "roles": roles,
-            "message": "Initial administrator password set",
-        },
-        token,
-        csrf_token,
-    )
+    payload = _auth_profile_payload(user, roles, active_role, "session_cookie")
+    payload["message"] = "Initial administrator password set"
+    return _session_response(payload, token, csrf_token)
 
 
-@router.post("/auth/users/{user_id}/setup-token")
+@router.post("/auth/users/{user_id:path}/setup-token")
 async def issue_password_setup_token(user_id: str, request: Request):
     _check(request, "settings:manage")
     actor = _actor(request)
@@ -498,21 +504,34 @@ async def issue_password_setup_token(user_id: str, request: Request):
     expires = now + timedelta(hours=24)
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT user_id, password_hash, is_active FROM users WHERE user_id = ?", (user_id,))
+        cursor = await db.execute(
+            "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?",
+            (user_id,),
+        )
+        alias = await cursor.fetchone()
+        canonical_id = alias["canonical_user_id"] if alias else user_id
+        cursor = await db.execute(
+            "SELECT user_id, password_hash, is_active FROM users "
+            "WHERE user_id = ? AND merged_into_user_id IS NULL",
+            (canonical_id,),
+        )
         user = await cursor.fetchone()
         if not user or not user["is_active"]:
             raise HTTPException(status_code=404, detail="Active user not found")
         if user["password_hash"]:
             raise HTTPException(status_code=409, detail="User already has a password; use the password-change workflow")
-        await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL", (now.isoformat(), user_id))
+        await db.execute(
+            "UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
+            (now.isoformat(), canonical_id),
+        )
         await db.execute(
             "INSERT INTO auth_setup_tokens (setup_id, user_id, token_hash, issued_by, created_at, expires_at) VALUES (?,?,?,?,?,?)",
-            (str(uuid.uuid4()), user_id, _token_hash(raw_token), actor, now.isoformat(), expires.isoformat()),
+            (str(uuid.uuid4()), canonical_id, _token_hash(raw_token), actor, now.isoformat(), expires.isoformat()),
         )
         await db.commit()
     finally:
         await db.close()
-    await log_audit_event("user_auth", user_id, "password_setup_token_issued", actor, {"expires_at": expires.isoformat()})
+    await log_audit_event("user_auth", canonical_id, "password_setup_token_issued", actor, {"expires_at": expires.isoformat()})
     return {"setup_token": raw_token, "expires_at": expires.isoformat(), "use_once": True}
 
 

@@ -142,7 +142,7 @@ export function SafetyActions() {
               </select>
             </div>
             <FormField htmlFor="sa_owner" label="Owner ID" hint="Person responsible for completing this action." required>
-              <input id="sa_owner" name="owner_id" aria-describedby="sa_owner-error" aria-invalid={!!saErrors.owner_id} className={`app-input ${saErrors.owner_id ? "border-rose-400" : ""}`} placeholder="e.g. u-safety" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
+              <input id="sa_owner" name="owner_id" aria-describedby="sa_owner-error" aria-invalid={!!saErrors.owner_id} className={`app-input ${saErrors.owner_id ? "border-rose-400" : ""}`} placeholder="e.g. u-safety/security" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
               {saErrors.owner_id && <p id="sa_owner-error" className="text-[11px] text-rose-700 mt-1">{saErrors.owner_id}</p>}
             </FormField>
           </div>

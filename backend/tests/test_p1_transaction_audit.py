@@ -88,9 +88,9 @@ async def _seed_releasable_mission():
         await db.execute(
             """INSERT INTO roc_register
                (roc_id, roc_number, issue_date, expiry_date, status, bvlos_authorized,
-                night_authorized, evlos_authorized, created_at, updated_at, created_by, updated_by)
+                night_authorized, evlos_authorized, authorized_registrations, created_at, updated_at, created_by, updated_by)
                VALUES ('ROC-TX', 'ROC-TX', '2020-01-01', '2035-12-31', 'active', 1,
-                       1, 1, 'now', 'now', 'seed', 'seed')"""
+                       1, 1, '5Y-TX', 'now', 'now', 'seed', 'seed')"""
         )
         await db.execute(
             """INSERT INTO aircraft
@@ -101,16 +101,27 @@ async def _seed_releasable_mission():
         )
         await db.execute(
             """INSERT INTO missions
-               (mission_id, title, mission_type, status, priority, aircraft_id, roc_id,
+               (mission_id, title, mission_type, status, priority, aircraft_id, roc_id, max_altitude_agl,
                 created_at, updated_at, created_by, updated_by)
                VALUES ('MISSION-TX', 'Transaction test', 'survey', 'planned', 'normal',
-                       'AC-TX', 'ROC-TX', 'now', 'now', 'seed', 'seed')"""
+                       'AC-TX', 'ROC-TX', 300, 'now', 'now', 'seed', 'seed')"""
         )
         await db.execute(
-            """INSERT INTO flight_plans
-               (plan_id, mission_id, status, created_at, updated_at, created_by, updated_by)
-               VALUES ('PLAN-TX', 'MISSION-TX', 'approved', 'now', 'now', 'seed', 'seed')"""
+            """INSERT INTO risk_assessments
+               (assessment_id, mission_id, title, likelihood, severity, risk_level, risk_model, exposure,
+                risk_score, scrutiny_required, flight_cancelled, assessor_id, assessed_at,
+                reviewed_by, reviewed_at, status, created_at, updated_at)
+               VALUES ('RA-TX', 'MISSION-TX', 'Transaction risk', 'rare', 'negligible', 'low', 'om_flight_26', 'rare',
+                       2, 0, 0, 'seed-assessor', 'now', 'seed-reviewer', 'now', 'approved', 'now', 'now')"""
         )
+        await db.execute("UPDATE missions SET risk_assessment_id = 'RA-TX' WHERE mission_id = 'MISSION-TX'")
+        await db.execute(
+            """INSERT INTO flight_plans
+               (plan_id, mission_id, max_altitude_agl, status, approved_by, approved_at,
+                created_at, updated_at, created_by, updated_by)
+               VALUES ('PLAN-TX', 'MISSION-TX', 300, 'approved', 'seed-reviewer', 'now', 'now', 'now', 'seed', 'seed')"""
+        )
+        await db.execute("UPDATE missions SET flight_plan_id = 'PLAN-TX' WHERE mission_id = 'MISSION-TX'")
         await db.commit()
     finally:
         await db.close()
@@ -220,6 +231,14 @@ def test_flight_release_audit_failure_rolls_back_release_and_mission(isolated_p1
 def test_post_flight_audit_failure_rolls_back_report_and_mission(isolated_p1_db, monkeypatch):
     _, connections = isolated_p1_db
     _run(_seed_released_mission())
+    async def mark_mission_in_progress():
+        db = await database.get_db()
+        try:
+            await db.execute("UPDATE missions SET status = 'in_progress' WHERE mission_id = 'MISSION-TX'")
+            await db.commit()
+        finally:
+            await db.close()
+    _run(mark_mission_in_progress())
     _run(_install_semantic_audit_failure("post_flight_report"))
     before_events = _run(_audit_event_count())
     _run(_install_same_connection_audit_spy(monkeypatch, connections))
@@ -229,7 +248,7 @@ def test_post_flight_audit_failure_rolls_back_report_and_mission(isolated_p1_db,
         _run(p1_routes.create_post_flight_report(payload, _request()))
 
     assert _run(_mission_snapshot()) == {
-        "status": "released", "release_id": "RELEASE-TX", "post_flight_report_id": None,
+        "status": "in_progress", "release_id": "RELEASE-TX", "post_flight_report_id": None,
     }
     assert _run(_audit_event_count()) == before_events
     db = _run(database.get_db())

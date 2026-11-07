@@ -20,8 +20,8 @@ async function login(page: any) {
   await page.click('button[type="submit"]:has-text("Sign in")');
   // Wait for redirect away from login page
   await page.waitForURL(url => url.pathname !== "/login");
-  // Wait for dashboard to load
-  await page.waitForURL("**/");
+  // Wait for the role-specific authenticated shell.
+  await page.locator(".app-shell").waitFor();
 }
 
 async function loginAsAdmin(page: any) {
@@ -34,7 +34,7 @@ async function loginAsAdmin(page: any) {
   await page.fill('input[id="login-password"]', password);
   await page.click('button[type="submit"]:has-text("Sign in")');
   await page.waitForURL(url => url.pathname !== "/login");
-  await page.waitForURL("**/");
+  await page.locator(".app-shell").waitFor();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -74,6 +74,7 @@ test.describe("Document Catalogue", () => {
 test.describe("Navigation", () => {
   test("sidebar navigation works", async ({ page }) => {
     await page.goto("/");
+    await page.getByRole("button", { name: "All modules" }).click();
     // Flight section is collapsed by default; expand it first
     await page.getByRole("button", { name: "Flight" }).click();
     await page.getByRole("link", { name: "Missions" }).click();
@@ -82,16 +83,18 @@ test.describe("Navigation", () => {
   });
 
   test("notifications page accessible", async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto("/notifications");
     await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
   });
 
   test("sidebar exposes the revised control structure", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Safety dashboard" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Operations" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Fleet & Registry" })).toHaveCount(0);
 
+    await page.getByRole("button", { name: "All modules" }).click();
     await page.getByRole("button", { name: "Document Control" }).click();
     await expect(page.getByRole("link", { name: "Documents" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Document Viewer" })).toHaveCount(0);
@@ -106,12 +109,22 @@ test.describe("Navigation", () => {
     await expect(page.getByRole("cell", { name: "system_admin" }).first()).toBeVisible();
   });
 
+  test("organization overview shows organization summaries and the NOTAM source gap", async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto("/organization-overview");
+    await expect(page.getByRole("heading", { name: "Organization overview" })).toBeVisible();
+    await expect(page.getByText("Active operations")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fleet summary" })).toBeVisible();
+    await expect(page.getByText(/No approved NOTAM data source is connected/i)).toBeVisible();
+    await expect(page.getByText(/not an indication that there are no NOTAMs/i)).toBeVisible();
+  });
+
   test("canonical role editor preserves IDs and submits only assigned roles", async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto("/admin/observability");
     await expect(page.getByRole("heading", { name: "System Observability" })).toBeVisible();
 
-    const roleSelect = page.locator("#roles-u-lib");
+    const roleSelect = page.locator("#roles-u-quality");
     await expect(roleSelect).toBeVisible();
     const selectedRoles = await roleSelect.evaluate((select: HTMLSelectElement) =>
       Array.from(select.selectedOptions, (option) => option.value).sort(),
@@ -126,12 +139,12 @@ test.describe("Navigation", () => {
     expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
 
     const updateResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/p0/auth/users/u-lib/roles") && response.request().method() === "PUT",
+      response.url().includes("/api/p0/auth/users/u-quality/roles") && response.request().method() === "PUT",
     );
     await page.getByRole("button", { name: "Save roles for Eric Otieno" }).click();
     const response = await updateResponse;
     expect(response.status()).toBe(200);
-    expect(await response.json()).toMatchObject({ user_id: "u-lib", active_sessions_revoked: false });
+    expect(await response.json()).toMatchObject({ user_id: "u-quality", active_sessions_revoked: false });
   });
 
   test("document editor exposes a draggable toolbar", async ({ page }) => {
@@ -473,9 +486,9 @@ test.describe("Change Requests", () => {
 });
 
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests", "/organization-overview"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
-      if (route === "/documents/DOC-001/edit") await loginAsAdmin(page);
+      if (route === "/documents/DOC-001/edit" || route === "/organization-overview") await loginAsAdmin(page);
       await page.goto(route);
       await page.waitForLoadState("networkidle");
       const results = await new AxeBuilder({ page })
@@ -497,15 +510,18 @@ test.describe("Profile & Role Switching", () => {
     await expect(page.locator("text=Active Role").first()).toBeVisible();
   });
 
-  test("sidebar shows separate Safety and Flight sections", async ({ page }) => {
+  test("sidebar prioritizes role workspace links and keeps remaining safety and flight screens available", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("button", { name: "Safety" }).first()).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "My workspace" }).getByRole("link", { name: "Safety Actions" })).toBeVisible();
+    await page.getByRole("button", { name: "All modules" }).click();
+    await expect(page.getByRole("link", { name: "Safety KPIs" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Flight" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Safety & Flight" })).toHaveCount(0);
   });
 
   test("sidebar shows Personnel and Aircraft as separate sections", async ({ page }) => {
     await page.goto("/");
+    await page.getByRole("button", { name: "All modules" }).click();
     await expect(page.getByRole("button", { name: "Personnel" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Aircraft" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Personnel & Aircraft" })).toHaveCount(0);

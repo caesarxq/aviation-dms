@@ -9,8 +9,9 @@ Seeds the following tables with aviation-realistic data:
   - safety_kpis (Monthly/quarterly safety metrics)
   - missions (Flight missions)
 
-All foreign keys reference existing seed data:
-  - users: u-safety, u-reporter, u-ops, u-chief-pilot, u-flight-ops, u-maintenance, u-quality, u-accountable
+All person references use seeded user identities; legacy actor IDs remain in
+historical safety records and resolve through the canonical alias table:
+  - canonical users: u-safety/security, u-reporter, u-ops, u-flight-ops, u-admin, u-quality, u-accountable
   - aircraft: 20 master-fleet registrations; OpSpec authorization remains a separate 7-aircraft subset
   - roc_register: ROC-001
 

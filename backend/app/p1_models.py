@@ -1,5 +1,6 @@
 """P1 Pydantic models."""
-from pydantic import BaseModel, ConfigDict
+from datetime import date
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, Literal
 from enum import Enum
 
@@ -173,6 +174,7 @@ class RiskAssessmentResponse(BaseModel):
     mitigation_measures: Optional[str] = None
     residual_risk: Optional[str] = None
     assessor_id: str
+    can_approve_for_current_user: bool = False
     assessed_at: str
     reviewed_by: Optional[str] = None
     reviewed_at: Optional[str] = None
@@ -264,6 +266,18 @@ class SafetyTrendsResponse(BaseModel):
     occurrences_last_30_days: int = 0
 
 
+def _validate_canonical_date(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("date must use YYYY-MM-DD format") from exc
+    if parsed.isoformat() != value:
+        raise ValueError("date must use YYYY-MM-DD format")
+    return value
+
+
 class ROCRegisterCreate(BaseModel):
     roc_number: str
     serial_number: Optional[str] = None
@@ -273,7 +287,7 @@ class ROCRegisterCreate(BaseModel):
     categories: Optional[str] = None
     bvlos_authorized: bool = False
     night_authorized: bool = False
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     evlos_authorized: bool = False
     dg_category: Optional[str] = None
     authorized_registrations: Optional[str] = None
@@ -290,7 +304,7 @@ class ROCRegisterUpdate(BaseModel):
     categories: Optional[str] = None
     bvlos_authorized: Optional[bool] = None
     night_authorized: Optional[bool] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     evlos_authorized: Optional[bool] = None
     dg_category: Optional[str] = None
     notes: Optional[str] = None
@@ -307,7 +321,7 @@ class ROCRegisterResponse(BaseModel):
     categories: Optional[str] = None
     bvlos_authorized: bool = False
     night_authorized: bool = False
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     evlos_authorized: bool = False
     dg_category: Optional[str] = None
     authorized_registrations: Optional[str] = None
@@ -365,6 +379,18 @@ class AircraftResponse(BaseModel):
     updated_by: str
 
 # --- Mission Workflow (P1 Phase 3) ---
+def _validate_iso_planned_date(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("planned_date must use YYYY-MM-DD format") from exc
+    if parsed.isoformat() != value:
+        raise ValueError("planned_date must use YYYY-MM-DD format")
+    return value
+
+
 class MissionCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -377,15 +403,21 @@ class MissionCreate(BaseModel):
     rpas_pilot_id: Optional[str] = None
     visual_observer_id: Optional[str] = None
     dg_category: Optional[str] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     bvlos_required: bool = False
     night_required: bool = False
 
+    @field_validator("planned_date")
+    @classmethod
+    def validate_planned_date(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_iso_planned_date(value)
+
 class MissionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: Optional[str] = None
     description: Optional[str] = None
     mission_type: Optional[str] = None
-    status: Optional[str] = None
     priority: Optional[str] = None
     planned_date: Optional[str] = None
     location: Optional[str] = None
@@ -394,10 +426,15 @@ class MissionUpdate(BaseModel):
     rpas_pilot_id: Optional[str] = None
     visual_observer_id: Optional[str] = None
     dg_category: Optional[str] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     bvlos_required: Optional[bool] = None
     night_required: Optional[bool] = None
     risk_assessment_id: Optional[str] = None
+
+    @field_validator("planned_date")
+    @classmethod
+    def validate_planned_date(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_iso_planned_date(value)
 
 class MissionResponse(BaseModel):
     mission_id: str
@@ -413,7 +450,7 @@ class MissionResponse(BaseModel):
     rpas_pilot_id: Optional[str] = None
     visual_observer_id: Optional[str] = None
     dg_category: Optional[str] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     bvlos_required: bool = False
     night_required: bool = False
     risk_assessment_id: Optional[str] = None
@@ -429,7 +466,7 @@ class FlightPlanCreate(BaseModel):
     mission_id: str
     route_description: Optional[str] = None
     waypoints: Optional[str] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     estimated_duration_min: Optional[int] = None
     fuel_battery_plan: Optional[str] = None
     weather_minima: Optional[str] = None
@@ -440,7 +477,7 @@ class FlightPlanResponse(BaseModel):
     mission_id: str
     route_description: Optional[str] = None
     waypoints: Optional[str] = None
-    max_altitude_agl: Optional[int] = None
+    max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     estimated_duration_min: Optional[int] = None
     fuel_battery_plan: Optional[str] = None
     weather_minima: Optional[str] = None
@@ -484,12 +521,12 @@ class FlightReleaseResponse(BaseModel):
 
 class PostFlightReportCreate(BaseModel):
     mission_id: str
-    actual_duration_min: Optional[int] = None
-    actual_max_altitude: Optional[int] = None
+    actual_duration_min: Optional[int] = Field(default=None, ge=0)
+    actual_max_altitude: Optional[int] = Field(default=None, ge=0)
     incidents: Optional[str] = None
     anomalies: Optional[str] = None
-    battery_cycles: Optional[int] = None
-    flight_hours: Optional[float] = None
+    battery_cycles: Optional[int] = Field(default=None, ge=0)
+    flight_hours: Optional[float] = Field(default=None, ge=0)
     data_collected: Optional[str] = None
 
 class PostFlightReportResponse(BaseModel):

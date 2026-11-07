@@ -26,7 +26,10 @@ All API routes are prefixed with `/api/p0`, `/api/p1`, or `/api/p2`. Authenticat
 |---|---|---|---|
 | `/api/p0/auth/users` | GET | List canonical active accounts with roles and password status | `settings:manage` |
 | `/api/p0/auth/users/{user_id}/roles` | PUT | Replace a user's role assignments; revokes active sessions | `settings:manage` |
+| `/api/p0/auth/users/{user_id}/setup-token` | POST | Issue a one-time password setup token for an active canonical account | `settings:manage` |
 | `/api/p0/auth/invites` | POST | Issue a one-time invite code (max 5 per actor per 15 min) | `settings:manage` |
+
+For the literal canonical ID `u-safety/security`, URL-encode the slash as `%2F` in `{user_id}` path segments (for example, `/api/p0/auth/users/u-safety%2Fsecurity/roles`). API profile payloads retain the exact canonical ID. Owner-confirmed legacy IDs continue to resolve through the account-alias table for role administration, setup-token issuance, and personnel upload/license ownership and filtering.
 
 ## P1 — Safety Management
 
@@ -59,6 +62,11 @@ All API routes are prefixed with `/api/p0`, `/api/p1`, or `/api/p2`. Authenticat
 | `/api/p2/crew-members` | GET/POST | List/create crew members | `personnel:read`/`personnel:manage` |
 | `/api/p2/duty-records` | GET/POST | List/create duty time records | `personnel:read`/`personnel:manage` |
 | `/api/p2/crew-qualifications` | GET/POST | List/create crew qualifications | `personnel:read`/`personnel:manage` |
+| `/api/p2/personnel/uploads/file` | POST | Upload a private credential file via multipart form data | `personnel:view`; `personnel:manage` is also required when uploading for another person |
+| `/api/p2/personnel/uploads/{person_id}` | GET | List a person's uploads; slash-containing canonical IDs must encode `/` as `%2F` | `personnel:view` (self) or `personnel:read`/`personnel:manage` |
+| `/api/p2/personnel/uploads` | GET | List the staff verification queue (filter by status, limit, offset) | `personnel:read`/`personnel:manage` |
+| `/api/p2/personnel/uploads/{upload_id}/file` | GET | Download a private uploaded credential file | `personnel:view` (self) or `personnel:read`/`personnel:manage` |
+| `/api/p2/personnel/uploads/{upload_id}/verify` | PATCH | Independently verify or reject a pending upload | `personnel:manage` |
 | `/api/p2/maintenance-records` | GET/POST | List/create maintenance records | `aircraft:read`/`aircraft:manage` |
 | `/api/p2/aircraft-insurance` | GET/POST | List/create aircraft insurance records | `aircraft:read`/`aircraft:manage` |
 

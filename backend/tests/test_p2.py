@@ -51,7 +51,7 @@ class TestDocumentProposals:
                 "WHERE entity_type = 'document_proposal' AND entity_id = ?",
                 (data["proposal_id"],),
             ).fetchone()
-            assert event == ("u-lib", "created")
+            assert event == ("u-quality", "created")
         finally:
             conn.close()
 
@@ -476,7 +476,7 @@ class TestDocumentProposals:
         assert applied == ("draft", "before applied text after")
 
     # SEC-C1: SoD — proposer cannot apply their own proposal.
-    # librarian (u-lib) and quality (u-lib canonical) share the same actor;
+    # librarian and head_quality share the canonical actor u-quality;
     # quality has document:publish so it passes the first gate, but SoD
     # must block the shared canonical actor from applying its own proposal.
     def test_apply_proposal_sod_proposer_cannot_apply_own(self, client, librarian_headers, quality_headers, admin_headers):
@@ -486,17 +486,17 @@ class TestDocumentProposals:
         }, headers=librarian_headers)
         pid = resp.json()["proposal_id"]
         proposer_id = resp.json().get("proposer_id")
-        assert proposer_id == "u-lib"
+        assert proposer_id == "u-quality"
         client.patch(f"/api/p2/proposals/{pid}", json={"status": "submitted"}, headers=librarian_headers)
         client.patch(f"/api/p2/proposals/{pid}", json={"status": "approved"}, headers=admin_headers)
         # Simulate a proposal persisted with the historical pre-merge actor ID.
         conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
         try:
-            conn.execute("UPDATE document_proposals SET proposer_id = 'u-quality' WHERE proposal_id = ?", (pid,))
+            conn.execute("UPDATE document_proposals SET proposer_id = 'u-lib' WHERE proposal_id = ?", (pid,))
             conn.commit()
         finally:
             conn.close()
-        # head_quality authenticates as canonical u-lib; SoD must see its u-quality alias.
+        # head_quality is canonical u-quality; SoD must recognize legacy requester u-lib.
         resp = client.post(f"/api/p2/proposals/{pid}/apply", headers=quality_headers)
         assert resp.status_code == 403
 
@@ -560,7 +560,7 @@ class TestPersonnelLicenses:
         }, headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["person_id"] == "u-safety"
+        assert data["person_id"] == "u-safety/security"
         assert data["status"] == "valid"
 
     def test_list_licenses(self, client, admin_headers):

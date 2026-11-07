@@ -164,14 +164,14 @@ def test_login_rate_limit_applies_to_invalid_credentials(client):
 def test_admin_issues_single_use_password_setup_token_for_uninitialized_user(client, admin_headers):
     conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
     try:
-        conn.execute("UPDATE users SET password_hash = NULL WHERE user_id = 'u-lib'")
-        conn.execute("DELETE FROM auth_setup_tokens WHERE user_id = 'u-lib'")
+        conn.execute("UPDATE users SET password_hash = NULL WHERE user_id = 'u-quality'")
+        conn.execute("DELETE FROM auth_setup_tokens WHERE user_id = 'u-quality'")
         conn.commit()
     finally:
         conn.close()
 
     try:
-        issued = client.post("/api/p0/auth/users/u-lib/setup-token", headers=admin_headers)
+        issued = client.post("/api/p0/auth/users/u-quality/setup-token", headers=admin_headers)
         assert issued.status_code == 200
         token = issued.json()["setup_token"]
         assert issued.json()["use_once"] is True
@@ -191,8 +191,8 @@ def test_admin_issues_single_use_password_setup_token_for_uninitialized_user(cli
         assert repeated.status_code == 400
     finally:
         conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
-        conn.execute("UPDATE users SET password_hash = NULL WHERE user_id = 'u-lib'")
-        conn.execute("DELETE FROM auth_setup_tokens WHERE user_id = 'u-lib'")
+        conn.execute("UPDATE users SET password_hash = NULL WHERE user_id = 'u-quality'")
+        conn.execute("DELETE FROM auth_setup_tokens WHERE user_id = 'u-quality'")
         conn.commit()
         conn.close()
 

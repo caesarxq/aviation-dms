@@ -49,12 +49,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const response = await api.get("/p0/auth/profile");
     if (response.status !== 200) throw new Error("Authentication failed");
     const nextProfile = response.data as AuthProfile;
-    try {
-      const onboardingResponse = await api.get("/p0/auth/me/onboarding");
-      if (onboardingResponse.status !== 200) throw new Error("Authentication failed");
-      nextProfile.onboarding_completed = onboardingResponse.data.onboarding_completed;
-    } catch {
-      nextProfile.onboarding_completed = true;
+    if (typeof nextProfile.onboarding_completed !== "boolean") {
+      throw new Error("Authentication profile is incomplete");
     }
     setProfile(nextProfile);
     setState("authenticated");
@@ -74,13 +70,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const response = await api.get("/p0/auth/profile");
         if (response.status !== 200) throw new Error("Authentication failed");
-        let nextProfile = response.data as AuthProfile;
-        try {
-          const onboardingResponse = await api.get("/p0/auth/me/onboarding");
-          if (onboardingResponse.status !== 200) throw new Error("Authentication failed");
-          nextProfile.onboarding_completed = onboardingResponse.data.onboarding_completed;
-        } catch {
-          nextProfile.onboarding_completed = true;
+        const nextProfile = response.data as AuthProfile;
+        if (typeof nextProfile.onboarding_completed !== "boolean") {
+          throw new Error("Authentication profile is incomplete");
         }
         if (active) {
           setProfile(nextProfile);
@@ -112,21 +104,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clearAuthentication, queryClient, refreshProfile]);
 
   const switchRole = useCallback(async (activeRole: string) => {
+    let switchError: unknown = null;
     try {
-      const response = await api.post("/p0/auth/active-role", { active_role: activeRole });
-      const nextProfile = response.data as AuthProfile;
-      queryClient.clear();
-      setProfile(nextProfile);
-      setState("authenticated");
-      return nextProfile;
+      await api.post("/p0/auth/active-role", { active_role: activeRole });
     } catch (error) {
-      try {
-        await refreshProfile();
-      } catch {
-        clearAuthentication();
-      }
+      switchError = error;
+    }
+
+    queryClient.clear();
+    let nextProfile: AuthProfile;
+    try {
+      nextProfile = await refreshProfile();
+    } catch (error) {
+      clearAuthentication();
       throw error;
     }
+    if (nextProfile.active_role === activeRole) return nextProfile;
+    if (switchError) throw switchError;
+    throw new Error("The server did not confirm the active role change");
   }, [clearAuthentication, queryClient, refreshProfile]);
 
   const logout = useCallback(async () => {

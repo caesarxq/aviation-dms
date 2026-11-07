@@ -34,6 +34,17 @@ describe("AuditReports", () => {
     expect(screen.queryByRole("button", { name: "View Findings for A-001" })).not.toBeInTheDocument();
   });
 
+  it("offers the authenticated evidence download for reports with an evidence file", async () => {
+    vi.mocked(auditApi.listAuditReports).mockResolvedValueOnce([
+      { ...audit, evidence_file: "attachments/report.pdf" },
+    ] as never);
+    renderPage(["audit_report:read"]);
+
+    const link = await screen.findByRole("link", { name: "Download Evidence for A-001" });
+
+    expect(link).toHaveAttribute("href", "/api/p3/audit-reports/audit-1/evidence");
+  });
+
   it("shows read failures separately from the empty state and hides creation without permission", async () => {
     vi.mocked(auditApi.listAuditReports).mockRejectedValueOnce(new Error("network"));
     renderPage(["audit_report:read"]);

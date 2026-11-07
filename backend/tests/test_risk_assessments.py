@@ -1,4 +1,8 @@
+import asyncio
+
 import pytest
+
+from app.database import get_db
 
 
 def _create_hazard(client, headers, title="Test hazard"):
@@ -38,6 +42,173 @@ class TestRiskAssessments:
         resp = client.get("/api/p1/risk-assessments", headers=safety_headers)
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+    def test_list_computes_current_user_approval_by_canonical_assessor_identity(self, client, admin_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Alias-aware approval action", "risk_level": "low",
+        }, headers=admin_headers)
+        assert created.status_code == 201, created.text
+        assessment_id = created.json()["assessment_id"]
+        legacy_admin_alias = f"legacy-admin-{assessment_id}"
+
+        async def store_legacy_assessor_alias():
+            db = await get_db()
+            try:
+                await db.execute(
+                    "INSERT INTO user_id_aliases (legacy_user_id, canonical_user_id, merged_at) VALUES (?, 'u-admin', datetime('now'))",
+                    (legacy_admin_alias,),
+                )
+                await db.execute(
+                    "UPDATE risk_assessments SET assessor_id = ? WHERE assessment_id = ?",
+                    (legacy_admin_alias, assessment_id),
+                )
+                await db.commit()
+            finally:
+                await db.close()
+        asyncio.run(store_legacy_assessor_alias())
+
+        own_list = client.get("/api/p1/risk-assessments", headers=admin_headers)
+        independent_list = client.get(
+            "/api/p1/risk-assessments",
+            headers={"X-Role": "head_safety", "X-Actor": "u-safety"},
+        )
+        assert own_list.status_code == independent_list.status_code == 200
+        own_item = next(item for item in own_list.json() if item["assessment_id"] == assessment_id)
+        independent_item = next(item for item in independent_list.json() if item["assessment_id"] == assessment_id)
+        assert own_item["can_approve_for_current_user"] is False
+        assert independent_item["can_approve_for_current_user"] is True
+
+    def test_list_filters_by_risk_level_before_pagination(self, client, safety_headers):
+        low = client.post("/api/p1/risk-assessments", json={
+            "title": "Filtered low risk", "likelihood": "rare", "severity": "negligible", "risk_level": "low",
+        }, headers=safety_headers).json()
+        high = client.post("/api/p1/risk-assessments", json={
+            "title": "Filtered high risk", "likelihood": "likely", "severity": "major", "risk_level": "high",
+        }, headers=safety_headers).json()
+
+        response = client.get("/api/p1/risk-assessments", params={
+            "status": "draft", "risk_level": "low", "limit": 1, "offset": 0,
+        }, headers=safety_headers)
+        assert response.status_code == 200
+        assert [item["assessment_id"] for item in response.json()] == [low["assessment_id"]]
+        assert high["assessment_id"] not in {item["assessment_id"] for item in response.json()}
+
+    @pytest.mark.parametrize("params", [
+        {"limit": 0}, {"limit": 101}, {"offset": -1}, {"offset": 1_000_001},
+        {"status": "under_review"}, {"risk_level": "unrated"},
+    ])
+    def test_risk_assessment_list_rejects_unbounded_or_unknown_filters(self, client, safety_headers, params):
+        response = client.get("/api/p1/risk-assessments", params=params, headers=safety_headers)
+        assert response.status_code == 422
+
+    def test_summary_counts_full_table_and_is_permission_gated(self, client, safety_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Summary count risk", "likelihood": "rare", "severity": "negligible", "risk_level": "low",
+        }, headers=safety_headers)
+        assert created.status_code == 201, created.text
+
+        summary = client.get("/api/p1/risk-assessments/summary", headers=safety_headers)
+        assert summary.status_code == 200
+        async def persisted_counts():
+            db = await get_db()
+            try:
+                cursor = await db.execute(
+                    """SELECT COUNT(*) AS total,
+                              SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+                              SUM(CASE WHEN status = 'scrutiny_required' THEN 1 ELSE 0 END) AS scrutiny_required,
+                              SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                              SUM(CASE WHEN status = 'cancelled' OR flight_cancelled = 1 THEN 1 ELSE 0 END) AS cancelled,
+                              SUM(CASE WHEN risk_level IN ('high', 'critical') THEN 1 ELSE 0 END) AS high_or_critical
+                       FROM risk_assessments"""
+                )
+                row = await cursor.fetchone()
+                assert row is not None
+                return {key: (row[key] or 0) for key in summary.json()}
+            finally:
+                await db.close()
+
+        assert summary.json() == asyncio.run(persisted_counts())
+        assert client.get("/api/p1/risk-assessments/summary").status_code == 401
+
+    def test_creation_for_mission_links_assessment_to_that_planned_mission(self, client, admin_headers):
+        mission = client.post("/api/p1/missions", json={"title": "Risk-linked mission"}, headers=admin_headers)
+        assert mission.status_code == 201, mission.text
+        mission_id = mission.json()["mission_id"]
+
+        assessment = client.post("/api/p1/risk-assessments", json={
+            "title": "Mission risk", "mission_id": mission_id,
+            "risk_model": "sms_5x5", "likelihood": "rare", "severity": "negligible", "risk_level": "low",
+        }, headers=admin_headers)
+        assert assessment.status_code == 201, assessment.text
+
+        persisted_mission = client.get(f"/api/p1/missions/{mission_id}", headers=admin_headers)
+        assert persisted_mission.status_code == 200
+        assert persisted_mission.json()["risk_assessment_id"] == assessment.json()["assessment_id"]
+
+    def test_creation_rejects_unknown_mission_link(self, client, admin_headers):
+        response = client.post("/api/p1/risk-assessments", json={
+            "title": "Unknown mission risk", "mission_id": "MSN-MISSING",
+        }, headers=admin_headers)
+        assert response.status_code == 404
+
+    def test_approved_assessment_is_immutable_until_amendment_workflow_exists(self, client, admin_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Approved immutable risk", "risk_level": "low",
+        }, headers=admin_headers)
+        assert created.status_code == 201, created.text
+        assessment_id = created.json()["assessment_id"]
+        reviewer_headers = {"X-Role": "head_safety", "X-Actor": "u-safety"}
+        approved = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=reviewer_headers)
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["reviewed_at"]
+
+        changed = client.patch(f"/api/p1/risk-assessments/{assessment_id}", json={
+            "mitigation_measures": "Changed after approval",
+        }, headers=admin_headers)
+        assert changed.status_code == 409
+        assert "approved" in changed.json()["detail"].lower()
+
+        persisted = next(
+            item for item in client.get("/api/p1/risk-assessments", headers=admin_headers).json()
+            if item["assessment_id"] == assessment_id
+        )
+        assert persisted["mitigation_measures"] is None
+
+    def test_assessor_cannot_approve_own_risk_assessment(self, client, safety_headers, admin_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Independent review required", "risk_level": "low",
+        }, headers=safety_headers)
+        assert created.status_code == 201, created.text
+        assessment_id = created.json()["assessment_id"]
+
+        self_approval = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=safety_headers)
+        assert self_approval.status_code == 403
+        independent_approval = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=admin_headers)
+        assert independent_approval.status_code == 200, independent_approval.text
+
+    def test_risk_assessment_without_assessor_cannot_be_approved(self, client, safety_headers, admin_headers):
+        created = client.post("/api/p1/risk-assessments", json={
+            "title": "Missing assessor identity", "risk_level": "low",
+        }, headers=safety_headers)
+        assert created.status_code == 201, created.text
+        assessment_id = created.json()["assessment_id"]
+
+        async def remove_assessor_identity():
+            db = await get_db()
+            try:
+                await db.execute("UPDATE risk_assessments SET assessor_id = '' WHERE assessment_id = ?", (assessment_id,))
+                await db.commit()
+            finally:
+                await db.close()
+        asyncio.run(remove_assessor_identity())
+
+        listed = client.get("/api/p1/risk-assessments", headers=admin_headers)
+        missing_assessor = next(item for item in listed.json() if item["assessment_id"] == assessment_id)
+        assert missing_assessor["can_approve_for_current_user"] is False
+
+        approval = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=admin_headers)
+        assert approval.status_code == 409
+        assert "assessor" in approval.json()["detail"].lower()
 
     def test_filter_by_hazard_id(self, client, safety_headers):
         h = _create_hazard(client, safety_headers, "Filtered hazard")
@@ -82,7 +253,7 @@ class TestRiskAssessments:
         }, headers=safety_headers)
         assert response.status_code == 422
 
-    def test_update_risk_assessment(self, client, safety_headers):
+    def test_update_risk_assessment(self, client, safety_headers, admin_headers):
         resp = client.post("/api/p1/risk-assessments", json={
             "title": "Updatable risk",
             "description": "Test update",
@@ -98,7 +269,7 @@ class TestRiskAssessments:
         assert resp.json()["status"] == "draft"
         assert resp.json()["residual_risk"] == "Accepted residual risk"
         assert resp.json()["hazard_ids"] == [h]
-        approved = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=safety_headers)
+        approved = client.post(f"/api/p1/risk-assessments/{assessment_id}/approve", headers=admin_headers)
         assert approved.status_code == 200
         assert approved.json()["status"] == "approved"
 
@@ -160,8 +331,9 @@ class TestRiskAssessments:
         ("head_operations", "u-ops"),
         ("chief_pilot", "u-chief-pilot"),
     ])
-    def test_risk_assessment_approval_permission_allows_existing_roles(self, client, safety_headers, role, actor):
-        created = client.post("/api/p1/risk-assessments", json={"title": f"Approval by {role}"}, headers=safety_headers).json()
+    def test_risk_assessment_approval_permission_allows_existing_roles(self, client, safety_headers, admin_headers, role, actor):
+        creator_headers = admin_headers if role == "head_safety" else safety_headers
+        created = client.post("/api/p1/risk-assessments", json={"title": f"Approval by {role}"}, headers=creator_headers).json()
         approved = client.post(
             f"/api/p1/risk-assessments/{created['assessment_id']}/approve",
             headers={"X-Role": role, "X-Actor": actor},
@@ -201,7 +373,7 @@ class TestRiskAssessments:
         assert resp.status_code == 400
 
     def test_om_flight_risk_tool_thresholds_20_and_25(self, client, safety_headers):
-        # Score 22 (>20) requires additional scrutiny
+        # Ignore the client score; probable x hazardous + frequent exposure calculates 21 (>20).
         r22 = client.post("/api/p1/risk-assessments", json={
             "title": "Unfamiliar route survey",
             "risk_model": "om_flight_26",

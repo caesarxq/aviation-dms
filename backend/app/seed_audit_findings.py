@@ -1,25 +1,40 @@
-"""Seed the September 2026 Safety & Security audit findings (SS-KFL-SEP 2026).
+"""Import the September 2026 Safety & Security audit record after source checks.
 
-Populates audit_reports + audit_findings tables with all 39 findings extracted
-from the audit report PDF. Idempotent: skips if audit_reports already contains
-data.
+The reviewed source record contains 38 findings; finding 32 is absent. The
+payload must remain reconciled to the authoritative source before import. The
+source PDF SHA-256 and curated-payload SHA-256 are pinned; importing requires
+separate confirmation of the checksum's authority and reconciliation of every
+finding number, title, description, and reference with that PDF.
+Idempotent: skips if audit_reports already contains data.
 
 Usage:
-  DEV_MODE=true python /Users/mohamedalsayed/Projects/aviation-dms/backend/app/seed_audit_findings.py
+  DEV_MODE=true AUDIT_IMPORT_ENABLED=true AUDIT_IMPORT_ATTRIBUTION_CONFIRMED=true AUDIT_IMPORT_SOURCE_CHECKSUM_CONFIRMED=true AUDIT_IMPORT_SOURCE_RECONCILED=true python /Users/mohamedalsayed/Projects/aviation-dms/backend/app/seed_audit_findings.py
+
+`DMS_DB_PATH` must point to a disposable database under the system temporary
+directory. This historical import preserves the source auditor attribution; it
+does not create or assign an active `independent_auditor` role.
 """
 
 import asyncio
-import sys
+import hashlib
+import hmac
+import json
 import os
+import stat
+import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app import database
 from app.database import get_db
+from app.p3_routes import _snapshot_audit_evidence, _validated_audit_report_evidence_path
 
 NOW = datetime.now().isoformat()
 
-# Auditor / auditee from the report
-AUDITOR_ID = "u-safety"      # Brian Swanka performed the audit
+# Auditor / auditee from the report; user confirmed the source auditor spelling.
+AUDITOR_ID = "u-safety/security"  # Brian Swanya performed the audit
 AUDITEE_ID = "u-accountable" # Utana Kinuthia signed as auditee
 
 AUDIT_DATA = {
@@ -30,6 +45,10 @@ AUDIT_DATA = {
     "regulatory_basis": "KCARs 2018, KCAA CL: O-SMS003 routine SMS assessment, AVSEC checklist",
     "evidence_file": "attachments/SAFETY AND SECURITY SEPTEMBER 2026 AUDIT REPORT.pdf",
 }
+
+# Expected SHA-256 of the reviewed source PDF. Import also requires an
+# independent operator confirmation that this digest identifies the authority.
+AUDIT_EVIDENCE_SHA256 = "db99508fabee281f86c52fc182c1f54926538e53a298857b0a9b2a12ad156efd"
 
 FINDINGS = [
     # (finding_number, area, level, title, description, regulatory_reference)
@@ -187,10 +206,78 @@ FINDINGS = [
      "KCARs 2018 / integrated flight records"),
 ]
 
+EXPECTED_SOURCE_FINDING_NUMBERS = tuple(str(number) for number in [*range(1, 32), *range(33, 40)])
+# Digest of this exact curated payload; it is not a substitute for the PDF digest.
+AUDIT_FINDINGS_PAYLOAD_SHA256 = "873416db8ad22519316cb5b458957726aa1a3541db6ed8ce1efe2d9906ebe321"
+
 
 import uuid
 
 async def seed_audit_findings():
+    finding_numbers = tuple(str(finding[0]) for finding in FINDINGS)
+    if finding_numbers != EXPECTED_SOURCE_FINDING_NUMBERS:
+        raise RuntimeError(
+            "Audit seed is disabled: finding numbers must match the hash-pinned source record (1-31, 33-39). "
+            "No database rows were written."
+        )
+    payload = json.dumps(FINDINGS, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload_sha256 = hashlib.sha256(payload).hexdigest()
+    if not hmac.compare_digest(payload_sha256, AUDIT_FINDINGS_PAYLOAD_SHA256):
+        raise RuntimeError("Audit finding content changed after source reconciliation; no database rows were written")
+    enabled_values = {"1", "true", "yes"}
+    if os.getenv("DEV_MODE", "").strip().lower() not in enabled_values:
+        raise RuntimeError("Historical audit import is development-only; DEV_MODE must be explicitly true")
+    if os.getenv("AUDIT_IMPORT_ENABLED", "").strip().lower() not in enabled_values:
+        raise RuntimeError("Set AUDIT_IMPORT_ENABLED=true only for an authorized isolated development import")
+    if os.getenv("AUDIT_IMPORT_ATTRIBUTION_CONFIRMED", "").strip().lower() not in enabled_values:
+        raise RuntimeError(
+            "Confirm the source auditor identity and spelling before setting AUDIT_IMPORT_ATTRIBUTION_CONFIRMED=true"
+        )
+    if os.getenv("AUDIT_IMPORT_SOURCE_CHECKSUM_CONFIRMED", "").strip().lower() not in enabled_values:
+        raise RuntimeError(
+            "Independently confirm AUDIT_EVIDENCE_SHA256 against the approved source before setting "
+            "AUDIT_IMPORT_SOURCE_CHECKSUM_CONFIRMED=true"
+        )
+    # Text-extraction layout differs across PDF producers; require an explicit
+    # operator attestation that every curated field was reconciled to this pinned source.
+    if os.getenv("AUDIT_IMPORT_SOURCE_RECONCILED", "").strip().lower() not in enabled_values:
+        raise RuntimeError(
+            "Reconcile all finding numbers and content against the hash-pinned source PDF before setting "
+            "AUDIT_IMPORT_SOURCE_RECONCILED=true"
+        )
+    configured_db = Path(database.DB_PATH).expanduser()
+    if configured_db.is_symlink():
+        raise RuntimeError("Historical audit import database path must not be a symlink")
+    target_db = configured_db.resolve()
+    scratch_root = Path(tempfile.gettempdir()).resolve()
+    try:
+        target_db.relative_to(scratch_root)
+    except ValueError as exc:
+        raise RuntimeError("Historical audit import target database must be inside the system temp directory") from exc
+    current_uid = os.getuid() if hasattr(os, "getuid") else None
+    directory_stat = target_db.parent.stat()
+    directory_mode = stat.S_IMODE(directory_stat.st_mode)
+    if (current_uid is not None and directory_stat.st_uid != current_uid) or directory_mode & 0o077 or not directory_mode & stat.S_IWUSR:
+        raise RuntimeError("Historical audit import target must be inside a private, owner-only writable directory")
+    try:
+        database_stat = target_db.lstat()
+    except FileNotFoundError as exc:
+        raise RuntimeError("Historical audit import requires an initialized scratch database file") from exc
+    if (
+        not stat.S_ISREG(database_stat.st_mode)
+        or (current_uid is not None and database_stat.st_uid != current_uid)
+        or database_stat.st_nlink != 1
+    ):
+        raise RuntimeError("Historical audit import target must be an owner-held single-link regular database file")
+    database.DB_PATH = str(target_db)
+    evidence_path = _validated_audit_report_evidence_path(AUDIT_DATA["evidence_file"])
+    if evidence_path is None:
+        raise RuntimeError("The authorized audit evidence PDF must exist and validate under attachments/ before import")
+    evidence_snapshot, evidence_sha256, _ = _snapshot_audit_evidence(
+        evidence_path,
+        expected_sha256=AUDIT_EVIDENCE_SHA256,
+    )
+    evidence_snapshot.close()
     db = await get_db()
     try:
         # Idempotent: skip if audit_reports already has data
@@ -205,8 +292,8 @@ async def seed_audit_findings():
         await db.execute(
             """INSERT INTO audit_reports
                (audit_id, audit_number, audit_date, auditor_id, auditee_id,
-                scope, regulatory_basis, status, evidence_file, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                scope, regulatory_basis, status, evidence_file, evidence_sha256, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 AUDIT_DATA["audit_id"],
                 AUDIT_DATA["audit_number"],
@@ -217,6 +304,7 @@ async def seed_audit_findings():
                 AUDIT_DATA["regulatory_basis"],
                 "open",
                 AUDIT_DATA["evidence_file"],
+                evidence_sha256,
                 NOW,
                 NOW,
             ),

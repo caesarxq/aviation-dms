@@ -44,6 +44,11 @@ function toneColor(tone: string) {
   }
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
+}
+
 export function Missions() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -70,13 +75,20 @@ export function Missions() {
   });
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [missionType, setMissionType] = useState("survey");
+  const [priority, setPriority] = useState("normal");
+  const [plannedDate, setPlannedDate] = useState("");
+  const [location, setLocation] = useState("");
   const [missionError, setMissionError] = useState("");
   const [dirty, setDirty] = useState(false);
 
   const { errors: missionFieldErrors, isValid: missionIsValid } = useValidation(
-    { title },
+    { title, mission_type: missionType, priority },
     {
       title: { required: true, minLength: 2 },
+      mission_type: { required: true, minLength: 2 },
+      priority: { required: true, minLength: 2 },
     }
   );
 
@@ -90,11 +102,16 @@ export function Missions() {
       setShowForm(false);
       setDirty(false);
       setTitle("");
+      setDescription("");
+      setMissionType("survey");
+      setPriority("normal");
+      setPlannedDate("");
+      setLocation("");
       setMissionError("");
       toast({ title: "Mission created", message: "The new mission has been added to the register.", type: "success" });
     },
-    onError: () => {
-      setMissionError("Failed to create mission. Please try again.");
+    onError: (error: unknown) => {
+      setMissionError(getErrorMessage(error, "Failed to create mission. Please try again."));
     },
   });
 
@@ -105,6 +122,9 @@ export function Missions() {
       qc.invalidateQueries({ queryKey: ["missions"] });
       qc.invalidateQueries({ queryKey: ["mission-summary"] });
     },
+    onError: (error: unknown) => {
+      toast({ title: "Mission transition not recorded", message: getErrorMessage(error, "Reload the mission and retry."), type: "error" });
+    },
   });
 
   return (
@@ -113,10 +133,11 @@ export function Missions() {
         <div>
           <div className="app-eyebrow">Flight Operations</div>
           <h1 className="app-title">Missions</h1>
-          <p className="app-subtitle">Plan, track, and transition flight missions through their operational lifecycle.</p>
+          <p className="app-subtitle">Create planned mission records and track their lifecycle. Mission creation does not authorize flight.</p>
         </div>
         {hasPermission("safety:create") && <button
-          onClick={() => setShowForm(!showForm)}
+          type="button"
+          onClick={() => { setShowForm(!showForm); setMissionError(""); }}
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Mission"}
@@ -164,24 +185,54 @@ export function Missions() {
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <div className="app-label mb-1">New Mission</div>
-                <p className="text-xs text-kfl-muted">Create a new mission plan.</p>
-              </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-            </div>
-            {missionError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
-                {missionError}
+                <p className="text-xs text-kfl-muted">Enter the planning context. Use values confirmed by the current operational procedure.</p>
+                </div>
+                <button type="button" onClick={() => { setShowForm(false); setDirty(false); setMissionError(""); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+                </div>
+                <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Creating a planned mission does not authorize flight. Release requires the separately approved flight plan, linked approved risk assessment, and release evidence.
+                </div>
+                {missionError && (
+                <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                  {missionError}
               </div>
             )}
             <FormField htmlFor="mission_title_137" label="Mission title" hint="Use the operational mission name or reference." required>
               <input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={`app-input ${missionFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Mission title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {missionFieldErrors.title && <p id="mission_title_137-error" className="text-[11px] text-rose-700 mt-1">{missionFieldErrors.title}</p>}
             </FormField>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <FormField htmlFor="mission_type" label="Mission type" hint="Use the exact type label in the applicable local procedure." required>
+                <input id="mission_type" name="mission_type" aria-invalid={!!missionFieldErrors.mission_type} className={`app-input ${missionFieldErrors.mission_type ? "border-rose-400" : ""}`} value={missionType} onChange={(e) => { setMissionType(e.target.value); setDirty(true); }} />
+                {missionFieldErrors.mission_type && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.mission_type}</p>}
+              </FormField>
+              <FormField htmlFor="mission_priority" label="Priority" hint="Use the approved local priority scale." required>
+                <input id="mission_priority" name="priority" aria-invalid={!!missionFieldErrors.priority} className={`app-input ${missionFieldErrors.priority ? "border-rose-400" : ""}`} value={priority} onChange={(e) => { setPriority(e.target.value); setDirty(true); }} />
+                {missionFieldErrors.priority && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.priority}</p>}
+              </FormField>
+              <FormField htmlFor="mission_planned_date" label="Planned date">
+                <input id="mission_planned_date" name="planned_date" type="date" className="app-input" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="mission_location" label="Location">
+                <input id="mission_location" name="location" className="app-input" value={location} onChange={(e) => { setLocation(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="mission_description" label="Description" className="md:col-span-2">
+                <textarea id="mission_description" name="description" rows={3} className="app-input" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} />
+              </FormField>
+            </div>
             <button
+              type="button"
               disabled={!missionIsValid || createMutation.isPending}
               onClick={() => {
                 setMissionError("");
-                createMutation.mutate({ title });
+                createMutation.mutate({
+                  title: title.trim(),
+                  description: description.trim() || null,
+                  mission_type: missionType.trim(),
+                  priority: priority.trim(),
+                  planned_date: plannedDate || null,
+                  location: location.trim() || null,
+                });
               }}
               className="app-btn-primary w-full"
             >
@@ -219,6 +270,7 @@ export function Missions() {
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Type</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Priority</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Risk assessment</th>
                   <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Actions</th>
                 </tr>
               </thead>
@@ -228,19 +280,22 @@ export function Missions() {
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{m.mission_id}</td>
                     <td className="px-4 py-4">
                       <div className="font-semibold text-kfl-text">{m.title}</div>
-                      <div className="mt-1 text-xs text-kfl-muted">{m.planned_date}</div>
+                      <div className="mt-1 text-xs text-kfl-muted">{m.planned_date || "Date not set"}</div>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.mission_type}</td>
                     <td className="px-4 py-4">
                       <span className={missionStatusClass(m.status)}>{m.status}</span>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.priority}</td>
+                    <td className="px-4 py-4 text-sm text-kfl-secondary">{m.risk_assessment_id || "Not linked"}</td>
                     <td className="px-4 py-4 text-right text-sm">
                       {hasPermission("safety:update") && availableActions(m.status)
                         .filter((action) => action.state !== "aborted" || hasPermission("safety:close"))
                         .map((a) => (
                         <button
                           key={a.state}
+                          type="button"
+                          disabled={transitionMutation.isPending}
                           onClick={() => transitionMutation.mutate({ id: m.mission_id, state: a.state })}
                           className="text-xs font-medium px-2 py-1.5 rounded border transition hover:bg-kfl-surface-subtle"
                           style={{ borderColor: toneColor(a.tone), color: toneColor(a.tone) }}

@@ -240,14 +240,23 @@ export function AuditReports() {
                       </span>
                     </td>
                     <td className="px-4 py-4 text-right text-sm">
-                      {hasPermission("audit_finding:read") && <button
-                        type="button"
-                        className="text-xs text-kfl-blue underline"
-                        onClick={() => navigate(`/audit-findings?audit_id=${encodeURIComponent(r.audit_id)}`)}
-                        aria-label={`View Findings for ${r.audit_number}`}
-                      >
-                        View Findings
-                      </button>}
+                      <div className="flex items-center justify-end gap-3">
+                        {r.evidence_file && hasPermission("audit_report:read") && <a
+                          href={`/api/p3/audit-reports/${encodeURIComponent(r.audit_id)}/evidence`}
+                          className="text-xs text-kfl-blue underline"
+                          aria-label={`Download Evidence for ${r.audit_number}`}
+                        >
+                          Download Evidence
+                        </a>}
+                        {hasPermission("audit_finding:read") && <button
+                          type="button"
+                          className="text-xs text-kfl-blue underline"
+                          onClick={() => navigate(`/audit-findings?audit_id=${encodeURIComponent(r.audit_id)}`)}
+                          aria-label={`View Findings for ${r.audit_number}`}
+                        >
+                          View Findings
+                        </button>}
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -9,12 +9,12 @@ import AdminObservability from "./AdminObservability";
 vi.mock("../api/client", () => ({ default: { get: vi.fn(), put: vi.fn() } }));
 
 const userProfile = {
-  user_id: "u-lib",
+  user_id: "u-quality",
   username: "librarian",
   email: "librarian@example.test",
   full_name: "Canonical User",
-  role: "librarian",
-  roles: ["head_quality", "librarian"],
+  role: "head_quality",
+  roles: ["head_quality", "librarian", "records_custodian"],
   department: "Quality",
   is_active: 1,
   merged_into_user_id: null,
@@ -48,7 +48,7 @@ function renderAdmin() {
 describe("AdminObservability role assignments", () => {
   beforeEach(() => {
     vi.mocked(api.get).mockResolvedValue({ data: observability } as any);
-    vi.mocked(api.put).mockResolvedValue({ data: { user_id: "u-lib", roles: ["head_quality", "librarian", "records_custodian"] } } as any);
+    vi.mocked(api.put).mockResolvedValue({ data: { user_id: "u-quality", roles: ["head_quality", "librarian", "records_custodian"] } } as any);
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -60,7 +60,7 @@ describe("AdminObservability role assignments", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save roles for Canonical User" }));
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
-      "/p0/auth/users/u-lib/roles",
+      "/p0/auth/users/u-quality/roles",
       { roles: ["head_quality", "librarian", "records_custodian"] },
     ));
   });
@@ -71,13 +71,43 @@ describe("AdminObservability role assignments", () => {
         ...observability,
         user_profiles: [
           userProfile,
-          { ...userProfile, user_id: "u-quality", username: "quality", roles: ["head_quality"], is_active: 0, merged_into_user_id: "u-lib", has_password: false },
+          { ...userProfile, user_id: "u-lib", username: "librarian", roles: ["librarian"], is_active: 0, merged_into_user_id: "u-quality", has_password: false },
         ],
       },
     } as any);
     renderAdmin();
 
-    expect(await screen.findByText(/Merged into u-lib; historical ID retained/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Merged into u-quality; historical ID retained/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Save roles for/ })).toHaveLength(1);
+  });
+
+  it("URL-encodes a literal slash in the canonical ID when saving roles", async () => {
+    const slashUser = {
+      ...userProfile,
+      user_id: "u-safety/security",
+      full_name: "Safety Security User",
+      role: "head_safety",
+      roles: ["head_safety", "head_security"],
+    };
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        ...observability,
+        user_profiles: [slashUser],
+        role_matrix: [
+          ...observability.role_matrix,
+          { role: "head_safety", access_level: "L2", permissions: [] },
+          { role: "head_security", access_level: "L2", permissions: [] },
+        ],
+      },
+    } as any);
+    renderAdmin();
+
+    await screen.findByLabelText("Assigned roles for Safety Security User");
+    fireEvent.click(screen.getByRole("button", { name: "Save roles for Safety Security User" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith(
+      "/p0/auth/users/u-safety%2Fsecurity/roles",
+      { roles: ["head_safety", "head_security"] },
+    ));
   });
 });

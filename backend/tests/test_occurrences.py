@@ -42,7 +42,7 @@ class TestOccurrences:
         data = resp.json()
         assert data["mor_required"] is True
         assert data["mor_deadline"] == "2026-11-02T09:00:00+03:00"
-        assert data["mor_assessed_by"] == "u-safety"
+        assert data["mor_assessed_by"] == "u-safety/security"
         assert data["mor_assessment_reason"] == "Serious incident meets the reportability criteria"
 
     def test_reporter_cannot_assess_mor(self, client, reporter_headers):
@@ -150,7 +150,7 @@ class TestOccurrences:
         assert data["status"] == "closed"
         assert data["effectiveness_confirmed"] is True
         assert data["no_new_hazards"] is True
-        assert data["closed_by"] == "u-safety"
+        assert data["closed_by"] == "u-safety/security"
 
 
 class TestFlightRelease:

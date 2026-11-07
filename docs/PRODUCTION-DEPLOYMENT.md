@@ -1,14 +1,15 @@
 # Production deployment and operational release
 
-The default Compose deployment is for local development only. Production Compose now requires explicit host, SMTP, and bootstrap-secret configuration; it terminates HTTPS with Caddy, keeps the API private to the Compose network, and does not start the unused Keycloak development server.
+Local development should use the backend and Vite commands in the README. The root Compose file is a production-shaped HTTPS deployment: it requires explicit host, SMTP, and bootstrap-secret configuration, terminates HTTPS with Caddy, keeps the API private to the Compose network, and does not start the unused Keycloak development server.
 
 ## Prerequisites
 
 - A production hostname with DNS A/AAAA records pointing to this host.
 - Inbound TCP 80/443 and UDP 443 allowed for ACME certificate issuance and HTTPS.
-- A protected one-time bootstrap-token file on the host; do not place its contents in Git or command-line arguments. Restrict it to the deployment operator (for example, mode `0600`).
+- Store the bootstrap token and SMTP password in separate protected files outside the repository; never print them into shell logs, put them in command-line arguments, or commit them. The backend container runs as UID/GID `10001:10001`, and file-backed Compose secrets are bind mounts: the host files must be readable by that identity. Use a root-owned secret directory and files owned by `root:10001` with mode `0440` (or an equivalent ACL). Do not use root-only mode `0600`, which prevents the backend from reading the mounted secret. Verify access with a disposable container before startup.
 - A real SMTP service/account for password-reset and notification delivery.
-- A backup location and an independently tested restore procedure before importing operational records; backups must include `/app/data/dms.db`, `/app/data/kcaa-evidence/`, and `/app/data/uploads/`.
+- A backup location and an independently tested restore procedure before importing operational records; backups must include `/app/data/dms.db`, `/app/data/kcaa-evidence/`, `/app/data/attachments/`, and `/app/data/uploads/`.
+- An approved retention, storage-quota, and file-scanning policy for personnel uploads. The current API limits each file to 10 MiB, checks its declared type/signature, and constrains credential metadata to the UI's controlled values, but does not enforce cumulative quotas or malware scanning. Personal history and staff queues are paginated. File writes and SQLite commits are not one atomic operation; no orphan reconciliation job exists, so monitor storage and do not remove files without a DB/path cross-check.
 - Approved, current source manuals, authority evidence, and named/effective delegations for each workflow that will be activated.
 
 ## Required environment
@@ -24,6 +25,7 @@ Set these in the deployment environment or an ignored root `.env` file. Use real
 - `RATE_LIMIT_REQUESTS_PER_MIN` (default `100`), `RATE_LIMIT_WINDOW_SECONDS` (default `60`), and `RATE_LIMIT_MAX_CLIENTS` (default `10000`): per-client-IP API throttling controls; the limiter covers `/api/p0` through `/api/p3`, not `/health`. Tune only after staging load checks, especially where multiple users share a public NAT. The limiter is process-local; use a shared store or edge enforcement before adding backend workers or replicas.
 - `SESSION_TTL_SECONDS` (default `28800`, sliding) and `SESSION_ABSOLUTE_MAX_SECONDS` (default `86400`): session lifetime controls. The absolute maximum prevents sliding activity from extending a session indefinitely.
 - `DMS_TRUSTED_FRONTEND_IP`: exact reverse-proxy peer allowed to supply `X-Forwarded-For`; Compose sets this to `172.31.254.3` to match the frontend container.
+- `FLIGHT_RELEASE_ENABLED` (default `false`): leave disabled until accountable postholders sign the controlled source-to-rule mapping and required evidence is linked to exact effective sources. This controls only the flight-release API; it does not make mission planning or risk assessment operationally approved.
 
 Compose refuses to start if required values are absent. The bootstrap token and SMTP password are mounted as Docker secrets at `/run/secrets/kfl_bootstrap_token` and `/run/secrets/smtp_pass`; neither secret is passed in the backend environment. The API does not publish port 8000 to the host. `DEV_MODE` is fixed to false, the session cookie is Secure, and CORS/auth origins are restricted to the configured HTTPS host. Caddy automatically obtains and renews certificates. Backend readiness checks the database, and Compose waits for the backend and frontend health checks before starting dependent services.
 
@@ -45,7 +47,13 @@ After initial administrator setup, remove/rotate the bootstrap-token file and re
 
 ## Backup and restore
 
-The persistent `/app/data` volume contains the SQLite database, KCAA evidence, and personnel uploads. Back up the complete directory as one set; do not copy only `dms.db`. For a consistent filesystem-level backup, pause backend writes:
+The persistent `/app/data` volume contains the SQLite database, KCAA evidence, audit attachments, and personnel uploads. Back up the complete directory as one set; do not copy only `dms.db`. For a consistent filesystem-level backup, pause backend writes:
+
+Audit-report evidence is stored under `/app/data/attachments/` by default; the backend image does not package controlled audit PDFs. Provision each evidence file from an authorized, verified source before setting its `evidence_file` record or enabling its download link. The API parses the PDF structure and records a SHA-256 when a report is created; downloads are served from a snapshot only after the digest matches. Existing report rows with a null digest fail closed with HTTP 409 until controlled, documented revalidation is completed; do not silently calculate a replacement digest for legacy evidence. A digest detects later byte changes but does not establish source authenticity, approval, or immutable custody. Maintain an independently controlled provenance record and do not replace files in place.
+
+The historical audit seeder is not a deployment or recovery command. It requires a disposable private scratch database and explicit development/import flags; it also verifies the pinned source-PDF digest and curated-payload digest. `AUDIT_IMPORT_SOURCE_CHECKSUM_CONFIRMED=true` and `AUDIT_IMPORT_SOURCE_RECONCILED=true` are operator attestations: set them only after independently confirming the approved source checksum and comparing every finding number and content field against that source. No audit import is authorized by these code gates alone.
+
+On upgrade, existing personnel-upload rows with a null `file_sha256` fail closed for download and verification. Inventory and re-upload or complete an authorized, documented revalidation before relying on those legacy files; do not establish a new checksum silently for an unverified file.
 
 ```bash
 cd /opt/aviation-dms
@@ -73,7 +81,7 @@ If the copy fails, start the backend immediately with `sudo docker compose start
 HTTPS and a green test suite do not constitute aviation or regulatory approval. Keep the following controls inactive or human/manual-only until the accountable postholders have signed the source-to-rule mapping and the required evidence is linked to the exact effective source version:
 
 - KCAA approval/publishing decisions and authority submissions.
-- Mission and flight release, including current ROC/OpSpec coverage, aircraft configuration/checklists, crew qualifications, insurance and validated risk acceptance.
+- Mission and flight release, including current ROC/OpSpec coverage, aircraft configuration/checklists, crew qualifications, insurance and validated risk acceptance. Release requires both mission and approved-plan altitudes to be present and equal. `FLIGHT_RELEASE_ENABLED` remains false until sign-off; aircraft registration/configuration/ROC changes revoke the seeded OpSpec flag, and reauthorization must follow controlled evidence review. Post-flight completion requires the mission to be `in_progress` and at least one substantive report detail; the exact required evidence-field set still needs postholder approval.
 - Return-to-service and maintenance sign-off where aircraft-specific controlled sources are not linked.
 - DG acceptance until the controlling checklist and approval evidence are reconciled.
 - FDTL thresholds while their source and authority interpretation remain provisional.

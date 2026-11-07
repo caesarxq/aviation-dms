@@ -1,18 +1,135 @@
 """P3 API routes for external audit reports and their findings."""
 
+import hashlib
+import hmac
 import json
+import os
+import stat
+import tempfile
 import uuid
 from datetime import date, datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from pypdf import PdfReader
 
-from .database import get_db
+from .database import DB_PATH, get_db
 from .rbac import has_permission
 
 router = APIRouter()
+AUDIT_REPORT_EVIDENCE_DIR = Path(
+    os.getenv("AUDIT_REPORT_EVIDENCE_DIR", str(Path(DB_PATH).parent / "attachments"))
+)
+
+
+def _validated_audit_report_evidence_path(evidence_file: Optional[str]) -> Optional[Path]:
+    """Resolve only a named file path inside the audit attachments directory."""
+    if not evidence_file or "\\" in evidence_file or "\x00" in evidence_file:
+        return None
+    parts = evidence_file.split("/")
+    if len(parts) != 2 or parts[0] != "attachments" or parts[1] in {"", ".", ".."}:
+        return None
+
+    root = AUDIT_REPORT_EVIDENCE_DIR.resolve()
+    try:
+        path = (root / parts[1]).resolve(strict=True)
+        if path.parent != root or not path.is_file():
+            return None
+    except (OSError, RuntimeError):
+        return None
+    return path
+
+
+class InvalidAuditEvidence(Exception):
+    """Evidence path resolved but the opened file is not a valid PDF file."""
+
+
+class AuditEvidenceIntegrityError(Exception):
+    """The evidence snapshot does not match the report's recorded digest."""
+
+
+def _open_directory_without_symlinks(path: Path) -> int:
+    """Open every directory component without following symlinks."""
+    if not path.is_absolute():
+        raise OSError("Evidence directory must be absolute")
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(os.path.sep, directory_flags)
+    try:
+        for component in path.parts[1:]:
+            next_descriptor = os.open(component, directory_flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _snapshot_audit_evidence(path: Path, expected_sha256: Optional[str] = None):
+    """Copy, hash, and optionally verify evidence bytes from one opened file descriptor."""
+    snapshot = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+    digest = hashlib.sha256()
+    directory_descriptor = None
+    descriptor = None
+    try:
+        directory_descriptor = _open_directory_without_symlinks(path.parent)
+        descriptor = os.open(
+            path.name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_descriptor,
+        )
+        os.close(directory_descriptor)
+        directory_descriptor = None
+        with os.fdopen(descriptor, "rb") as source:
+            descriptor = None
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise InvalidAuditEvidence("Audit evidence is not a regular file")
+            header = source.read(5)
+            if header != b"%PDF-":
+                raise InvalidAuditEvidence("Audit evidence is not a PDF")
+            snapshot.write(header)
+            digest.update(header)
+            while chunk := source.read(1024 * 1024):
+                snapshot.write(chunk)
+                digest.update(chunk)
+
+        size = snapshot.tell()
+        snapshot.seek(0)
+        try:
+            reader = PdfReader(snapshot, strict=True)
+            if not reader.is_encrypted and len(reader.pages) == 0:
+                raise InvalidAuditEvidence("Audit evidence PDF has no pages")
+        except Exception as exc:
+            raise InvalidAuditEvidence("Audit evidence PDF structure is invalid") from exc
+        finally:
+            snapshot.seek(0)
+
+        actual_sha256 = digest.hexdigest()
+        if expected_sha256 and not hmac.compare_digest(actual_sha256, expected_sha256):
+            raise AuditEvidenceIntegrityError("Audit evidence digest mismatch")
+        snapshot.seek(0)
+        return snapshot, actual_sha256, size
+    except Exception:
+        snapshot.close()
+        raise
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
+
+
+def _stream_audit_snapshot(snapshot):
+    try:
+        while chunk := snapshot.read(1024 * 1024):
+            yield chunk
+    finally:
+        snapshot.close()
 
 
 class ReportStatus(str, Enum):
@@ -125,6 +242,17 @@ async def create_audit_report(payload: AuditReportCreate, request: Request):
         raise HTTPException(status_code=422, detail="Auditor and auditee are required")
     if auditor_id == auditee_id:
         raise HTTPException(status_code=422, detail="Auditor and auditee must be different people")
+    evidence_path = None
+    evidence_sha256 = None
+    if payload.evidence_file is not None:
+        evidence_path = _validated_audit_report_evidence_path(payload.evidence_file)
+        if evidence_path is None:
+            raise HTTPException(status_code=422, detail="evidence_file must reference an existing PDF under attachments/")
+        try:
+            snapshot, evidence_sha256, _ = _snapshot_audit_evidence(evidence_path)
+            snapshot.close()
+        except (OSError, InvalidAuditEvidence) as exc:
+            raise HTTPException(status_code=422, detail="evidence_file must reference a readable PDF under attachments/") from exc
     db = await get_db()
     try:
         auditor = await (await db.execute(
@@ -143,21 +271,30 @@ async def create_audit_report(payload: AuditReportCreate, request: Request):
         await db.execute(
             """INSERT INTO audit_reports
                (audit_id, audit_number, audit_date, auditor_id, auditee_id, scope, regulatory_basis,
-                status, evidence_file, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                status, evidence_file, evidence_sha256, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 audit_id, audit_number, audit_date, auditor_id, auditee_id, payload.scope,
-                payload.regulatory_basis, payload.status.value, payload.evidence_file, now, now,
+                payload.regulatory_basis, payload.status.value, payload.evidence_file, evidence_sha256, now, now,
             ),
         )
-        await _write_event(db, "audit_report", audit_id, "created", actor, {"audit_number": audit_number})
+        await _write_event(db, "audit_report", audit_id, "created", actor, {
+            "audit_number": audit_number,
+            "evidence_sha256": evidence_sha256,
+        })
         await db.commit()
     except Exception:
         await db.rollback()
         raise
     finally:
         await db.close()
-    return {"audit_id": audit_id, "audit_number": audit_number, "status": payload.status.value, "created_at": now}
+    return {
+        "audit_id": audit_id,
+        "audit_number": audit_number,
+        "status": payload.status.value,
+        "evidence_sha256": evidence_sha256,
+        "created_at": now,
+    }
 
 
 @router.get("/audit-reports")
@@ -180,6 +317,47 @@ async def list_audit_reports(
         return [dict(row) for row in await cursor.fetchall()]
     finally:
         await db.close()
+
+
+@router.get("/audit-reports/{audit_id}/evidence")
+async def download_audit_report_evidence(audit_id: str, request: Request):
+    _check(request, "audit_report:read")
+    db = await get_db()
+    try:
+        report = await (await db.execute(
+            "SELECT evidence_file, evidence_sha256 FROM audit_reports WHERE audit_id = ?", (audit_id,)
+        )).fetchone()
+    finally:
+        await db.close()
+    if not report:
+        raise HTTPException(status_code=404, detail="Audit report not found")
+
+    path = _validated_audit_report_evidence_path(report["evidence_file"])
+    if not path:
+        raise HTTPException(status_code=404, detail="Audit evidence file not found")
+    expected_sha256 = report["evidence_sha256"]
+    if not expected_sha256:
+        raise HTTPException(status_code=409, detail="Audit evidence integrity metadata is missing; controlled revalidation is required")
+    try:
+        snapshot, _, size = _snapshot_audit_evidence(path, expected_sha256)
+    except AuditEvidenceIntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Audit evidence integrity check failed")
+    except (OSError, InvalidAuditEvidence) as exc:
+        raise HTTPException(status_code=409, detail="Audit evidence integrity check failed") from exc
+    ascii_filename = "".join(
+        character if character.isascii() and (character.isalnum() or character in "._-") else "_"
+        for character in path.name
+    ) or "audit-evidence.pdf"
+    return StreamingResponse(
+        _stream_audit_snapshot(snapshot),
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Length": str(size),
+            "Content-Disposition": f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quote(path.name, safe="")}',
+        },
+    )
 
 
 @router.post("/audit-findings", status_code=201)

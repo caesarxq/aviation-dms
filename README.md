@@ -26,7 +26,7 @@ aviation-dms/
 │   │   ├── database.py      # SQLite schema, seed data, migrations
 │   │   └── notifications.py # Deadline/ expiry notification scheduler
 │   ├── data/                # SQLite DB + uploads (gitignored)
-│   └── tests/               # pytest suite (80 tests)
+│   └── tests/               # pytest suite
 ├── frontend/                # React 18 + TypeScript + Vite + Tailwind
 │   ├── src/
 │   │   ├── App.tsx          # Lazy-loaded routes (Suspense)
@@ -39,7 +39,7 @@ aviation-dms/
 │   │   ├── pages/           # Route pages (Dashboard, DocumentEditor, etc.)
 │   │   ├── test/            # Vitest setup
 │   │   └── utils/           # diff.ts, inlineSuggestion
-│   ├── e2e/                 # Playwright smoke tests (14 tests)
+│   ├── e2e/                 # Playwright smoke and isolated mock-backed tests
 │   ├── vitest.config.ts
 │   └── tsconfig.json
 ├── docker-compose.yml       # HTTPS production stack; see docs/PRODUCTION-DEPLOYMENT.md
@@ -91,6 +91,8 @@ npm run test:e2e     # Playwright E2E smoke tests
 
 The frontend proxies `/api` to `http://localhost:8000` in dev.
 
+**E2E safety:** `npm run test:e2e` is mutating: the smoke suite creates and updates backend records. Run it only with a disposable, seeded local database selected by `DMS_DB_PATH` and dedicated test-only accounts/credentials (`KFL_E2E_USER` and `KFL_E2E_PASSWORD`). Because Vite proxies API requests to `localhost:8000`, do not run this suite while that backend is connected to staging, production, or user data. If the target cannot be proven disposable, do not run the E2E suite.
+
 ### Docker
 
 Local development should use the backend and Vite commands above. The root `docker-compose.yml` is a production-shaped HTTPS deployment and intentionally requires a hostname, SMTP configuration, and a mounted bootstrap-token file; it will not start with development defaults. Follow [`docs/PRODUCTION-DEPLOYMENT.md`](docs/PRODUCTION-DEPLOYMENT.md) for staging/production setup and release gates.
@@ -101,7 +103,7 @@ Local development should use the backend and Vite commands above. The root `dock
 
 Identity is supplied via request headers:
 - `X-Role` — one of the 16 known roles
-- `X-Actor` — the seeded user ID (e.g. `u-admin`, `u-quality`, `u-safety`)
+- `X-Actor` — a canonical or retained legacy user ID (e.g. `u-admin`, `u-quality`, `u-safety/security`)
 
 Invalid or unknown actor/role pairs return `401`.
 
@@ -114,7 +116,7 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | Role | Access | Key capabilities |
 |------|--------|------------------|
 | `system_admin` | L4 | All permissions, observability |
-| `accountable_manager` | L4 | Executive oversight, approve/publish |
+| `accountable_manager` | L4 | Organization overview, approve/publish |
 | `head_quality` | L3 | Document approve/publish, QA, audits |
 | `head_safety` | L3 | Safety SMS, occurrences, investigations |
 | `head_security` | L3 | Security records, audit read |
@@ -127,10 +129,12 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | `dg_coordinator` | L2 | Dangerous goods, safety read |
 | `records_custodian` | L2 | Retention, legal holds |
 | `independent_auditor` | L2 | Audit/compliance read |
-| `occurrence_reporter` | L1 | Occurrence reporting only |
-| `as_contracted` | L1 | Read-only operational/safety info |
+| `occurrence_reporter` | L1 | Safety read and occurrence reporting |
+| `as_contracted` | L1 | Baseline read-only access; contract-specific scope is assigned separately |
 
 Separation of duties: a change proposer cannot approve/reject/publish their own change.
+
+New users should follow the [User Onboarding Procedure](docs/USER-ONBOARDING-PROCEDURE.md). Administrators should use the [Onboarding Runbook](docs/ONBOARDING-RUNBOOK.md) for roster reconciliation and controlled invitations.
 
 ## Document Control Workflow
 
@@ -226,8 +230,11 @@ GET    /api/p2/personnel/expiring-licenses
 POST   /api/p2/aircraft/{id}/insurance             # Aircraft insurance + expiry tracking
 GET    /api/p2/aircraft/{id}/insurance
 GET    /api/p2/insurance/expiring
-POST   /api/p2/personnel/uploads/file              # Multipart file upload
-PATCH  /api/p2/personnel/uploads/{id}/verify       # Verify/reject upload
+POST   /api/p2/personnel/uploads/file              # Private multipart credential upload
+GET    /api/p2/personnel/uploads/{person_id}       # Paginated own uploads/staff view; status, limit, offset
+GET    /api/p2/personnel/uploads                   # Staff verification queue
+GET    /api/p2/personnel/uploads/{id}/file         # Authenticated private download
+PATCH  /api/p2/personnel/uploads/{id}/verify       # Independent verify/reject decision
 ```
 
 ## Database
@@ -240,6 +247,7 @@ SQLite at `backend/data/dms.db`. Schema includes:
 - `change_requests` — formal change requests with SoD
 - `audit_events` — immutable audit trail
 - `personnel_licenses` / `license_renewal_history` — license expiry tracking
+- `personnel_uploads` — private credential file metadata, SHA-256 integrity, and independent review status
 - `aircraft_insurance` / `insurance_renewal_history` — insurance expiry tracking
 - `notifications` — deadline/expiry notifications
 
@@ -255,14 +263,12 @@ SQLite at `backend/data/dms.db`. Schema includes:
 
 ```bash
 # Backend
-cd backend
-python -m pytest -q          # 80 tests
+(cd backend && python -m pytest -q)
 
 # Frontend
-cd frontend
-npm test                     # Vitest unit tests (14 tests)
-npm run test:e2e             # Playwright E2E smoke tests (14 tests)
-npm run build                # TypeScript + Vite production build
+(cd frontend && npm test)       # Vitest unit tests
+(cd frontend && npm run test:e2e) # Playwright E2E smoke tests
+(cd frontend && npm run build)  # TypeScript + Vite production build
 ```
 
 ## Environment Variables
@@ -276,6 +282,7 @@ npm run build                # TypeScript + Vite production build
 | `PUBLIC_APP_URL` | localhost in local dev | HTTPS base URL used for password-reset links |
 | `KFL_BOOTSTRAP_TOKEN_FILE` | unset locally | Protected file containing the one-time production bootstrap token |
 | `UPLOAD_DIR` | `data/uploads` | Multipart upload storage |
+| `FLIGHT_RELEASE_ENABLED` | `false` | Disabled until source-to-rule mapping and postholder validation are complete |
 | `SMTP_*` | unset in local dev | Required production email/reset delivery settings |
 | `NOTIFICATION_ENABLED` | `false` locally | Enables configured email notifications |
 

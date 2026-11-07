@@ -8,6 +8,7 @@ services:
       - "8000"
     environment:
       DEV_MODE: "false"
+      FLIGHT_RELEASE_ENABLED: "${FLIGHT_RELEASE_ENABLED:-false}"
       DMS_TRUSTED_FRONTEND_IP: "172.31.254.3"
       RATE_LIMIT_REQUESTS_PER_MIN: "${RATE_LIMIT_REQUESTS_PER_MIN:-100}"
       RATE_LIMIT_WINDOW_SECONDS: "${RATE_LIMIT_WINDOW_SECONDS:-60}"
@@ -15,6 +16,7 @@ services:
       SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-28800}"
       SESSION_ABSOLUTE_MAX_SECONDS: "${SESSION_ABSOLUTE_MAX_SECONDS:-86400}"
       DMS_DB_PATH: /app/data/dms.db
+      UPLOAD_DIR: /app/data/uploads
       SESSION_COOKIE_SECURE: "true"
       AUTH_ALLOWED_ORIGINS: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
       CORS_ORIGINS: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"

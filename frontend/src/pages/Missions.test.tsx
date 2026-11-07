@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext } from "../auth/AuthContext";
@@ -30,6 +30,28 @@ function renderPage(items: typeof missions = missions, permissions: string[] = [
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.get).mockResolvedValue({ data: missions }); });
 
 describe("Missions list filters", () => {
+  it("creates a planned mission with operational context and makes the release boundary explicit", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.post).mockResolvedValue({ data: { mission_id: "MSN-NEW" } } as never);
+    renderPage([]);
+    await user.click(screen.getByRole("button", { name: "New Mission" }));
+    await user.type(screen.getByLabelText(/Mission title/), "Coastal survey");
+    await user.clear(screen.getByLabelText(/Mission type/));
+    await user.type(screen.getByLabelText(/Mission type/), "survey");
+    await user.clear(screen.getByLabelText(/Priority/));
+    await user.type(screen.getByLabelText(/Priority/), "normal");
+    fireEvent.change(screen.getByLabelText(/Planned date/), { target: { value: "2026-11-20" } });
+    await user.type(screen.getByLabelText(/Location/), "Mombasa coast");
+    await user.type(screen.getByLabelText(/Description/), "Coastal mapping mission");
+    expect(screen.getByText(/Creating a planned mission does not authorize flight/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Create Mission" }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/p1/missions", expect.objectContaining({
+      title: "Coastal survey", mission_type: "survey", priority: "normal", planned_date: "2026-11-20",
+      location: "Mombasa coast", description: "Coastal mapping mission",
+    })));
+  });
+
   it("filters mission records independently from the create form and by status", async () => {
     const user = userEvent.setup();
     renderPage(missions, undefined, undefined, (config) => missions.filter((mission: any) =>

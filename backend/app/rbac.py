@@ -19,7 +19,7 @@ PERMISSIONS = [
     "change_request:approve", "distribution:manage", "retention:manage", "legal_hold:manage",
     "compliance:read", "compliance:manage", "audit:read", "audit:manage",
     "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
-    "audit_report:read", "audit_report:create",
+    "audit_report:read", "audit_report:create", "organization:overview",
     "safety:read", "safety:create", "safety:update", "safety:close",
     "risk_assessment:approve",
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
@@ -37,7 +37,7 @@ ROLE_PERMISSIONS = {
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
         "flight:release", "risk_assessment:approve", "security:read_sensitive", "security:manage",
-        "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
+        "audit_report:read", "organization:overview", "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
     },
     "librarian": {
         "document:create", "document:read", "document:update", "document:propose", "document:annotate",
@@ -49,7 +49,7 @@ ROLE_PERMISSIONS = {
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
         "audit:read", "audit:manage", "safety:read", "safety:create", "safety:update", "safety:close",
         "roc:read", "aircraft:read", "personnel:read", "personnel:view",
-        "audit_finding:read", "audit_finding:create", "audit_finding:update",
+        "audit_report:read", "audit_finding:read", "audit_finding:create", "audit_finding:update",
     },
     "head_safety": {
         "document:read", "document:propose", "document:annotate", "safety:read", "safety:create",

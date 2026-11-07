@@ -48,11 +48,10 @@ export function WelcomePage() {
     try {
       if (selectedRole !== onboarding.active_role) {
         await switchRole(selectedRole);
-        await refreshProfile();
       }
       await api.post("/p0/auth/me/onboarding/complete");
-      await refreshProfile();
-      navigate(getPostLoginPath(profile), { replace: true });
+      const completedProfile = await refreshProfile();
+      navigate(getPostLoginPath(completedProfile), { replace: true });
     } catch (cause: any) {
       setError(cause?.response?.data?.detail || "Unable to complete onboarding. Try again.");
     } finally {
@@ -68,8 +67,16 @@ export function WelcomePage() {
         <p className="mb-5 text-center text-sm text-kfl-muted">Let's confirm your access profile before you start.</p>
         <div className="space-y-4">
           <div className="bg-kfl-surface-subtle rounded p-4">
+            <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Name</p>
+            <p className="text-sm text-kfl-text">{onboarding.full_name || profile?.user.full_name || "Not listed"}</p>
+          </div>
+          <div className="bg-kfl-surface-subtle rounded p-4">
             <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Canonical ID</p>
             <p className="text-sm font-mono text-kfl-text">{onboarding.canonical_user_id}</p>
+          </div>
+          <div className="bg-kfl-surface-subtle rounded p-4">
+            <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Department</p>
+            <p className="text-sm text-kfl-text">{profile?.user.department || "Not listed — confirm with your administrator"}</p>
           </div>
           <div className="bg-kfl-surface-subtle rounded p-4">
             <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Your assigned roles</p>

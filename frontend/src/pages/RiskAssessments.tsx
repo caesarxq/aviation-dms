@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
-import { ShieldCheck, Plus } from "lucide-react";
+import { CheckCircle, ShieldCheck, Plus } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useToast } from "../components/ui/Toast";
+import { useAuth } from "../auth/AuthContext";
+import type { RiskAssessment } from "../types";
 
 function riskClass(risk: string) {
   switch (risk) {
@@ -19,20 +22,32 @@ function riskClass(risk: string) {
 function statusClass(status: string) {
   switch (status) {
     case "draft": return "app-status app-status-info";
-    case "under_review": return "app-status app-status-warning";
+    case "scrutiny_required": return "app-status app-status-warning";
     case "approved": return "app-status app-status-healthy";
-    case "rejected": return "app-status app-status-critical";
-    case "implemented": return "app-status app-status-healthy";
+    case "cancelled": return "app-status app-status-critical";
     default: return "app-status app-status-info";
   }
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
+}
+
+function riskModelLabel(model: string): string {
+  return model === "om_flight_26" ? "OM §2.6" : "SMS 5×5";
+}
+
 export function RiskAssessments() {
   const qc = useQueryClient();
-  const { data: assessments = [], isLoading } = useQuery({
-    queryKey: ["risk-assessments"],
-    queryFn: () => safetyApi.listRiskAssessments(),
-  });
+  const { hasPermission } = useAuth();
+  const { toast } = useToast();
+  const canCreate = hasPermission("safety:create");
+  const canApprove = hasPermission("risk_assessment:approve");
+  const pageSize = 50;
+  const [statusFilter, setStatusFilter] = useState("");
+  const [riskFilter, setRiskFilter] = useState("");
+  const [page, setPage] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -40,12 +55,49 @@ export function RiskAssessments() {
   const [newHazardId, setNewHazardId] = useState("");
   const [occurrenceId, setOccurrenceId] = useState("");
   const [missionId, setMissionId] = useState("");
+  const [missionSearch, setMissionSearch] = useState("");
+  const [riskModel, setRiskModel] = useState("sms_5x5");
   const [likelihood, setLikelihood] = useState("possible");
   const [severity, setSeverity] = useState("minor");
   const [riskLevel, setRiskLevel] = useState("medium");
+  const [exposure, setExposure] = useState("possible");
   const [mitigationMeasures, setMitigationMeasures] = useState("");
   const [residualRisk, setResidualRisk] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [lastCreated, setLastCreated] = useState<RiskAssessment | null>(null);
+
+  const { data: fetchedAssessments = [], isLoading, isError, error, refetch } = useQuery<RiskAssessment[]>({
+    queryKey: ["risk-assessments", statusFilter, riskFilter, page],
+    queryFn: () => safetyApi.listRiskAssessments({
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(riskFilter ? { risk_level: riskFilter } : {}),
+      limit: pageSize + 1,
+      offset: page * pageSize,
+    }),
+  });
+  const hasNextPage = fetchedAssessments.length > pageSize;
+  const assessments = fetchedAssessments.slice(0, pageSize);
+  const {
+    data: summary,
+    isLoading: summaryLoading,
+    isError: summaryError,
+    refetch: refetchSummary,
+  } = useQuery({
+    queryKey: ["risk-assessments-summary"],
+    queryFn: () => safetyApi.getRiskAssessmentSummary(),
+  });
+  const { data: plannedMissions = [], isError: missionsError } = useQuery({
+    queryKey: ["risk-assessment-planned-missions", missionSearch],
+    queryFn: () => safetyApi.listMissions({
+      status: "planned",
+      ...(missionSearch.trim() ? { search: missionSearch.trim() } : {}),
+      limit: 100,
+      offset: 0,
+    }),
+    enabled: showForm,
+  });
 
   const addHazard = () => {
     const hid = newHazardId.trim();
@@ -61,22 +113,32 @@ export function RiskAssessments() {
   };
 
   const { errors: raErrors, isValid: raIsValid } = useValidation(
-    { title, description, likelihood, severity, risk_level: riskLevel },
+    {
+      title,
+      description,
+      likelihood,
+      severity,
+      risk_level: riskModel === "sms_5x5" ? riskLevel : "not_applicable",
+      exposure: riskModel === "om_flight_26" ? exposure : "not_applicable",
+    },
     {
       title: { required: true, minLength: 2 },
       description: { required: true, minLength: 5 },
       likelihood: { required: true },
       severity: { required: true },
-      risk_level: { required: true },
+      ...(riskModel === "sms_5x5" ? { risk_level: { required: true } } : { exposure: { required: true } }),
     }
   );
 
   useUnsavedChanges(showForm && dirty);
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => safetyApi.createRiskAssessment(data),
-    onSuccess: () => {
+    mutationFn: (data: Record<string, unknown>) => safetyApi.createRiskAssessment(data),
+    onSuccess: (created: RiskAssessment) => {
       qc.invalidateQueries({ queryKey: ["risk-assessments"] });
+      qc.invalidateQueries({ queryKey: ["risk-assessments-summary"] });
+      setLastCreated(created);
+      setCreateError("");
       setShowForm(false);
       setDirty(false);
       setTitle("");
@@ -85,18 +147,34 @@ export function RiskAssessments() {
       setNewHazardId("");
       setOccurrenceId("");
       setMissionId("");
+      setRiskModel("sms_5x5");
       setLikelihood("possible");
       setSeverity("minor");
       setRiskLevel("medium");
+      setExposure("possible");
       setMitigationMeasures("");
       setResidualRisk("");
+      toast({ title: "Risk assessment recorded", message: "The server-calculated risk result is shown below.", type: "success" });
+    },
+    onError: (mutationError: unknown) => {
+      const message = getErrorMessage(mutationError, "Unable to create the risk assessment. Please try again.");
+      setCreateError(message);
+      toast({ title: "Risk assessment not saved", message, type: "error" });
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => safetyApi.updateRiskAssessment(id, data),
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => safetyApi.approveRiskAssessment(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["risk-assessments"] });
+      qc.invalidateQueries({ queryKey: ["risk-assessments-summary"] });
+      setActionError("");
+      toast({ title: "Risk assessment approved", message: "The independent approval is recorded.", type: "success" });
+    },
+    onError: (mutationError: unknown) => {
+      const message = getErrorMessage(mutationError, "Unable to approve this risk assessment.");
+      setActionError(message);
+      toast({ title: "Approval not recorded", message, type: "error" });
     },
   });
 
@@ -108,30 +186,50 @@ export function RiskAssessments() {
           <h1 className="app-title">Risk Assessments</h1>
           <p className="app-subtitle">Assess hazards and occurrences, define mitigations, and track residual risk.</p>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
+        {canCreate && <button
+          type="button"
+          onClick={() => {
+            setShowForm(!showForm);
+            setCreateError("");
+            setLastCreated(null);
+          }}
           className="app-btn-primary"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Assessment"}
-        </button>
+        </button>}
       </header>
 
+      {lastCreated && (
+        <div role="alert" className={`mb-4 rounded border p-3 text-sm ${lastCreated.flight_cancelled ? "border-rose-300 bg-rose-50 text-rose-900" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
+          <strong>Assessment recorded: {lastCreated.assessment_id}</strong>
+          <p className="mt-1">
+            Server-calculated {riskModelLabel(lastCreated.risk_model)} result: risk score {lastCreated.risk_score ?? "—"}, {lastCreated.risk_level}.
+          </p>
+          {lastCreated.flight_cancelled && <p className="mt-1 font-semibold">Flight cancelled by this assessment; flight release is blocked.</p>}
+          {!lastCreated.flight_cancelled && lastCreated.status !== "approved" && <p className="mt-1">Independent approval is required before flight release.</p>}
+          {lastCreated.mission_id && <p className="mt-1">Linked assessment for mission {lastCreated.mission_id}.</p>}
+        </div>
+      )}
+
+      {summaryError && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        Unable to load risk assessment metrics. <button type="button" className="font-semibold underline" onClick={() => void refetchSummary()}>Retry metrics</button>
+      </div>}
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="app-surface p-4">
           <div className="app-label">Total Assessments</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-text">{assessments.length}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-text">{summaryLoading ? "…" : summaryError ? "—" : summary?.total ?? 0}</div>
         </div>
         <div className="app-surface p-4">
-          <div className="app-label">Draft</div>
-          <div className="mt-2 text-2xl font-bold text-amber-700">{assessments.filter((r: any) => r.status === "draft").length}</div>
+          <div className="app-label">Awaiting Approval</div>
+          <div className="mt-2 text-2xl font-bold text-amber-700">{summaryLoading ? "…" : summaryError ? "—" : (summary?.draft ?? 0) + (summary?.scrutiny_required ?? 0)}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">High / Critical</div>
-          <div className="mt-2 text-2xl font-bold text-red-700">{assessments.filter((r: any) => r.risk_level === "high" || r.risk_level === "critical").length}</div>
+          <div className="mt-2 text-2xl font-bold text-red-700">{summaryLoading ? "…" : summaryError ? "—" : summary?.high_or_critical ?? 0}</div>
         </div>
         <div className="app-surface p-4">
-          <div className="app-label">Implemented</div>
-          <div className="mt-2 text-2xl font-bold text-emerald-700">{assessments.filter((r: any) => r.status === "implemented").length}</div>
+          <div className="app-label">Approved</div>
+          <div className="mt-2 text-2xl font-bold text-emerald-700">{summaryLoading ? "…" : summaryError ? "—" : summary?.approved ?? 0}</div>
         </div>
       </section>
 
@@ -140,11 +238,18 @@ export function RiskAssessments() {
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
               <div className="app-label mb-1">New Risk Assessment</div>
-              <p className="text-xs text-kfl-muted">Assess a hazard, occurrence, or mission for likelihood, severity, and mitigation.</p>
+              <p className="text-xs text-kfl-muted">Select the applicable risk model. The server calculates the result and keeps approval separate from assessment.</p>
             </div>
-            <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+            <button type="button" onClick={() => { setShowForm(false); setDirty(false); setCreateError(""); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
           </div>
+          {createError && <div role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{createError}</div>}
           <div className="space-y-3 mb-4">
+            <FormField htmlFor="ra_model" label="Risk model" hint="Choose the model required for this assessment." required>
+              <select id="ra_model" name="risk_model" className="app-input" value={riskModel} onChange={(e) => { setRiskModel(e.target.value); setDirty(true); }}>
+                <option value="sms_5x5">SMS 5×5 matrix</option>
+                <option value="om_flight_26">OM §2.6 flight risk tool</option>
+              </select>
+            </FormField>
             <FormField htmlFor="ra_title" label="Assessment title" hint="Summarize the risk being assessed." required>
               <input id="ra_title" name="title" aria-describedby="ra_title-error" aria-invalid={!!raErrors.title} className={`app-input ${raErrors.title ? "border-rose-400" : ""}`} placeholder="Assessment title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {raErrors.title && <p id="ra_title-error" className="text-[11px] text-rose-700 mt-1">{raErrors.title}</p>}
@@ -201,45 +306,86 @@ export function RiskAssessments() {
                 </p>
               </FormField>
             </div>
-            <FormField htmlFor="ra_occurrence" label="Occurrence ID" hint="Link to an existing occurrence.">
-              <input id="ra_occurrence" name="occurrence_id" className="app-input" placeholder="e.g. OCC-..." value={occurrenceId} onChange={(e) => { setOccurrenceId(e.target.value); setDirty(true); }} />
-            </FormField>
+            <div className="space-y-3">
+              <FormField htmlFor="ra_occurrence" label="Occurrence ID" hint="Optional link to an existing occurrence.">
+                <input id="ra_occurrence" name="occurrence_id" className="app-input" placeholder="e.g. OCC-..." value={occurrenceId} onChange={(e) => { setOccurrenceId(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="ra_mission_search" label="Search planned missions" hint="Search by mission ID, title, or location.">
+                <input
+                  id="ra_mission_search"
+                  name="mission_search"
+                  className="app-input"
+                  value={missionSearch}
+                  onChange={(e) => setMissionSearch(e.target.value)}
+                />
+              </FormField>
+              <FormField htmlFor="ra_mission" label="Mission" hint="Optional. This assessment becomes the mission's active risk assessment.">
+                <select id="ra_mission" name="mission_id" className="app-input" value={missionId} onChange={(e) => { setMissionId(e.target.value); setDirty(true); }}>
+                  <option value="">No mission link</option>
+                  {plannedMissions.map((mission: { mission_id: string; title: string }) => (
+                    <option key={mission.mission_id} value={mission.mission_id}>{mission.mission_id} — {mission.title}</option>
+                  ))}
+                </select>
+                {missionsError && <p role="alert" className="mt-1 text-[11px] text-rose-700">Unable to load planned missions; an assessment can still be created without a mission link.</p>}
+              </FormField>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="app-label">Likelihood</label>
+            <FormField htmlFor="ra_likelihood" label="Likelihood" required>
               <select id="ra_likelihood" name="likelihood" value={likelihood} onChange={(e) => { setLikelihood(e.target.value); setDirty(true); }} className="app-input">
                 <option value="rare">Rare</option>
+                <option value="remote">Remote</option>
                 <option value="unlikely">Unlikely</option>
+                <option value="occasional">Occasional</option>
                 <option value="possible">Possible</option>
+                <option value="probable">Probable</option>
                 <option value="likely">Likely</option>
-                <option value="certain">Certain</option>
+                <option value="frequent">Frequent</option>
+                <option value="almost_certain">Almost certain</option>
               </select>
-            </div>
-            <div>
-              <label className="app-label">Severity</label>
+            </FormField>
+            <FormField htmlFor="ra_severity" label="Severity" required>
               <select id="ra_severity" name="severity" value={severity} onChange={(e) => { setSeverity(e.target.value); setDirty(true); }} className="app-input">
                 <option value="negligible">Negligible</option>
                 <option value="minor">Minor</option>
                 <option value="major">Major</option>
+                <option value="moderate">Moderate</option>
                 <option value="hazardous">Hazardous</option>
+                <option value="critical">Critical</option>
                 <option value="catastrophic">Catastrophic</option>
               </select>
-            </div>
+            </FormField>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="app-label">Risk Level</label>
-              <select id="ra_risk" name="risk_level" value={riskLevel} onChange={(e) => { setRiskLevel(e.target.value); setDirty(true); }} className="app-input">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
+            {riskModel === "sms_5x5" ? (
+              <FormField htmlFor="ra_risk" label="Risk level" hint="The backend validates the selected band against the SMS matrix." required>
+                <select id="ra_risk" name="risk_level" aria-invalid={!!raErrors.risk_level} className={`app-input ${raErrors.risk_level ? "border-rose-400" : ""}`} value={riskLevel} onChange={(e) => { setRiskLevel(e.target.value); setDirty(true); }}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+                {raErrors.risk_level && <p className="mt-1 text-[11px] text-rose-700">{raErrors.risk_level}</p>}
+              </FormField>
+            ) : (
+              <FormField htmlFor="ra_exposure" label="Exposure" hint="Required by the OM §2.6 flight risk model." required>
+                <select id="ra_exposure" name="exposure" aria-invalid={!!raErrors.exposure} className={`app-input ${raErrors.exposure ? "border-rose-400" : ""}`} value={exposure} onChange={(e) => { setExposure(e.target.value); setDirty(true); }}>
+                  <option value="rare">Rare</option>
+                  <option value="remote">Remote</option>
+                  <option value="unlikely">Unlikely</option>
+                  <option value="occasional">Occasional</option>
+                  <option value="possible">Possible</option>
+                  <option value="probable">Probable</option>
+                  <option value="likely">Likely</option>
+                  <option value="frequent">Frequent</option>
+                  <option value="almost_certain">Almost certain</option>
+                </select>
+                {raErrors.exposure && <p className="mt-1 text-[11px] text-rose-700">{raErrors.exposure}</p>}
+              </FormField>
+            )}
+            <div className="flex items-end text-xs text-kfl-muted">
+              Risk result, scrutiny, and cancellation decisions are returned by the server and cannot be client-overridden.
             </div>
-            <FormField htmlFor="ra_mission" label="Mission ID" hint="Optional mission link.">
-              <input id="ra_mission" name="mission_id" className="app-input" placeholder="e.g. MSN-..." value={missionId} onChange={(e) => { setMissionId(e.target.value); setDirty(true); }} />
-            </FormField>
           </div>
           <div className="space-y-3 mb-4">
             <FormField htmlFor="ra_mitigation" label="Mitigation measures" hint="Controls or actions to reduce likelihood or severity.">
@@ -250,21 +396,24 @@ export function RiskAssessments() {
             </FormField>
           </div>
           <button
+            type="button"
             disabled={!raIsValid || createMutation.isPending}
-            onClick={() =>
+            onClick={() => {
+              setCreateError("");
               createMutation.mutate({
-                title,
-                description,
+                title: title.trim(),
+                description: description.trim(),
                 hazard_ids: hazardIds,
-                occurrence_id: occurrenceId || null,
+                occurrence_id: occurrenceId.trim() || null,
                 mission_id: missionId || null,
                 likelihood,
                 severity,
-                risk_level: riskLevel,
-                mitigation_measures: mitigationMeasures || null,
-                residual_risk: residualRisk || null,
-              })
-            }
+                risk_model: riskModel,
+                ...(riskModel === "sms_5x5" ? { risk_level: riskLevel } : { exposure }),
+                mitigation_measures: mitigationMeasures.trim() || null,
+                residual_risk: residualRisk.trim() || null,
+              });
+            }}
             className="app-btn-primary w-full"
           >
             {createMutation.isPending ? "Submitting…" : "Submit Assessment"}
@@ -274,23 +423,19 @@ export function RiskAssessments() {
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-semibold text-kfl-text">Risk Assessments</div>
-          <div className="flex gap-2">
-            <select id="ra_status_filter" name="status" aria-label="Filter by status" className="app-input w-full md:w-auto" onChange={(e) => {
-              const val = e.target.value;
-              qc.setQueryData(["risk-assessments"], (old: any[]) => val ? old.filter((r: any) => r.status === val) : old);
-            }}>
+          <div>
+            <div className="text-sm font-semibold text-kfl-text">Risk Assessments</div>
+            <p className="mt-1 text-xs text-kfl-muted">Filters are applied on the server before pagination.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select id="ra_status_filter" name="status" aria-label="Filter by status" className="app-input w-full md:w-auto" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }}>
               <option value="">All statuses</option>
               <option value="draft">Draft</option>
-              <option value="under_review">Under Review</option>
+              <option value="scrutiny_required">Scrutiny required</option>
               <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="implemented">Implemented</option>
+              <option value="cancelled">Cancelled</option>
             </select>
-            <select id="ra_risk_filter" name="risk_level" aria-label="Filter by risk level" className="app-input w-full md:w-auto" onChange={(e) => {
-              const val = e.target.value;
-              qc.setQueryData(["risk-assessments"], (old: any[]) => val ? old.filter((r: any) => r.risk_level === val) : old);
-            }}>
+            <select id="ra_risk_filter" name="risk_level" aria-label="Filter by risk level" className="app-input w-full md:w-auto" value={riskFilter} onChange={(e) => { setPage(0); setRiskFilter(e.target.value); }}>
               <option value="">All risk levels</option>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
@@ -300,71 +445,83 @@ export function RiskAssessments() {
           </div>
         </div>
 
+        {actionError && <div role="alert" className="m-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{actionError}</div>}
         {isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">Loading risk assessments…</div>
+        ) : isError ? (
+          <div className="p-10 text-center" role="alert">
+            <p className="text-sm font-semibold text-rose-800">Unable to load risk assessments: {getErrorMessage(error, "Please try again.")}</p>
+            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry risk assessments</button>
+          </div>
         ) : assessments.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
             <ShieldCheck size={26} className="mx-auto mb-2 text-kfl-muted" />
-            <p className="text-sm font-bold text-kfl-text">No risk assessments recorded.</p>
-            <p className="mt-1 text-xs text-kfl-muted">Create your first assessment to begin risk tracking.</p>
+            <p className="text-sm font-bold text-kfl-text">{statusFilter || riskFilter ? "No assessments match these filters." : "No risk assessments recorded."}</p>
+            {!statusFilter && !riskFilter && <p className="mt-1 text-xs text-kfl-muted">Create an assessment to begin risk tracking.</p>}
+            {(statusFilter || riskFilter) && <button type="button" className="app-btn-secondary mt-3" onClick={() => { setStatusFilter(""); setRiskFilter(""); setPage(0); }}>Clear filters</button>}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
-                <tr>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Assessment ID</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Title</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Linked To</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Risk</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
-                  <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-kfl-border">
-                {assessments.map((r: any) => (
-                  <tr key={r.assessment_id} className="transition hover:bg-kfl-surface-subtle group">
-                    <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{r.assessment_id}</td>
-                    <td className="px-4 py-4">
-                      <div className="font-semibold text-kfl-text">{r.title}</div>
-                      <div className="mt-1 text-xs text-kfl-muted line-clamp-1">{r.description}</div>
-                    </td>
-                    <td className="px-4 py-4 text-sm text-kfl-secondary">
-                      {r.hazard_ids?.length
-                        ? r.hazard_ids.map((h: string) => `Hazard ${h}`).join(", ")
-                        : r.hazard_id
-                          ? `Hazard ${r.hazard_id}`
-                          : r.occurrence_id
-                            ? `Occurrence ${r.occurrence_id}`
-                            : r.mission_id
-                              ? `Mission ${r.mission_id}`
-                              : "—"}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={riskClass(r.risk_level)}>{r.risk_level}</span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={statusClass(r.status)}>{r.status}</span>
-                    </td>
-                    <td className="px-4 py-4 text-right text-sm">
-                      <select
-                        aria-label={`Update status for ${r.assessment_id}`}
-                        className="app-input w-auto text-xs"
-                        value={r.status}
-                        onChange={(e) => updateMutation.mutate({ id: r.assessment_id, data: { status: e.target.value } })}
-                      >
-                        <option value="draft">Draft</option>
-                        <option value="under_review">Under Review</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="implemented">Implemented</option>
-                      </select>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Assessment ID</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Title</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Linked To</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Model / Score</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Risk</th>
+                    <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
+                    <th className="px-4 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-kfl-border">
+                  {assessments.map((r) => {
+                    const links = [
+                      ...(r.hazard_ids ?? []).map((hazardId) => `Hazard ${hazardId}`),
+                      ...(r.occurrence_id ? [`Occurrence ${r.occurrence_id}`] : []),
+                      ...(r.mission_id ? [`Mission ${r.mission_id}`] : []),
+                    ];
+                    const approvalPending = ["draft", "scrutiny_required"].includes(r.status) && !r.flight_cancelled;
+                    const canApproveThis = canApprove && approvalPending && r.can_approve_for_current_user === true;
+                    return (
+                      <tr key={r.assessment_id} className="transition hover:bg-kfl-surface-subtle group">
+                        <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{r.assessment_id}</td>
+                        <td className="px-4 py-4">
+                          <div className="font-semibold text-kfl-text">{r.title}</div>
+                          <div className="mt-1 text-xs text-kfl-muted line-clamp-1">{r.description}</div>
+                          <div className="mt-1 text-[11px] text-kfl-muted">Assessor: {r.assessor_id}</div>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-kfl-secondary">{links.length ? links.join(", ") : "—"}</td>
+                        <td className="px-4 py-4 text-sm text-kfl-secondary">
+                          <div>{riskModelLabel(r.risk_model)}</div>
+                          <div className="mt-1 text-xs text-kfl-muted">Score {r.risk_score ?? "—"}{r.exposure ? ` · Exposure ${r.exposure}` : ""}</div>
+                        </td>
+                        <td className="px-4 py-4"><span className={riskClass(r.risk_level)}>{r.risk_level}</span></td>
+                        <td className="px-4 py-4"><span className={statusClass(r.status)}>{r.status.replace(/_/g, " ")}</span></td>
+                        <td className="px-4 py-4 text-right text-sm">
+                          {canApproveThis ? (
+                            <button type="button" aria-label={`Approve ${r.assessment_id}`} disabled={approveMutation.isPending} onClick={() => approveMutation.mutate(r.assessment_id)} className="app-btn-secondary inline-flex items-center gap-1 text-xs">
+                              <CheckCircle size={13} /> Approve
+                            </button>
+                          ) : canApprove && approvalPending && r.can_approve_for_current_user !== true ? (
+                            <span className="text-xs text-kfl-muted">Independent reviewer required</span>
+                          ) : <span className="text-xs text-kfl-muted">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-kfl-border p-4">
+              <span className="text-sm text-kfl-muted">Page {page + 1}</span>
+              <div className="flex gap-2">
+                <button type="button" className="app-btn-secondary" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>
+                <button type="button" className="app-btn-secondary" disabled={!hasNextPage || isLoading} onClick={() => setPage((current) => current + 1)}>Next page</button>
+              </div>
+            </div>
+          </>
         )}
       </section>
     </div>

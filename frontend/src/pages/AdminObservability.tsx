@@ -143,6 +143,7 @@ export default function AdminObservability() {
                 const assignedRoles = user.roles || [user.role];
                 const selectedRoles = roleDrafts[user.user_id] ?? assignedRoles;
                 const existingInvite = issuedInvites.find((inv) => inv.user_id === user.user_id);
+                const controlKey = encodeURIComponent(user.user_id).replace(/%/g, "_");
                 return (
                   <tr key={user.user_id}>
                     <td className="px-5 py-3">
@@ -157,11 +158,11 @@ export default function AdminObservability() {
                         </>
                       ) : user.is_active ? (
                         <div className="min-w-[230px] space-y-2">
-                          <label htmlFor={`roles-${user.user_id}`} className="block font-semibold">Assigned roles for {user.full_name}</label>
+                          <label htmlFor={`roles-${controlKey}`} className="block font-semibold">Assigned roles for {user.full_name}</label>
                           <p className="text-[10px] text-kfl-muted">Use Ctrl/Command to select multiple roles.</p>
                           <select
-                            id={`roles-${user.user_id}`}
-                            name={`roles-${user.user_id}`}
+                            id={`roles-${controlKey}`}
+                            name={`roles-${controlKey}`}
                             aria-label={`Assigned roles for ${user.full_name}`}
                             multiple
                             size={Math.min(5, Math.max(3, data?.role_matrix?.length || 3))}
@@ -192,9 +193,9 @@ export default function AdminObservability() {
                     <td className="px-5 py-3 text-xs text-kfl-text">
                       {!user.has_password && user.is_active ? (
                         <div className="space-y-2">
-                          <label htmlFor={`invite-email-${user.user_id}`} className="block font-semibold">Email for invite</label>
+                          <label htmlFor={`invite-email-${controlKey}`} className="block font-semibold">Email for invite</label>
                           <input
-                            id={`invite-email-${user.user_id}`}
+                            id={`invite-email-${controlKey}`}
                             type="email"
                             value={inviteUsername === user.user_id ? inviteUsername : user.email || user.username}
                             onChange={(event) => {

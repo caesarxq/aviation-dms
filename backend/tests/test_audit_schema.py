@@ -89,17 +89,17 @@ def test_quality_audit_finding_records_mutation_actor_and_semantic_event(client,
         row = conn.execute(
             "SELECT created_by, updated_by FROM quality_audit_findings WHERE finding_id = ?", (finding_id,)
         ).fetchone()
-        assert row == ("u-lib", "u-lib")
+        assert row == ("u-quality", "u-quality")
         events = conn.execute(
             "SELECT actor_id, action FROM audit_events WHERE entity_type='quality_audit_finding' AND entity_id=?",
             (finding_id,),
         ).fetchall()
-        assert events == [("u-lib", "created")]
+        assert events == [("u-quality", "created")]
         trigger = conn.execute(
             "SELECT actor_id, action FROM audit_events WHERE entity_type='quality_audit_findings' AND entity_id=?",
             (finding_id,),
         ).fetchone()
-        assert trigger == ("u-lib", "row_inserted")
+        assert trigger == ("u-quality", "row_inserted")
     finally:
         conn.close()
 

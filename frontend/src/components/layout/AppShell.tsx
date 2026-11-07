@@ -26,11 +26,12 @@ import {
   Award,
   LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../../api/safety";
 import { useAuth } from "../../auth/AuthContext";
-import { getPostLoginPath } from "../../auth/permissions";
+import { getPostLoginPath, ROLE_WORKSPACES } from "../../auth/permissions";
+import { WorkspaceGuide } from "./WorkspaceGuide";
 
 interface NavItem {
   to: string;
@@ -183,6 +184,11 @@ const sections: SectionProps[] = [
     ],
   },
   {
+    label: "Organization",
+    icon: BarChart3,
+    items: [{ to: "/organization-overview", icon: BarChart3, label: "Organization overview", permission: "organization:overview" }],
+  },
+  {
     label: "Administration",
     icon: Activity,
     items: [{ to: "/admin/observability", icon: Activity, label: "System Observability", role: "system_admin" }],
@@ -196,22 +202,33 @@ export function AppShell() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [roleSwitchError, setRoleSwitchError] = useState("");
   const [switchingRole, setSwitchingRole] = useState(false);
+  const [allModulesOpen, setAllModulesOpen] = useState(false);
   const homeRoute = getPostLoginPath(profile);
-  const homeLabel = homeRoute === "/" ? "Go to dashboard" : `Go to ${sections.flatMap((section) => section.items).find((item) => item.to === homeRoute)?.label ?? "account security"}`;
+  const allNavItems = sections.flatMap((section) => section.items);
+  const homeLabel = homeRoute === "/" ? "Go to dashboard" : `Go to ${allNavItems.find((item) => item.to === homeRoute)?.label ?? "account security"}`;
   const { data: unread } = useQuery({
     queryKey: ["unread-notifications"],
     queryFn: () => safetyApi.getUnreadCount(),
     refetchInterval: 60000,
-    enabled: hasPermission("safety:read"),
+    enabled: hasPermission("compliance:read"),
   });
 
   const unreadCount = unread?.unread_count ?? 0;
+  const activeRole = profile?.active_role ?? profile?.role ?? "";
+  const workspaceItems = (ROLE_WORKSPACES[activeRole]?.primaryPaths ?? [])
+    .map((path) => allNavItems.find((item) => item.to === path))
+    .filter((item): item is NavItem => Boolean(item && canSeeNavItem(item, activeRole, hasPermission)));
+  const workspacePaths = new Set(workspaceItems.map((item) => item.to));
   const visibleSections = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => canSeeNavItem(item, profile?.active_role, hasPermission)),
+      items: section.items.filter((item) => !workspacePaths.has(item.to) && canSeeNavItem(item, activeRole, hasPermission)),
     }))
     .filter((section) => section.items.length > 0);
+
+  useEffect(() => {
+    setAllModulesOpen(false);
+  }, [activeRole]);
 
   async function handleRoleSwitch(activeRole: string) {
     setRoleSwitchError("");
@@ -248,7 +265,7 @@ export function AppShell() {
           <button onClick={() => navigate(homeRoute)} className="rounded-md p-1 text-left focus-visible:ring-2 focus-visible:ring-sky-300" aria-label={homeLabel}>
             <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="h-12 w-auto object-contain object-left" />
           </button>
-          {hasPermission("safety:read") && (
+          {hasPermission("compliance:read") && (
             <button
               onClick={() => navigate("/notifications")}
               className="relative rounded-md p-2 text-slate-200 transition hover:bg-white/10 hover:text-white"
@@ -265,6 +282,22 @@ export function AppShell() {
         </div>
 
         <div className="space-y-2 px-1">
+          {workspaceItems.length > 0 && (
+            <nav aria-label="My workspace" className="mb-4 space-y-0.5">
+              <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200/50">My workspace</div>
+              {workspaceItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === "/"}
+                  className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+                >
+                  <item.icon size={16} className="shrink-0" />
+                  <span className="nav-label">{item.label}</span>
+                </NavLink>
+              ))}
+            </nav>
+          )}
           {hasPermission("safety:read") && (
             <NavLink
               to="/"
@@ -272,28 +305,41 @@ export function AppShell() {
               className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
             >
               <LayoutDashboard size={16} className="shrink-0" />
-              <span className="nav-label">Dashboard</span>
+              <span className="nav-label">Safety dashboard</span>
             </NavLink>
           )}
-          {visibleSections.map((section) => {
-            // Single-item sections render as direct nav links instead of collapsible sections
-            if (section.items.length === 1) {
-              const item = section.items[0];
-              if (!canSeeNavItem(item, profile?.active_role, hasPermission)) return null;
-              return (
-                <NavLink
-                  key={section.label}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
-                >
-                  <item.icon size={16} className="shrink-0" />
-                  <span className="nav-label">{item.label}</span>
-                </NavLink>
-              );
-            }
-            return <CollapsibleSection key={section.label} {...section} />;
-          })}
+          <button
+            type="button"
+            aria-label="All modules"
+            aria-expanded={allModulesOpen}
+            onClick={() => setAllModulesOpen((open) => !open)}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sky-200/70 hover:bg-white/10 transition"
+          >
+            <LayoutDashboard size={16} className="shrink-0" />
+            <span className="flex-1 text-left">All modules</span>
+            <ChevronDown size={14} className={`shrink-0 transition-transform ${allModulesOpen ? "" : "-rotate-90"}`} />
+          </button>
+          {allModulesOpen && (
+            <div aria-label="All modules navigation" className="space-y-2 pt-1">
+              {visibleSections.map((section) => {
+                if (section.items.length === 1) {
+                  const item = section.items[0];
+                  return (
+                    <NavLink
+                      key={section.label}
+                      to={item.to}
+                      end={item.to === "/"}
+                      className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+                    >
+                      <item.icon size={16} className="shrink-0" />
+                      <span className="nav-label">{item.label}</span>
+                    </NavLink>
+                  );
+                }
+                return <CollapsibleSection key={section.label} {...section} />;
+              })}
+            </div>
+          )}
         </div>
 
         <div role="region" aria-label="Account and session controls" className="mobile-session-controls mt-auto border-t border-white/10 px-3 pt-4 text-[11px] text-slate-400">
@@ -343,6 +389,13 @@ export function AppShell() {
               {loggingOut ? "Retrying…" : "Retry sign out"}
             </button>
           </div>
+        )}
+        {profile?.onboarding_completed && (
+          <WorkspaceGuide
+            key={profile.user.user_id}
+            userId={profile.user.user_id}
+            activeRole={profile.active_role}
+          />
         )}
         <Outlet />
       </main>

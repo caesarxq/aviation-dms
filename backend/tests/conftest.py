@@ -7,6 +7,7 @@ import asyncio
 TEST_DB = tempfile.mktemp(suffix=".db")
 os.environ["DMS_DB_PATH"] = TEST_DB
 os.environ["DEV_MODE"] = "true"
+os.environ["FLIGHT_RELEASE_ENABLED"] = "true"
 
 from fastapi.testclient import TestClient
 from app.main import app

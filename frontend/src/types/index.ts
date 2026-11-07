@@ -122,15 +122,30 @@ export interface RiskAssessment {
   likelihood: string;
   severity: string;
   risk_level: string;
+  risk_model: string;
+  exposure: string | null;
+  risk_score: number | null;
+  scrutiny_required: boolean;
+  flight_cancelled: boolean;
   mitigation_measures: string | null;
   residual_risk: string | null;
   assessor_id: string;
+  can_approve_for_current_user?: boolean;
   assessed_at: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
   status: string;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface RiskAssessmentSummary {
+  total: number;
+  draft: number;
+  scrutiny_required: number;
+  approved: number;
+  cancelled: number;
+  high_or_critical: number;
 }
 
 export interface Investigation {

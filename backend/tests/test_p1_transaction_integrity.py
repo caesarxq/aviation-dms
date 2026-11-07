@@ -11,6 +11,7 @@ from app.main import app
 
 
 ADMIN = {"X-Role": "system_admin", "X-Actor": "admin"}
+PLAN_REVIEWER = {"X-Role": "head_operations", "X-Actor": "u-ops"}
 
 
 def _id(prefix):
@@ -75,10 +76,11 @@ def test_flight_plan_approval_audit_failure_rolls_back_approval(monkeypatch):
                VALUES (?, ?, 'draft', ?, ?, ?, ?)""",
             (plan_id, mission_id, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
         )
+        conn.execute("UPDATE missions SET flight_plan_id = ? WHERE mission_id = ?", (plan_id, mission_id))
     _audit_failure(monkeypatch)
 
     with _client() as client:
-        response = client.patch(f"/api/p1/flight-plans/{plan_id}/approve", headers=ADMIN)
+        response = client.patch(f"/api/p1/flight-plans/{plan_id}/approve", headers=PLAN_REVIEWER)
 
     assert response.status_code == 500
     assert _scalar("SELECT status FROM flight_plans WHERE plan_id = ?", (plan_id,)) == "draft"
@@ -86,34 +88,48 @@ def test_flight_plan_approval_audit_failure_rolls_back_approval(monkeypatch):
 
 def test_flight_release_audit_failure_rolls_back_release_and_mission(monkeypatch):
     mission_id, plan_id, aircraft_id, roc_id = (_id("MSN"), _id("FP"), _id("AC"), _id("ROC"))
+    registration = _id("REG")
     now = "2026-11-03T00:00:00"
     with sqlite3.connect(database.DB_PATH) as conn:
         conn.execute(
             """INSERT INTO roc_register
-               (roc_id, roc_number, issue_date, expiry_date, status, max_altitude_agl,
+               (roc_id, roc_number, issue_date, expiry_date, status, max_altitude_agl, authorized_registrations,
                 created_at, updated_at, created_by, updated_by)
-               VALUES (?, 'TEST-ROC', ?, ?, 'active', 400, ?, ?, ?, ?)""",
-            (roc_id, (date.today() - timedelta(days=1)).isoformat(), (date.today() + timedelta(days=30)).isoformat(), now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
+               VALUES (?, 'TEST-ROC', ?, ?, 'active', 400, ?, ?, ?, ?, ?)""",
+            (roc_id, (date.today() - timedelta(days=1)).isoformat(), (date.today() + timedelta(days=30)).isoformat(), registration, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
         )
         conn.execute(
             """INSERT INTO aircraft
                (aircraft_id, registration, model, roc_id, status, opspec_authorized,
                 created_at, updated_at, created_by, updated_by)
                VALUES (?, ?, 'Test UAS', ?, 'active', 1, ?, ?, ?, ?)""",
-            (aircraft_id, _id("REG"), roc_id, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
+            (aircraft_id, registration, roc_id, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
         )
         conn.execute(
             """INSERT INTO missions
-               (mission_id, title, status, aircraft_id, roc_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, 'Release rollback test', 'planned', ?, ?, ?, ?, ?, ?)""",
+               (mission_id, title, status, aircraft_id, roc_id, max_altitude_agl, created_at, updated_at, created_by, updated_by)
+               VALUES (?, 'Release rollback test', 'planned', ?, ?, 300, ?, ?, ?, ?)""",
             (mission_id, aircraft_id, roc_id, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
         )
         conn.execute(
             """INSERT INTO flight_plans
-               (plan_id, mission_id, status, max_altitude_agl, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, 'approved', 300, ?, ?, ?, ?)""",
-            (plan_id, mission_id, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
+               (plan_id, mission_id, status, max_altitude_agl, approved_by, approved_at,
+                created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, 'approved', 300, ?, ?, ?, ?, ?, ?)""",
+            (plan_id, mission_id, PLAN_REVIEWER["X-Actor"], now, now, now, ADMIN["X-Actor"], ADMIN["X-Actor"]),
         )
+        conn.execute("UPDATE missions SET flight_plan_id = ? WHERE mission_id = ?", (plan_id, mission_id))
+        assessment_id = _id("RA")
+        conn.execute(
+            """INSERT INTO risk_assessments
+               (assessment_id, mission_id, title, likelihood, severity, risk_level, risk_model, exposure,
+                risk_score, scrutiny_required, flight_cancelled, assessor_id, assessed_at,
+                reviewed_by, reviewed_at, status, created_at, updated_at)
+               VALUES (?, ?, 'Low risk', 'rare', 'negligible', 'low', 'om_flight_26', 'rare',
+                       2, 0, 0, 'seed-assessor', ?, 'seed-reviewer', ?, 'approved', ?, ?)""",
+            (assessment_id, mission_id, now, now, now, now),
+        )
+        conn.execute("UPDATE missions SET risk_assessment_id = ? WHERE mission_id = ?", (assessment_id, mission_id))
 
     assert _scalar("SELECT opspec_authorized FROM aircraft WHERE aircraft_id = ?", (aircraft_id,)) == 1
     async def skip_crew_eligibility(*args, **kwargs):

@@ -69,16 +69,16 @@ The repository now includes:
 npm run mutation:pilot
 ```
 
-The pilot targets `DocumentOutline.tsx` and its focused unit tests. It completed in approximately 86 seconds and produced:
+The pilot targets `DocumentOutline.tsx` and `validation.ts` with their focused unit tests. The latest local run instrumented 218 mutants and ran 77 tests in approximately 2 minutes 44 seconds. It produced:
 
-- 133 mutants instrumented
-- 38% mutation score
-- 38 mutants killed
-- 57 mutants survived
-- 5 mutants with no coverage
-- 33 errors reported by the runner/mutant combinations
+- 71.43% overall mutation score (`DocumentOutline.tsx`: 59%; `validation.ts`: 94.44%)
+- 109 mutants killed
+- 43 mutants survived
+- 1 mutant with no coverage
+- 1 timeout
+- 64 runner errors reported across mutant/test combinations
 
-The pilot passed because the break threshold is intentionally `0`; the score is diagnostic, not an acceptance gate.
+The command exited successfully because the break threshold is intentionally `0`; the score is diagnostic, not an acceptance gate. The timeout and runner errors still need triage. Backend mutation testing is not configured.
 
 ### Interpretation
 
@@ -93,11 +93,12 @@ The low score is useful: the outline tests cover the main happy paths but do not
 
 ### Recommended rollout
 
-1. Improve unit tests for `DocumentOutline` and `diff.ts` until the pilot score is at least 70–80%.
+1. Improve `DocumentOutline` unit tests to lift its 59% score into the 70–80% range; add `diff.ts` only when it is included in the mutation pilot.
 2. Add mutation testing for proposal grouping and stale/ambiguous application logic.
-3. Add mutation testing for backend workflow transition helpers where tests are deterministic and fast.
-4. Keep full-page React mutation testing out of CI initially; cover those behaviors with Playwright and contract tests instead.
-5. Raise the Stryker break threshold gradually: `0 → 60 → 70 → 80`.
+3. Triage the Stryker timeout and runner errors before raising the break threshold.
+4. Add mutation testing for backend workflow transition helpers where tests are deterministic and fast.
+5. Keep full-page React mutation testing out of CI initially; cover those behaviors with Playwright and contract tests instead.
+6. Raise the Stryker break threshold gradually: `0 → 60 → 70 → 80`.
 
 ## Dependency note
 

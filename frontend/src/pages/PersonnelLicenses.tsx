@@ -144,8 +144,8 @@ export function PersonnelLicenses() {
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <FormField htmlFor="person_id_129" label="Person ID" hint="Use the ID from the personnel register, for example u-safety." required>
-            <input id="person_id_129" name="person_id" aria-describedby="person_id_129-error" aria-invalid={!!licenseFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety" value={form.person_id} onChange={e => setField("person_id", e.target.value)} />
+          <FormField htmlFor="person_id_129" label="Person ID" hint="Use the canonical ID from the personnel register, for example u-safety/security." required>
+            <input id="person_id_129" name="person_id" aria-describedby="person_id_129-error" aria-invalid={!!licenseFieldErrors.person_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${licenseFieldErrors.person_id ? "border-rose-400" : ""}`} placeholder="u-safety/security" value={form.person_id} onChange={e => setField("person_id", e.target.value)} />
             {licenseFieldErrors.person_id && <p id="person_id_129-error" className="text-[11px] text-rose-700 mt-1">{licenseFieldErrors.person_id}</p>}
           </FormField>
           <FormField htmlFor="license_type_135" label="License type" required>

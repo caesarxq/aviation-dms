@@ -14,6 +14,7 @@ import { WelcomePage } from "./pages/Welcome";
 import { ProfileSettingsPage } from "./pages/ProfileSettings";
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
+const OrganizationOverview = lazy(() => import("./pages/OrganizationOverview").then((module) => ({ default: module.OrganizationOverview })));
 const DocumentCatalogue = lazy(() => import("./pages/DocumentCatalogue").then((module) => ({ default: module.DocumentCatalogue })));
 const Occurrences = lazy(() => import("./pages/Occurrences").then((module) => ({ default: module.Occurrences })));
 const OccurrenceDetail = lazy(() => import("./pages/OccurrenceDetail").then((module) => ({ default: module.OccurrenceDetail })));
@@ -90,6 +91,7 @@ export default function App() {
             <Route element={<RequireAuth><OnboardingGate><AppShell /></OnboardingGate></RequireAuth>}>
               <Route path="/welcome" element={<WelcomePage />} />
               <Route path="/" element={<RequireAccess permission="safety:read"><Dashboard /></RequireAccess>} />
+              <Route path="/organization-overview" element={<RequireAccess permission="organization:overview"><OrganizationOverview /></RequireAccess>} />
               <Route path="/documents" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><DocumentCatalogue /></RequireAccess>} />
               <Route path="/occurrences" element={<RequireAccess permission="safety:read"><Occurrences /></RequireAccess>} />
               <Route path="/occurrences/:occurrenceId" element={<RequireAccess permission="safety:read"><OccurrenceDetail /></RequireAccess>} />
@@ -128,7 +130,7 @@ export default function App() {
               <Route path="/audit-findings" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
               <Route path="/audit-findings/:findingId" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
               <Route path="/audit-dashboard" element={<RequireAccess permission="audit_finding:read"><AuditDashboard /></RequireAccess>} />
-              <Route path="/notifications" element={<RequireAccess permission="safety:read"><Notifications /></RequireAccess>} />
+              <Route path="/notifications" element={<RequireAccess permission="compliance:read"><Notifications /></RequireAccess>} />
               <Route path="/account/security" element={<ChangePasswordPage />} />
               <Route path="/account/profile" element={<ProfileSettingsPage />} />
               <Route path="*" element={<AuthenticatedRouteFallback />} />

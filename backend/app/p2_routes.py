@@ -1,15 +1,22 @@
 """P2 API routes - Document Proposals/Annotations, Personnel Licenses, Aircraft Insurance."""
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict
 from starlette.datastructures import UploadFile
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 import uuid
 import json
 import os
+import stat
+from io import BytesIO
 from pathlib import Path
 import hashlib
+from urllib.parse import quote
+from PIL import Image
+from pypdf import PdfReader
 
-from .database import get_db
+from .database import DB_PATH, get_db
 from .audit import log_audit_event
 from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
@@ -17,9 +24,18 @@ from .proposal_engine import detect_proposals
 
 router = APIRouter()
 
-# Upload storage directory
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "data/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# Upload storage directory is colocated with the database by default so the
+# persistent /app/data volume contains both records and file bytes.
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(Path(DB_PATH).parent / "uploads")))
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+os.chmod(UPLOAD_DIR, 0o700)
+PERSONNEL_UPLOAD_LICENSE_TYPES = frozenset({
+    "pilot_license", "medical", "type_rating", "proficiency_check", "dg_training", "security_training",
+    "sms_awareness", "crm", "indoctrination", "background_check", "english_proficiency", "avsec",
+})
+PERSONNEL_UPLOAD_DOCUMENT_TYPES = frozenset({
+    "license_copy", "certificate", "medical_cert", "training_record", "other",
+})
 
 
 def _actor(request: Request) -> str:
@@ -532,6 +548,10 @@ async def create_license(request: Request):
     body = await request.json()
     db = await get_db()
     try:
+        raw_person_id = body.get("person_id")
+        if not isinstance(raw_person_id, str) or not raw_person_id.strip():
+            raise HTTPException(status_code=422, detail="A person identifier is required")
+        person_id = await _canonical_person_id(db, raw_person_id.strip())
         lic_id = _gen_id("LIC")
         now = now_iso()
         actor = _actor(request)
@@ -541,7 +561,7 @@ async def create_license(request: Request):
                 expiry_date, status, document_ref, aircraft_type, notes, verified_by, verified_at,
                 created_at, updated_at, created_by, updated_by)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (lic_id, body["person_id"], body["license_type"], body.get("license_number"),
+            (lic_id, person_id, body["license_type"], body.get("license_number"),
              body.get("issuing_authority"), body.get("issued_date"), body["expiry_date"],
              body.get("status", "valid"), body.get("document_ref"), body.get("aircraft_type"),
              body.get("notes"), body.get("verified_by"), body.get("verified_at", now if body.get("verified_by") else None),
@@ -549,7 +569,7 @@ async def create_license(request: Request):
         )
         await log_audit_event(
             "personnel_license", lic_id, "created", actor,
-            {"person_id": body["person_id"], "license_type": body["license_type"]}, db=db,
+            {"person_id": person_id, "license_type": body["license_type"]}, db=db,
         )
         await db.commit()
         async with db.execute("SELECT * FROM personnel_licenses WHERE license_id = ?", (lic_id,)) as cur:
@@ -571,6 +591,7 @@ async def list_licenses(request: Request, person_id: Optional[str] = None, statu
         query = "SELECT * FROM personnel_licenses WHERE 1=1"
         params = []
         if person_id:
+            person_id = await _canonical_person_id(db, person_id)
             query += " AND person_id = ?"
             params.append(person_id)
         if status:
@@ -982,6 +1003,8 @@ _UPLOAD_TYPES = {
     ".jpg": ("image/jpeg", b"\xff\xd8\xff"),
     ".jpeg": ("image/jpeg", b"\xff\xd8\xff"),
 }
+_UPLOAD_IMAGE_FORMATS = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG"}
+MAX_PERSONNEL_IMAGE_PIXELS = 40_000_000
 
 
 def _safe_upload_name(filename: str | None) -> tuple[str, str]:
@@ -1007,11 +1030,155 @@ def _contained_upload_path(root: Path, filename: str) -> Path:
     return target
 
 
+def _validate_personnel_upload_content(content: bytes, extension: str) -> None:
+    """Require format-aware parsing in addition to MIME and signature checks."""
+    file_type = _UPLOAD_TYPES.get(extension)
+    if file_type is None or not content.startswith(file_type[1]):
+        raise ValueError("File signature does not match its declared type")
+    try:
+        if extension == ".pdf":
+            reader = PdfReader(BytesIO(content), strict=True)
+            if reader.is_encrypted or len(reader.pages) < 1:
+                raise ValueError("PDF is encrypted or contains no pages")
+            return
+
+        expected_format = _UPLOAD_IMAGE_FORMATS[extension]
+        with Image.open(BytesIO(content)) as image:
+            if image.format != expected_format:
+                raise ValueError("Image format does not match its extension")
+            if image.width < 1 or image.height < 1 or image.width * image.height > MAX_PERSONNEL_IMAGE_PIXELS:
+                raise ValueError("Image dimensions exceed the allowed limit")
+            image.verify()
+        with Image.open(BytesIO(content)) as decoded_image:
+            if decoded_image.format != expected_format:
+                raise ValueError("Image format does not match its extension")
+            decoded_image.load()
+    except Exception as exc:
+        raise ValueError("File is not a structurally valid supported credential") from exc
+
+
+def _open_personnel_upload_directory(path: Path) -> int:
+    """Open each storage directory component without following symlinks."""
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if not absolute.is_absolute():
+        raise OSError("Personnel upload storage path must be absolute")
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Secure no-follow upload storage access is unavailable on this platform")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    descriptor = os.open(os.path.sep, flags)
+    try:
+        for component in absolute.parts[1:]:
+            if component in ("", ".", ".."):
+                raise OSError("Personnel upload storage path has an invalid component")
+            next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+class PersonnelUploadVerification(BaseModel):
+    verification_status: Literal["verified", "rejected"]
+    rejection_reason: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _personnel_upload_response(row) -> dict:
+    data = dict(row)
+    data.pop("file_path", None)
+    data["download_url"] = f"/api/p2/personnel/uploads/{quote(data['upload_id'], safe='')}/file"
+    return data
+
+
+def _has_recorded_review_identities(upload: dict) -> bool:
+    return all(
+        isinstance(upload.get(field), str) and bool(upload[field].strip())
+        for field in ("created_by", "person_id")
+    )
+
+
+def _resolve_personnel_upload_file(row: dict) -> bytes:
+    root = Path(UPLOAD_DIR).resolve()
+    upload_id = str(row.get("upload_id") or "")
+    filename = str(row.get("file_name") or "")
+    extension = Path(filename).suffix.lower()
+    file_type = _UPLOAD_TYPES.get(extension)
+    if not upload_id or not filename or file_type is None:
+        raise HTTPException(status_code=409, detail="Stored upload metadata is invalid")
+    expected_type, _ = file_type
+    if row.get("content_type") != expected_type:
+        raise HTTPException(status_code=409, detail="Stored upload content type is invalid")
+    if not row.get("file_sha256"):
+        raise HTTPException(status_code=409, detail="Stored upload checksum is missing; file requires controlled revalidation")
+
+    candidate = Path(str(row.get("file_path") or ""))
+    expected_filename = f"{upload_id}{extension}"
+    expected_path = root / expected_filename
+    if candidate != expected_path:
+        raise HTTPException(status_code=409, detail="Stored upload filename does not match its record")
+
+    hasher = hashlib.sha256()
+    directory_descriptor = None
+    descriptor = None
+    content = bytearray()
+    try:
+        directory_descriptor = _open_personnel_upload_directory(root)
+        directory_stat = os.fstat(directory_descriptor)
+        if not stat.S_ISDIR(directory_stat.st_mode) or stat.S_IMODE(directory_stat.st_mode) & 0o077:
+            raise OSError("Personnel upload directory is not private")
+        descriptor = os.open(
+            expected_filename,
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=directory_descriptor,
+        )
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size < 0 or file_stat.st_size > MAX_PERSONNEL_UPLOAD_BYTES:
+            raise OSError("Personnel upload is not a regular file within the size limit")
+        while True:
+            chunk = os.read(descriptor, 64 * 1024)
+            if not chunk:
+                break
+            content.extend(chunk)
+            if len(content) > MAX_PERSONNEL_UPLOAD_BYTES:
+                raise OSError("Personnel upload exceeds the size limit")
+            hasher.update(chunk)
+    except OSError as exc:
+        raise HTTPException(status_code=409, detail="Stored upload file is missing or invalid") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
+
+    snapshot = bytes(content)
+    if row.get("file_size") is not None and len(snapshot) != row["file_size"]:
+        raise HTTPException(status_code=409, detail="Stored upload size does not match its record")
+    if hasher.hexdigest() != row["file_sha256"]:
+        raise HTTPException(status_code=409, detail="Stored upload checksum does not match its record")
+    try:
+        _validate_personnel_upload_content(snapshot, extension)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Stored upload is not a structurally valid credential file") from exc
+    return snapshot
+
+
 async def _active_person(db, person_id: str) -> bool:
     async with db.execute(
         "SELECT user_id FROM users WHERE user_id = ? AND is_active = 1", (person_id,)
     ) as cur:
         return await cur.fetchone() is not None
+
+
+async def _canonical_person_id(db, person_id: str) -> str:
+    async with db.execute(
+        "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?",
+        (person_id,),
+    ) as cur:
+        alias = await cur.fetchone()
+    return alias["canonical_user_id"] if alias else person_id
 
 
 @router.post("/personnel/uploads/file")
@@ -1068,15 +1235,15 @@ async def create_personnel_upload_file(request: Request):
         document_type = raw_document_type.strip()
         if not license_type or len(license_type) > 80 or not document_type or len(document_type) > 80:
             raise HTTPException(status_code=422, detail="Invalid credential metadata")
+        if license_type not in PERSONNEL_UPLOAD_LICENSE_TYPES or document_type not in PERSONNEL_UPLOAD_DOCUMENT_TYPES:
+            raise HTTPException(status_code=422, detail="Unsupported credential type or document type")
 
         requested_person = (raw_person_id or actor).strip()
-        if not requested_person or requested_person.startswith(("/", "\\")) or "/" in requested_person or "\\" in requested_person or ".." in requested_person:
+        if not requested_person or requested_person.startswith(("/", "\\")) or "\\" in requested_person or ".." in requested_person:
             raise HTTPException(status_code=422, detail="Invalid person identifier")
-        if requested_person != actor and not has_permission(_role(request), "personnel:manage"):
-            raise HTTPException(status_code=403, detail="Cannot upload for another person")
 
         display_name, extension = _safe_upload_name(file.filename)
-        expected_content_type, signature = _UPLOAD_TYPES[extension]
+        expected_content_type, _ = _UPLOAD_TYPES[extension]
         if file.content_type != expected_content_type:
             raise HTTPException(status_code=415, detail="File type does not match the supported credential format")
 
@@ -1084,6 +1251,9 @@ async def create_personnel_upload_file(request: Request):
         saved_path: Optional[Path] = None
         row_committed = False
         try:
+            requested_person = await _canonical_person_id(db, requested_person)
+            if requested_person != actor and not has_permission(_role(request), "personnel:manage"):
+                raise HTTPException(status_code=403, detail="Cannot upload for another person")
             person_is_active = await _active_person(db, requested_person)
             if requested_person == actor and not person_is_active:
                 raise HTTPException(status_code=403, detail="No verified personnel mapping for this principal")
@@ -1094,12 +1264,15 @@ async def create_personnel_upload_file(request: Request):
 
             upload_id = _gen_id("UPL")
             root = UPLOAD_DIR.resolve()
-            root.mkdir(parents=True, exist_ok=True)
+            root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(root, 0o700)
             saved_path = _contained_upload_path(root, f"{upload_id}{extension}")
             file_size = 0
-            signature_bytes = bytearray()
+            file_content = bytearray()
+            file_hasher = hashlib.sha256()
             try:
-                with saved_path.open("xb") as target:
+                descriptor = os.open(saved_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as target:
                     while True:
                         chunk = await file.read(64 * 1024)
                         if not chunk:
@@ -1107,11 +1280,15 @@ async def create_personnel_upload_file(request: Request):
                         file_size += len(chunk)
                         if file_size > MAX_PERSONNEL_UPLOAD_BYTES:
                             raise HTTPException(status_code=413, detail="Upload exceeds the 10 MiB limit")
-                        if len(signature_bytes) < len(signature):
-                            signature_bytes.extend(chunk[: len(signature) - len(signature_bytes)])
+                        file_content.extend(chunk)
+                        file_hasher.update(chunk)
                         target.write(chunk)
-                if not bytes(signature_bytes).startswith(signature):
-                    raise HTTPException(status_code=415, detail="File content does not match the declared file type")
+                    target.flush()
+                    os.fsync(target.fileno())
+                try:
+                    _validate_personnel_upload_content(bytes(file_content), extension)
+                except ValueError as exc:
+                    raise HTTPException(status_code=415, detail="File content is not a structurally valid supported credential") from exc
             except Exception:
                 if saved_path.exists():
                     saved_path.unlink()
@@ -1121,12 +1298,12 @@ async def create_personnel_upload_file(request: Request):
             await db.execute(
                 """INSERT INTO personnel_uploads
                    (upload_id, person_id, license_type, document_type, file_name,
-                    file_path, file_size, content_type, verification_status,
+                    file_path, file_size, file_sha256, content_type, verification_status,
                     created_at, updated_at, created_by, updated_by)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     upload_id, requested_person, license_type, document_type,
-                    display_name, str(saved_path), file_size,
+                    display_name, str(saved_path), file_size, file_hasher.hexdigest(),
                     expected_content_type, "pending", now, now, actor, actor,
                 ),
             )
@@ -1134,12 +1311,14 @@ async def create_personnel_upload_file(request: Request):
                 "person_id": requested_person,
                 "license_type": license_type,
                 "file_name": display_name,
+                "file_size": file_size,
+                "file_sha256": file_hasher.hexdigest(),
             }, db=db)
             await db.commit()
             row_committed = True
             async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
                 row = await cur.fetchone()
-            return dict(row) if row else {"upload_id": upload_id}
+            return _personnel_upload_response(row) if row else {"upload_id": upload_id}
         except Exception:
             if not row_committed:
                 await _rollback_safely(db)
@@ -1161,68 +1340,185 @@ async def create_personnel_upload(request: Request):
     raise HTTPException(status_code=415, detail="Upload a file using multipart form data")
 
 
-@router.get("/personnel/uploads/{person_id}")
-async def list_personnel_uploads(person_id: str, request: Request):
-    """List the authenticated person's uploads, or staff-visible personnel uploads."""
-    actor = _actor(request)
-    is_self = bool(actor and person_id == actor)
-    if is_self:
-        _check(request, "personnel:view")
-    elif not (has_permission(_role(request), "personnel:read") or has_permission(_role(request), "personnel:manage")):
+@router.get("/personnel/uploads")
+async def list_personnel_upload_queue(
+    request: Request,
+    status: Optional[str] = "pending",
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List uploads for the authorized personnel verification queue."""
+    role = _role(request)
+    if not (has_permission(role, "personnel:read") or has_permission(role, "personnel:manage")):
         raise HTTPException(status_code=403, detail="Permission denied: personnel:read")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    if offset < 0 or offset > 1_000_000:
+        raise HTTPException(status_code=422, detail="offset must be between 0 and 1000000")
+    if status is not None and status not in {"pending", "verified", "rejected"}:
+        raise HTTPException(status_code=422, detail="Unknown personnel upload status")
 
     db = await get_db()
     try:
-        if is_self and not await _active_person(db, actor):
-            raise HTTPException(status_code=403, detail="No verified personnel mapping for this principal")
-        async with db.execute(
-            "SELECT * FROM personnel_uploads WHERE person_id = ? ORDER BY created_at DESC",
-            (person_id,),
-        ) as cur:
+        if status is None:
+            query = "SELECT * FROM personnel_uploads ORDER BY created_at DESC, upload_id ASC LIMIT ? OFFSET ?"
+            params = (limit, offset)
+        else:
+            query = "SELECT * FROM personnel_uploads WHERE verification_status = ? ORDER BY created_at DESC, upload_id ASC LIMIT ? OFFSET ?"
+            params = (status, limit, offset)
+        async with db.execute(query, params) as cur:
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        uploads = []
+        for row in rows:
+            upload = _personnel_upload_response(row)
+            upload["can_review"] = (
+                upload.get("verification_status") == "pending"
+                and has_permission(role, "personnel:manage")
+                and _has_recorded_review_identities(upload)
+                and not same_principal(request, upload.get("created_by"))
+                and not same_principal(request, upload.get("person_id"))
+            )
+            uploads.append(upload)
+        return uploads
     finally:
         await db.close()
 
 
-@router.patch("/personnel/uploads/{upload_id}/verify")
-async def verify_personnel_upload(upload_id: str, request: Request):
-    """Verify or reject a crew upload (requires personnel:manage)."""
-    _check(request, "personnel:manage")
-    body = await request.json()
+@router.get("/personnel/uploads/{upload_id}/file")
+async def download_personnel_upload(upload_id: str, request: Request):
+    role = _role(request)
+    if not any(has_permission(role, permission) for permission in ("personnel:view", "personnel:read", "personnel:manage")):
+        raise HTTPException(status_code=403, detail="Permission denied: personnel:view")
     db = await get_db()
     try:
         async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
             row = await cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Upload not found")
-        actor = _actor(request)
-        now = now_iso()
-        status = body.get("verification_status", "verified")
-        if status not in ("verified", "rejected"):
-            raise HTTPException(status_code=400, detail="Invalid verification status")
-        updates = ["verification_status = ?", "updated_at = ?", "updated_by = ?"]
-        params = [status, now, actor]
-        if status == "verified":
-            updates.extend(["verified_by = ?", "verified_at = ?"])
-            params.extend([actor, now])
-        if status == "rejected" and body.get("rejection_reason"):
-            updates.append("rejection_reason = ?")
-            params.append(body["rejection_reason"])
-        params.append(upload_id)
-        await db.execute(
-            f"UPDATE personnel_uploads SET {', '.join(updates)} WHERE upload_id = ?",
-            params,
+        upload = dict(row)
+        is_self = same_principal(request, upload.get("person_id"))
+        if is_self:
+            _check(request, "personnel:view")
+            if not await _active_person(db, _actor(request)):
+                raise HTTPException(status_code=403, detail="No verified personnel mapping for this principal")
+        elif not (has_permission(role, "personnel:read") or has_permission(role, "personnel:manage")):
+            raise HTTPException(status_code=403, detail="Permission denied: personnel:read")
+        content = _resolve_personnel_upload_file(upload)
+        return Response(
+            content=content,
+            media_type=upload["content_type"],
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(upload['file_name'], safe='')}",
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
+    finally:
+        await db.close()
+
+
+@router.get("/personnel/uploads/{person_id:path}")
+async def list_personnel_uploads(
+    person_id: str,
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List the authenticated person's uploads, or staff-visible personnel uploads."""
+    actor = _actor(request)
+    is_self = bool(actor and same_principal(request, person_id))
+    if is_self:
+        _check(request, "personnel:view")
+    elif not (has_permission(_role(request), "personnel:read") or has_permission(_role(request), "personnel:manage")):
+        raise HTTPException(status_code=403, detail="Permission denied: personnel:read")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    if offset < 0 or offset > 1_000_000:
+        raise HTTPException(status_code=422, detail="offset must be between 0 and 1000000")
+    if status is not None and status not in {"pending", "verified", "rejected"}:
+        raise HTTPException(status_code=422, detail="Unknown personnel upload status")
+
+    db = await get_db()
+    try:
+        canonical_person_id = await _canonical_person_id(db, person_id)
+        if is_self and not await _active_person(db, actor):
+            raise HTTPException(status_code=403, detail="No verified personnel mapping for this principal")
+        person_ids = {person_id, canonical_person_id}
+        if is_self:
+            aliases = getattr(request.state, "actor_aliases", ())
+            if isinstance(aliases, (set, tuple, list)):
+                person_ids.update(str(alias) for alias in aliases if alias)
+            if actor:
+                person_ids.add(actor)
+        sorted_person_ids = sorted(person_ids)
+        placeholders = ",".join("?" for _ in sorted_person_ids)
+        query = f"SELECT * FROM personnel_uploads WHERE person_id IN ({placeholders})"
+        params: list[object] = list(sorted_person_ids)
+        if status is not None:
+            query += " AND verification_status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC, upload_id ASC LIMIT ? OFFSET ?"
+        params.extend((limit, offset))
+        async with db.execute(query, tuple(params)) as cur:
+            rows = await cur.fetchall()
+        return [_personnel_upload_response(row) for row in rows]
+    finally:
+        await db.close()
+
+
+@router.patch("/personnel/uploads/{upload_id}/verify")
+async def verify_personnel_upload(upload_id: str, body: PersonnelUploadVerification, request: Request):
+    """Verify or reject a crew upload with an independent, auditable review."""
+    _check(request, "personnel:manage")
+    actor = _actor(request)
+    status = body.verification_status
+    rejection_reason = (body.rejection_reason or "").strip()
+    if status == "rejected" and not rejection_reason:
+        raise HTTPException(status_code=422, detail="A rejection reason is required")
+    if len(rejection_reason) > 1000:
+        raise HTTPException(status_code=422, detail="Rejection reason must be 1000 characters or fewer")
+
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
+            row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Upload not found")
+        upload = dict(row)
+        if upload.get("verification_status") != "pending":
+            raise HTTPException(status_code=409, detail="Only pending uploads can be reviewed")
+        if not _has_recorded_review_identities(upload):
+            raise HTTPException(status_code=409, detail="Upload lacks a recorded uploader or credential subject identity; review is blocked")
+        if same_principal(request, upload.get("created_by")) or same_principal(request, upload.get("person_id")):
+            raise HTTPException(status_code=403, detail="The uploader or credential subject cannot verify or reject their own upload")
+        _resolve_personnel_upload_file(upload)
+
+        now = now_iso()
+        verified_by = actor if status == "verified" else None
+        verified_at = now if status == "verified" else None
+        rejection_note = rejection_reason if status == "rejected" else None
+        cursor = await db.execute(
+            """UPDATE personnel_uploads
+               SET verification_status = ?, verified_by = ?, verified_at = ?, rejection_reason = ?,
+                   updated_at = ?, updated_by = ?
+               WHERE upload_id = ? AND verification_status = 'pending'""",
+            (status, verified_by, verified_at, rejection_note, now, actor, upload_id),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Upload review state changed; reload and retry")
         await log_audit_event("personnel_upload", upload_id, status, actor, {
-            "rejection_reason": body.get("rejection_reason"),
+            "rejection_reason": rejection_reason or None,
+            "file_sha256": upload.get("file_sha256"),
         }, db=db)
         await db.commit()
         async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
-            row = await cur.fetchone()
-        return dict(row) if row else {"upload_id": upload_id}
+            result = await cur.fetchone()
+        return _personnel_upload_response(result) if result else {"upload_id": upload_id}
     except Exception:
-        await _rollback_safely(db)
+        if db.in_transaction:
+            await _rollback_safely(db)
         raise
     finally:
         await db.close()

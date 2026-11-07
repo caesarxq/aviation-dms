@@ -3,7 +3,7 @@ import { canAccessScreen, hasPermission, getPostLoginPath } from "./permissions"
 
 const librarian = { role: "librarian", active_role: "librarian", permissions: ["document:read", "distribution:manage"] };
 const security = { role: "head_security", active_role: "head_security", permissions: ["safety:read", "security:read_sensitive"] };
-const admin = { role: "system_admin", active_role: "system_admin", permissions: ["document:read", "security:read_sensitive", "safety:read"] };
+const admin = { role: "system_admin", active_role: "system_admin", permissions: ["document:read", "security:read_sensitive", "safety:read", "compliance:read"] };
 
 describe("authentication authorization policy", () => {
   it("denies access when no authenticated profile exists", () => {
@@ -73,15 +73,52 @@ describe("authentication authorization policy", () => {
   });
 
   it("keeps the dashboard as the landing screen for profiles with safety access", () => {
-    expect(getPostLoginPath(security)).toBe("/");
+    expect(getPostLoginPath(security)).toBe("/security-reviews");
     expect(getPostLoginPath(admin, "/notifications")).toBe("/notifications");
+  });
+
+  it("requires compliance read access for notification routes", () => {
+    const safetyOnly = { role: "head_safety", active_role: "head_safety", permissions: ["safety:read"] };
+    const complianceReader = { ...safetyOnly, permissions: ["safety:read", "compliance:read"] };
+
+    expect(getPostLoginPath(safetyOnly, "/notifications")).toBe("/safety-actions");
+    expect(getPostLoginPath(complianceReader, "/notifications")).toBe("/notifications");
+  });
+
+  it("routes account managers to the organization overview only when its permission is present", () => {
+    const accountableManager = {
+      role: "accountable_manager", active_role: "accountable_manager",
+      permissions: ["safety:read", "organization:overview"],
+    };
+    expect(getPostLoginPath(accountableManager)).toBe("/organization-overview");
+    expect(getPostLoginPath({ ...accountableManager, permissions: ["safety:read"] })).toBe("/");
+  });
+
+  it.each([
+    ["system_admin", ["system_admin"], [], "/admin/observability"],
+    ["librarian", ["librarian"], ["document:read"], "/documents"],
+    ["head_quality", ["head_quality"], ["audit_finding:read"], "/audit-dashboard"],
+    ["head_safety", ["head_safety"], ["safety:read"], "/safety-actions"],
+    ["head_security", ["head_security"], ["security:read_sensitive"], "/security-reviews"],
+    ["head_operations", ["head_operations"], ["safety:read"], "/missions"],
+    ["chief_pilot", ["chief_pilot"], ["safety:read"], "/missions"],
+    ["flight_ops_officer", ["flight_ops_officer"], ["safety:read"], "/missions"],
+    ["head_training", ["head_training"], ["personnel:read"], "/training"],
+    ["head_maintenance", ["head_maintenance"], ["aircraft:read"], "/maintenance"],
+    ["dg_coordinator", ["dg_coordinator"], ["safety:read"], "/dangerous-goods"],
+    ["occurrence_reporter", ["occurrence_reporter"], ["safety:read"], "/occurrences"],
+    ["records_custodian", ["records_custodian"], ["document:read"], "/documents"],
+    ["independent_auditor", ["independent_auditor"], ["audit_report:read"], "/audit-reports"],
+    ["as_contracted", ["as_contracted"], ["document:read"], "/documents"],
+  ] as const)("routes %s to its primary workspace", (role, _assignedRoles, permissions, expected) => {
+    expect(getPostLoginPath({ role, active_role: role, permissions })).toBe(expected);
   });
 
   it("aligns audit return paths with report and finding read permissions", () => {
     const reportReader = { role: "independent_auditor", active_role: "independent_auditor", permissions: ["audit_report:read"] };
     const findingReader = { role: "head_quality", active_role: "head_quality", permissions: ["audit_finding:read"] };
     expect(getPostLoginPath(reportReader, "/audit-reports")).toBe("/audit-reports");
-    expect(getPostLoginPath(reportReader, "/audit-findings")).toBe("/account/security");
+    expect(getPostLoginPath(reportReader, "/audit-findings")).toBe("/audit-reports");
     expect(getPostLoginPath(findingReader, "/audit-findings")).toBe("/audit-findings");
   });
 });

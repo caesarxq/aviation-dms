@@ -183,7 +183,7 @@ export function Hazards() {
               <textarea id="hazard_mitigation" name="mitigation" className="app-input" placeholder="Initial mitigation measures" value={mitigation} onChange={(e) => { setMitigation(e.target.value); setDirty(true); }} rows={2} />
             </FormField>
             <FormField htmlFor="hazard_owner" label="Owner ID" hint="Person responsible for tracking this hazard.">
-              <input id="hazard_owner" name="owner_id" className="app-input" placeholder="e.g. u-safety" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
+              <input id="hazard_owner" name="owner_id" className="app-input" placeholder="e.g. u-safety/security" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
             </FormField>
           </div>
           <button

@@ -111,7 +111,7 @@ export function Investigations() {
               {invErrors.occurrence_id && <p id="inv_occurrence-error" className="text-[11px] text-rose-700 mt-1">{invErrors.occurrence_id}</p>}
             </FormField>
             <FormField htmlFor="inv_investigator" label="Investigator ID" hint="Person responsible for this investigation." required>
-              <input id="inv_investigator" name="investigator_id" aria-describedby="inv_investigator-error" aria-invalid={!!invErrors.investigator_id} className={`app-input ${invErrors.investigator_id ? "border-rose-400" : ""}`} placeholder="e.g. u-safety" value={investigatorId} onChange={(e) => { setInvestigatorId(e.target.value); setDirty(true); }} />
+              <input id="inv_investigator" name="investigator_id" aria-describedby="inv_investigator-error" aria-invalid={!!invErrors.investigator_id} className={`app-input ${invErrors.investigator_id ? "border-rose-400" : ""}`} placeholder="e.g. u-safety/security" value={investigatorId} onChange={(e) => { setInvestigatorId(e.target.value); setDirty(true); }} />
               {invErrors.investigator_id && <p id="inv_investigator-error" className="text-[11px] text-rose-700 mt-1">{invErrors.investigator_id}</p>}
             </FormField>
           </div>

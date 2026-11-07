@@ -1,6 +1,7 @@
 """SQLite database schema and connection management for Aviation DMS."""
 import aiosqlite
 import os
+import uuid
 from datetime import datetime
 
 DB_PATH = os.getenv("DMS_DB_PATH", os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "dms.db"))
@@ -382,6 +383,7 @@ CREATE TABLE IF NOT EXISTS audit_reports (
     regulatory_basis TEXT,
     status TEXT NOT NULL DEFAULT 'open',
     evidence_file TEXT,
+    evidence_sha256 TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (auditor_id) REFERENCES users(user_id),
@@ -1037,6 +1039,7 @@ CREATE TABLE IF NOT EXISTS personnel_uploads (
     file_name TEXT NOT NULL,
     file_path TEXT NOT NULL,
     file_size INTEGER,
+    file_sha256 TEXT,
     content_type TEXT,
     verification_status TEXT NOT NULL DEFAULT 'pending',
     verified_by TEXT,
@@ -1120,6 +1123,9 @@ CREATE INDEX IF NOT EXISTS idx_annotations_status ON document_annotations(status
 CREATE INDEX IF NOT EXISTS idx_personnel_licenses_person ON personnel_licenses(person_id);
 CREATE INDEX IF NOT EXISTS idx_personnel_licenses_expiry ON personnel_licenses(expiry_date);
 CREATE INDEX IF NOT EXISTS idx_personnel_licenses_status ON personnel_licenses(status);
+CREATE INDEX IF NOT EXISTS idx_personnel_uploads_person_created ON personnel_uploads(person_id, created_at DESC, upload_id ASC);
+CREATE INDEX IF NOT EXISTS idx_personnel_uploads_person_status_created ON personnel_uploads(person_id, verification_status, created_at DESC, upload_id ASC);
+CREATE INDEX IF NOT EXISTS idx_personnel_uploads_status_created ON personnel_uploads(verification_status, created_at DESC, upload_id ASC);
 CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_aircraft ON aircraft_insurance(aircraft_id);
 CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_expiry ON aircraft_insurance(expiry_date);
 CREATE INDEX IF NOT EXISTS idx_aircraft_insurance_status ON aircraft_insurance(status);
@@ -1280,9 +1286,9 @@ async def remove_shared_seed_passwords():
         await db.close()
 
 
-# Owner-confirmed identity groups are keyed by immutable account IDs, never display names.
-# The first ID in each tuple remains the canonical user_id; all other IDs are retained as aliases.
-VERIFIED_IDENTITY_GROUPS = {
+# V1 identity groups are retained so existing databases and fresh seeds reach the
+# same pre-v2 state before the owner-approved canonical-ID migration runs.
+V1_VERIFIED_IDENTITY_GROUPS = {
     "u-admin": ("u-admin", "u-maintenance"),
     "u-lib": ("u-lib", "u-quality", "u-records"),
     "u-safety": ("u-safety", "u-security"),
@@ -1319,7 +1325,7 @@ async def migrate_verified_identity_groups():
                     (historical_id, user["user_id"], now),
                 )
 
-        for canonical_id, member_ids in VERIFIED_IDENTITY_GROUPS.items():
+        for canonical_id, member_ids in V1_VERIFIED_IDENTITY_GROUPS.items():
             placeholders = ",".join("?" for _ in member_ids)
             cursor = await db.execute(f"SELECT * FROM users WHERE user_id IN ({placeholders})", member_ids)
             members = [dict(row) for row in await cursor.fetchall()]
@@ -1399,6 +1405,228 @@ async def migrate_verified_identity_groups():
         await db.close()
 
 
+
+
+async def _user_foreign_key_columns(db):
+    tables = await db.execute_fetchall(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    )
+    result = []
+    for row in tables:
+        table_name = row["name"]
+        foreign_keys = await db.execute_fetchall(f'PRAGMA foreign_key_list("{table_name}")')
+        for foreign_key in foreign_keys:
+            if foreign_key["table"] == "users":
+                result.append((table_name, foreign_key["from"]))
+    return result
+
+
+async def _remap_user_foreign_keys(db, source_ids, canonical_id):
+    # Auth/session and role tables are handled explicitly. Business foreign keys
+    # point to the same verified person and follow the new canonical ID.
+    excluded_tables = {"user_roles", "user_id_aliases", "auth_sessions", "auth_setup_tokens"}
+    for table_name, column_name in await _user_foreign_key_columns(db):
+        if table_name in excluded_tables:
+            continue
+        quoted_table = '"' + table_name.replace('"', '""') + '"'
+        quoted_column = '"' + column_name.replace('"', '""') + '"'
+        for source_id in source_ids:
+            await db.execute(
+                f"UPDATE {quoted_table} SET {quoted_column} = ? WHERE {quoted_column} = ?",
+                (canonical_id, source_id),
+            )
+
+
+async def _ensure_canonical_aliases(db, alias_ids, canonical_id, allowed_targets, now):
+    for alias_id in alias_ids:
+        cursor = await db.execute(
+            "SELECT canonical_user_id FROM user_id_aliases WHERE legacy_user_id = ?",
+            (alias_id,),
+        )
+        existing = await cursor.fetchone()
+        if existing and existing["canonical_user_id"] not in allowed_targets:
+            raise RuntimeError(f"Identity alias {alias_id} already belongs to another canonical account")
+        if existing:
+            await db.execute(
+                "UPDATE user_id_aliases SET canonical_user_id = ? WHERE legacy_user_id = ?",
+                (canonical_id, alias_id),
+            )
+        else:
+            await db.execute(
+                "INSERT INTO user_id_aliases (legacy_user_id, canonical_user_id, merged_at) VALUES (?, ?, ?)",
+                (alias_id, canonical_id, now),
+            )
+
+
+async def _promote_quality_canonical_account(db, now):
+    member_ids = ("u-lib", "u-quality", "u-records")
+    placeholders = ",".join("?" for _ in member_ids)
+    rows = await db.execute_fetchall(
+        f"SELECT * FROM users WHERE user_id IN ({placeholders})", member_ids
+    )
+    users = {row["user_id"]: dict(row) for row in rows}
+    source = users.get("u-lib")
+    canonical = users.get("u-quality")
+    if not source or not canonical:
+        raise RuntimeError("Cannot promote u-quality: both the prior canonical and target account must exist")
+    if source["merged_into_user_id"] is not None or canonical["merged_into_user_id"] != "u-lib":
+        raise RuntimeError("Cannot promote u-quality: account rows are not in the expected v1 state")
+    if canonical["is_active"]:
+        raise RuntimeError("Cannot promote u-quality: merged target account is unexpectedly active")
+
+    password_hashes = {user["password_hash"] for user in users.values() if user.get("password_hash")}
+    if len(password_hashes) > 1:
+        raise RuntimeError("Cannot promote u-quality: account password hashes conflict")
+    assigned_roles = {user["role"] for user in users.values()}
+    role_rows = await db.execute_fetchall(
+        f"SELECT role FROM user_roles WHERE user_id IN ({placeholders})", member_ids
+    )
+    assigned_roles.update(row["role"] for row in role_rows)
+    expected_roles = {"head_quality", "librarian", "records_custodian"}
+    if assigned_roles != expected_roles:
+        raise RuntimeError("Cannot promote u-quality: assigned roles differ from the approved role set")
+    if source["full_name"] != canonical["full_name"] or source["department"] != canonical["department"]:
+        raise RuntimeError("Cannot promote u-quality: merged account profile fields conflict")
+
+    # Keep login identifiers from the pre-v2 canonical account. Transfer the
+    # former target identifiers to the inactive legacy row within this transaction.
+    source_username, source_email = source["username"], source["email"]
+    target_username, target_email = canonical["username"], canonical["email"]
+    if source_username != target_username:
+        temporary_username = f"__canonical_v2_{uuid.uuid4().hex}"
+        await db.execute("UPDATE users SET username = ? WHERE user_id = 'u-quality'", (temporary_username,))
+        await db.execute("UPDATE users SET username = ? WHERE user_id = 'u-lib'", (target_username,))
+        await db.execute("UPDATE users SET username = ? WHERE user_id = 'u-quality'", (source_username,))
+    if source_email != target_email:
+        temporary_email = f"canonical-v2-{uuid.uuid4().hex}@invalid.invalid"
+        await db.execute("UPDATE users SET email = ? WHERE user_id = 'u-quality'", (temporary_email,))
+        await db.execute("UPDATE users SET email = ? WHERE user_id = 'u-lib'", (target_email,))
+        await db.execute("UPDATE users SET email = ? WHERE user_id = 'u-quality'", (source_email,))
+
+    password_hash = next(iter(password_hashes), None)
+    await db.execute(
+        """UPDATE users SET role = 'head_quality', is_active = ?, password_hash = ?,
+                  onboarding_completed = ?, merged_into_user_id = NULL, updated_at = ?
+           WHERE user_id = 'u-quality'""",
+        (source["is_active"], password_hash, source["onboarding_completed"], now),
+    )
+    await db.execute(
+        "UPDATE users SET is_active = 0, password_hash = NULL, merged_into_user_id = 'u-quality', updated_at = ? WHERE user_id = 'u-lib'",
+        (now,),
+    )
+    await db.execute(
+        "UPDATE users SET is_active = 0, password_hash = NULL, merged_into_user_id = 'u-quality', updated_at = ? WHERE user_id = 'u-records'",
+        (now,),
+    )
+    await db.execute("DELETE FROM user_roles WHERE user_id = 'u-quality'")
+    for role in sorted(expected_roles):
+        await db.execute("INSERT INTO user_roles (user_id, role) VALUES ('u-quality', ?)", (role,))
+
+    await _ensure_canonical_aliases(
+        db,
+        ("u-lib", "librarian", "u-quality", "quality", "u-records", "records_custodian"),
+        "u-quality",
+        {"u-lib", "u-quality"},
+        now,
+    )
+    await _remap_user_foreign_keys(db, ("u-lib", "u-records"), "u-quality")
+    await db.execute(
+        "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id IN ('u-lib', 'u-quality', 'u-records')",
+        (now,),
+    )
+    await db.execute(
+        "UPDATE auth_setup_tokens SET used_at = COALESCE(used_at, ?) WHERE user_id IN ('u-lib', 'u-quality', 'u-records')",
+        (now,),
+    )
+
+
+async def _promote_safety_security_canonical_account(db, now):
+    old_id = "u-safety"
+    canonical_id = "u-safety/security"
+    cursor = await db.execute("SELECT * FROM users WHERE user_id IN (?, ?)", (old_id, "u-security"))
+    users = {row["user_id"]: dict(row) for row in await cursor.fetchall()}
+    canonical = users.get(old_id)
+    security_alias = users.get("u-security")
+    if not canonical:
+        raise RuntimeError("Cannot promote u-safety/security: prior canonical account is missing")
+    if await (await db.execute("SELECT 1 FROM users WHERE user_id = ?", (canonical_id,))).fetchone():
+        raise RuntimeError("Cannot promote u-safety/security: target ID already exists")
+    if security_alias and (security_alias["merged_into_user_id"] != old_id or security_alias["is_active"]):
+        raise RuntimeError("Cannot promote u-safety/security: security alias is not in the expected v1 state")
+
+    password_hashes = {user["password_hash"] for user in users.values() if user.get("password_hash")}
+    if len(password_hashes) > 1:
+        raise RuntimeError("Cannot promote u-safety/security: account password hashes conflict")
+    assigned_roles = {user["role"] for user in users.values()}
+    role_rows = await db.execute_fetchall(
+        "SELECT role FROM user_roles WHERE user_id IN ('u-safety', 'u-security')"
+    )
+    assigned_roles.update(row["role"] for row in role_rows)
+    expected_roles = {"head_safety", "head_security"}
+    if assigned_roles != expected_roles:
+        raise RuntimeError("Cannot promote u-safety/security: assigned roles differ from the approved role set")
+
+    await _ensure_canonical_aliases(
+        db,
+        (canonical_id, "u-safety", "safety", "u-security", "security"),
+        canonical_id,
+        {old_id, canonical_id},
+        now,
+    )
+    await _remap_user_foreign_keys(db, (old_id, "u-security"), canonical_id)
+    await db.execute("UPDATE user_roles SET user_id = ? WHERE user_id = ?", (canonical_id, old_id))
+    await db.execute(
+        "UPDATE auth_sessions SET user_id = ?, revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?",
+        (canonical_id, now, old_id),
+    )
+    await db.execute(
+        "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = 'u-security'",
+        (now,),
+    )
+    await db.execute(
+        "UPDATE auth_setup_tokens SET user_id = ?, used_at = COALESCE(used_at, ?) WHERE user_id = ?",
+        (canonical_id, now, old_id),
+    )
+    await db.execute(
+        "UPDATE auth_setup_tokens SET used_at = COALESCE(used_at, ?) WHERE user_id = 'u-security'",
+        (now,),
+    )
+    await db.execute("UPDATE users SET user_id = ?, role = 'head_safety', updated_at = ? WHERE user_id = ?", (canonical_id, now, old_id))
+    await db.execute(
+        "UPDATE users SET is_active = 0, merged_into_user_id = ?, password_hash = NULL, updated_at = ? WHERE user_id = 'u-security'",
+        (canonical_id, now),
+    )
+
+
+async def migrate_canonical_account_ids_v2():
+    """Promote the owner-approved quality and safety canonical IDs transactionally."""
+    db = await get_db()
+    now = datetime.now().isoformat()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT value FROM app_settings WHERE key = 'canonical_account_ids_migration_v2'")
+        if await cursor.fetchone():
+            await db.rollback()
+            return
+        present_accounts = await db.execute_fetchall(
+            "SELECT user_id FROM users WHERE user_id IN ('u-lib', 'u-quality', 'u-records', 'u-safety', 'u-security')"
+        )
+        if not present_accounts:
+            await db.rollback()
+            return
+        await db.execute("PRAGMA defer_foreign_keys = ON")
+        await _promote_quality_canonical_account(db, now)
+        await _promote_safety_security_canonical_account(db, now)
+        await db.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('canonical_account_ids_migration_v2', 'complete', ?)",
+            (now,),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
 
 
 async def _table_columns(db, table_name):
@@ -1792,6 +2020,7 @@ async def init_db():
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+        await _add_column_if_missing(db, "audit_reports", "evidence_sha256", "TEXT")
         # documents: kcaa_approval_required, review_due_date
         await _add_column_if_missing(db, "documents", "kcaa_approval_required", "INTEGER NOT NULL DEFAULT 0")
         await _add_column_if_missing(db, "documents", "review_due_date", "TEXT")
@@ -1844,6 +2073,7 @@ async def init_db():
             await _add_column_if_missing(db, "documents", column, column_type)
         await _add_column_if_missing(db, "roc_register", "authorized_registrations", "TEXT")
         await _add_column_if_missing(db, "aircraft", "opspec_authorized", "INTEGER NOT NULL DEFAULT 0")
+        await _add_column_if_missing(db, "personnel_uploads", "file_sha256", "TEXT")
         ra_columns = {
             "risk_model": "TEXT NOT NULL DEFAULT 'sms_5x5'",
             "exposure": "TEXT",
@@ -1917,11 +2147,12 @@ async def init_db():
     await seed_db()
     await remove_shared_seed_passwords()
     await migrate_verified_identity_groups()
+    await migrate_canonical_account_ids_v2()
     await apply_catalogue_corrections()
     await repair_manual_content_assignment()
 
 async def apply_catalogue_corrections():
-    """Keep controlled-document catalogue metadata, source hashes, and OpSpec scope aligned with the approved manuals."""
+    """Keep catalogue corrections idempotent without overwriting operational authorization."""
     db = await get_db()
     try:
         now = datetime.now().isoformat()
@@ -2006,17 +2237,6 @@ async def apply_catalogue_corrections():
                    WHERE version_id = ?""",
                 (ver_id,),
             )
-        # Reconcile ROC-001 7 OpSpec-listed registrations while preserving the 20-aircraft master fleet
-        opspec_regs = ("5Y-0029A", "5Y-0030A", "5Y-0042A", "5Y-0164A", "5Y-0600A", "5Y-0601A", "5Y-0602A")
-        await db.execute(
-            "UPDATE roc_register SET authorized_registrations = ? WHERE roc_id = 'ROC-001'",
-            (",".join(opspec_regs),),
-        )
-        await db.execute("UPDATE aircraft SET opspec_authorized = 0")
-        await db.execute(
-            f"UPDATE aircraft SET opspec_authorized = 1 WHERE registration IN ({','.join('?' for _ in opspec_regs)})",
-            opspec_regs,
-        )
         await db.execute(
             "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
             ("fdtl_validation_status", "configurable_application_defaults_pending_regulatory_clause_validation", now),
@@ -2257,10 +2477,11 @@ async def seed_db():
             )
 
         # ROC register
+        opspec_regs = ("5Y-0029A", "5Y-0030A", "5Y-0042A", "5Y-0164A", "5Y-0600A", "5Y-0601A", "5Y-0602A")
         await db.execute(
-            """INSERT INTO roc_register (roc_id, roc_number, serial_number, kcaa_reference, issue_date, expiry_date, status, categories, bvlos_authorized, night_authorized, max_altitude_agl, evlos_authorized, dg_category, notes, created_at, updated_at, created_by, updated_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            ("ROC-001", "06", "0110", "KCAA/OPS/2117/ROC/06", "2026-10-12", "2027-10-11", "active", "A,B", 0, 0, 400, 1, "Division 6.2 Cat A&B", "EVLOS with qualified VO", now, now, "admin", "admin"),
+            """INSERT INTO roc_register (roc_id, roc_number, serial_number, kcaa_reference, issue_date, expiry_date, status, categories, bvlos_authorized, night_authorized, max_altitude_agl, evlos_authorized, dg_category, authorized_registrations, notes, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ("ROC-001", "06", "0110", "KCAA/OPS/2117/ROC/06", "2026-10-12", "2027-10-11", "active", "A,B", 0, 0, 400, 1, "Division 6.2 Cat A&B", ",".join(opspec_regs), "EVLOS with qualified VO", now, now, "admin", "admin"),
         )
 
         # Aircraft / UAS master fleet (20 registrations), separate from the 7 OpSpec-authorized registrations
@@ -2288,9 +2509,9 @@ async def seed_db():
         ]
         for ac in aircraft:
             await db.execute(
-                """INSERT INTO aircraft (aircraft_id, registration, model, manufacturer, serial_number, roc_id, status, category, weight_class, max_takeoff_weight_kg, acquired_date, notes, created_at, updated_at, created_by, updated_by)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                ac,
+                """INSERT INTO aircraft (aircraft_id, registration, model, manufacturer, serial_number, roc_id, status, opspec_authorized, category, weight_class, max_takeoff_weight_kg, acquired_date, notes, created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (*ac[:7], 1 if ac[1] in opspec_regs else 0, *ac[7:]),
             )
 
         # App settings (configurable FDTL defaults)

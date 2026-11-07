@@ -14,7 +14,7 @@ class TestInvestigations:
 
         resp = client.post("/api/p1/investigations", json={
             "occurrence_id": occ_id,
-            "investigator_id": "u-safety",
+            "investigator_id": "u-safety/security",
             "findings": "Initial findings",
             "root_cause": "Human error",
             "recommendations": "Additional training required"
@@ -22,7 +22,7 @@ class TestInvestigations:
         assert resp.status_code == 201
         data = resp.json()
         assert data["occurrence_id"] == occ_id
-        assert data["investigator_id"] == "u-safety"
+        assert data["investigator_id"] == "u-safety/security"
         assert data["status"] == "open"
         assert data["investigation_id"].startswith("INV")
 
@@ -42,7 +42,7 @@ class TestInvestigations:
 
         inv = client.post("/api/p1/investigations", json={
             "occurrence_id": occ_id,
-            "investigator_id": "u-safety"
+            "investigator_id": "u-safety/security"
         }, headers=safety_headers).json()
         inv_id = inv["investigation_id"]
 
@@ -72,7 +72,7 @@ class TestInvestigations:
 
         client.post("/api/p1/investigations", json={
             "occurrence_id": occ_id,
-            "investigator_id": "u-safety"
+            "investigator_id": "u-safety/security"
         }, headers=safety_headers)
 
         updated_occ = client.get(f"/api/p1/occurrences/{occ_id}", headers=safety_headers).json()

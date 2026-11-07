@@ -19,7 +19,7 @@ def test_mutation_trigger_records_unlogged_hazard_create(client, safety_headers)
             "SELECT actor_id, action FROM audit_events WHERE entity_type = 'hazards' AND entity_id = ?",
             (hazard_id,),
         ).fetchone()
-        assert event == ("u-safety", "row_inserted")
+        assert event == ("u-safety/security", "row_inserted")
     finally:
         conn.close()
 

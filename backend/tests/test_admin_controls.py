@@ -26,7 +26,8 @@ class TestAdminObservability:
 class TestIdentityValidation:
     def test_dev_identity_requires_known_profile_role_pair(self):
         assert validate_dev_identity("admin", "system_admin") == ("u-admin", "system_admin")
-        assert validate_dev_identity("u-quality", "head_quality") == ("u-lib", "head_quality")
+        assert validate_dev_identity("u-quality", "head_quality") == ("u-quality", "head_quality")
+        assert validate_dev_identity("u-safety/security", "head_safety") == ("u-safety/security", "head_safety")
 
     def test_dev_identity_rejects_role_mismatch(self):
         with pytest.raises(ValueError, match="does not match"):
@@ -37,11 +38,13 @@ class TestIdentityValidation:
             validate_dev_identity("not-a-user", "head_quality")
     def test_seeded_user_profiles_resolve_to_their_exact_roles(self, client):
         expected = {
-            "u-admin": ("u-admin", "system_admin"), "u-lib": ("u-lib", "librarian"), "u-quality": ("u-lib", "head_quality"),
-            "u-safety": ("u-safety", "head_safety"), "u-security": ("u-safety", "head_security"), "u-ops": ("u-ops", "head_operations"),
+            "u-admin": ("u-admin", "system_admin"), "u-lib": ("u-quality", "librarian"), "u-quality": ("u-quality", "head_quality"),
+            "u-records": ("u-quality", "records_custodian"),
+            "u-safety": ("u-safety/security", "head_safety"), "u-security": ("u-safety/security", "head_security"),
+            "u-safety/security": ("u-safety/security", "head_safety"), "u-ops": ("u-ops", "head_operations"),
             "u-chief-pilot": ("u-ops", "chief_pilot"), "u-flight-ops": ("u-flight-ops", "flight_ops_officer"), "u-training": ("u-ops", "head_training"),
             "u-maintenance": ("u-admin", "head_maintenance"), "u-dg": ("u-flight-ops", "dg_coordinator"), "u-reporter": ("u-reporter", "occurrence_reporter"),
-            "u-auditor": ("u-auditor", "independent_auditor"), "u-records": ("u-lib", "records_custodian"), "u-accountable": ("u-accountable", "accountable_manager"),
+            "u-auditor": ("u-auditor", "independent_auditor"), "u-accountable": ("u-accountable", "accountable_manager"),
         }
         for actor, (canonical_id, role) in expected.items():
             response = client.get("/api/p0/auth/profile", headers={"X-Role": role, "X-Actor": actor})
