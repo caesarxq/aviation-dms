@@ -312,7 +312,7 @@ test.describe("Investigations", () => {
     await page.click("text=New Investigation");
     await page.waitForSelector('input[placeholder="e.g. OCC-..."]');
     await page.fill('input[placeholder="e.g. OCC-..."]', "E2E Investigation Occurrence");
-    await page.fill('input[placeholder="e.g. u-safety"]', "u-safety");
+    await page.fill('input[placeholder="e.g. u-safety/security"]', "u-safety");
     await page.click("text=Open Investigation");
     await page.waitForTimeout(1500);
     await expect(page.locator("text=u-safety").first()).toBeVisible({ timeout: 8000 });
@@ -332,7 +332,7 @@ test.describe("Safety Actions", () => {
     await page.waitForSelector('input[placeholder="Action title"]');
     await page.fill('input[placeholder="Action title"]', "E2E Test Safety Action");
     await page.fill('textarea[placeholder="Describe the action"]', "A test safety action for E2E validation");
-    await page.fill('input[placeholder="e.g. u-safety"]', "u-safety");
+    await page.fill('input[placeholder="e.g. u-safety/security"]', "u-safety");
     await page.click("text=Create Action");
     await page.waitForTimeout(1500);
     await expect(page.locator("table").locator("text=E2E Test Safety Action").first()).toBeVisible({ timeout: 8000 });
