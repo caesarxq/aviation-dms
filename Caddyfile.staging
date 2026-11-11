@@ -1,0 +1,42 @@
+# ============================================================================
+# Aviation DMS — Caddyfile for Staging (Localhost)
+# ============================================================================
+# Local staging with self-signed certificates for HTTPS testing.
+# ============================================================================
+
+{
+    email admin@localhost.local
+    # Use local ACME CA or self-signed for staging
+    acme_ca https://localhost:14000/dir
+}
+
+localhost {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    # API routes -> backend
+    reverse_proxy /api/* localhost:8000 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # All other routes -> frontend
+    reverse_proxy localhost:8080 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+localhost:8081 {
+    reverse_proxy localhost:8080
+}

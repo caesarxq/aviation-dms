@@ -1,0 +1,42 @@
+# ============================================================================
+# Aviation DMS — Caddyfile for Production (OCI)
+# ============================================================================
+# Production Caddy with Let's Encrypt certificates for roc.kfl.ke.
+# ============================================================================
+
+{
+    email admin@kfl.ke
+}
+
+roc.kfl.ke {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+
+    # API routes -> backend (port 8000) with 10 MiB body limit
+    reverse_proxy /api/* 127.0.0.1:8000 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # All other routes -> frontend (port 8080) with 1 MiB body limit
+    reverse_proxy 127.0.0.1:8080 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+www.roc.kfl.ke {
+    redir https://roc.kfl.ke{uri} permanent
+}

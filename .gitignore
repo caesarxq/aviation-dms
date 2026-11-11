@@ -19,6 +19,8 @@ __pycache__/
 # Environment
 .env
 .env.local
+.env.staging
+.env.prod
 
 # IDE
 .vscode/

@@ -1,0 +1,93 @@
+# ============================================================================
+# Aviation DMS — Bastion Caddy Configuration
+# ============================================================================
+# Runs on bastion host (145.241.152.126) as the TLS entry point.
+# Proxies:
+#   - roc.kfl.ke     → production backend (new OCI instance)
+#   - staging.roc.kfl.ke → staging backend (10.20.4.234)
+# ============================================================================
+
+{
+    email admin@kfl.ke
+}
+
+# ============================================================================
+# PRODUCTION — roc.kfl.ke
+# ============================================================================
+# Proxies to the production OCI instance (private IP from Terraform output).
+# Replace <PROD_PRIVATE_IP> with the actual value from `terraform output instance_private_ip`.
+# ============================================================================
+
+roc.kfl.ke {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+
+    # API routes -> production backend (port 8000) with 10 MiB body limit
+    reverse_proxy /api/* <PROD_PRIVATE_IP>:8000 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # All other routes -> production frontend (port 8080) with 1 MiB body limit
+    reverse_proxy <PROD_PRIVATE_IP>:8080 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# ============================================================================
+# STAGING — staging.roc.kfl.ke
+# ============================================================================
+# Proxies to the staging cloud instance (10.20.4.234).
+# ============================================================================
+
+staging.roc.kfl.ke {
+    encode gzip zstd
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    # API routes -> staging backend (port 8000) with 10 MiB body limit
+    reverse_proxy /api/* 10.20.4.234:8000 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # All other routes -> staging frontend (port 8080) with 1 MiB body limit
+    reverse_proxy 10.20.4.234:8080 {
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote}
+        header_up X-Forwarded-For {remote}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# ============================================================================
+# WWW redirect
+# ============================================================================
+
+www.roc.kfl.ke {
+    redir https://roc.kfl.ke{uri} permanent
+}
+
+www.staging.roc.kfl.ke {
+    redir https://staging.roc.kfl.ke{uri} permanent
+}

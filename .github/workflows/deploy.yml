@@ -1,0 +1,176 @@
+name: Aviation DMS Build, Staging Deploy, and Production Promotion
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      image_tag:
+        description: 'Docker image tag to deploy (leave empty to build new)'
+        required: false
+        default: ''
+      approve_production:
+        description: 'Approve production deployment'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_USER: ${{ github.actor }}
+  BACKEND_IMAGE: ${{ github.repository }}/backend
+  FRONTEND_IMAGE: ${{ github.repository }}/frontend
+  STAGING_HOST: 10.20.4.234
+  STAGING_USER: ubuntu
+  STAGING_DIR: /opt/kfl-aviation-dms-staging
+  BASTION_HOST: 145.241.152.126
+  BASTION_USER: ubuntu
+  # Production instance private IP — set via GitHub secret or environment
+  # Obtain from: terraform -chdir=terraform/oci-prod output instance_private_ip
+  PROD_HOST: ${{ secrets.PROD_HOST || 'prod.kfl.ke' }}
+
+jobs:
+  build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.set-tag.outputs.tag }}
+      frontend_tag: ${{ steps.set-tag.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: set-tag
+        run: |
+          TAG="canonical-${{ github.sha }}-$(date +%Y%m%dT%H%M%SZ)"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
+
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ secrets.CR_PAT }}
+
+      - name: Set up Docker Buildx
+        uses: docker/buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest,mode=max
+
+      - name: Verify images in registry
+        run: |
+          echo "Backend: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}"
+          echo "Frontend: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}"
+
+  test-staging:
+    name: Run tests on staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.STAGING_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to staging
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "cd ${{ env.STAGING_DIR }} && \
+             ./scripts/deploy-staging.sh ${{ env.IMAGE_TAG }}"
+
+      - name: Run backend tests on staging
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "cd ${{ env.STAGING_DIR }} && \
+             sudo docker exec kfl-aviation-dms-staging-backend-1 python -m pytest -x -q"
+
+      - name: Run frontend tests on staging
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "cd ${{ env.STAGING_DIR }} && \
+             sudo docker exec kfl-aviation-dms-staging-frontend-1 npm test -- --run"
+
+  promote-to-production:
+    name: Promote to production (requires approval)
+    needs: test-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://roc.kfl.ke
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check production approval
+        run: |
+          if [ "${{ github.event.inputs.approve_production }}" != "true" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "ERROR: Production deployment requires explicit approval"
+            echo "Set approve_production=true in workflow_dispatch or use the production environment protection rule"
+            exit 1
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Promote image to production
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }} \
+            "./scripts/promote-to-production.sh ${{ env.IMAGE_TAG }}"
