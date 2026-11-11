@@ -122,6 +122,77 @@ CREATE TABLE IF NOT EXISTS document_files (
 CREATE INDEX IF NOT EXISTS idx_document_files_document ON document_files(document_id);
 CREATE INDEX IF NOT EXISTS idx_document_files_version ON document_files(version_id);
 
+-- Document classifications (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED)
+CREATE TABLE IF NOT EXISTS document_classifications (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    requires_watermark INTEGER NOT NULL DEFAULT 1,
+    allow_full_download INTEGER NOT NULL DEFAULT 0,
+    requires_approval INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+-- Document-level and section-level role permissions
+CREATE TABLE IF NOT EXISTS document_permissions (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    role_id TEXT NOT NULL,
+    permission_code TEXT NOT NULL,
+    scope_section_id TEXT,
+    valid_from TEXT NOT NULL,
+    valid_until TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (role_id) REFERENCES users(user_id),
+    UNIQUE (document_id, role_id, permission_code, scope_section_id)
+);
+CREATE INDEX IF NOT EXISTS idx_document_permissions_document ON document_permissions(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_permissions_role ON document_permissions(role_id);
+
+-- Section extraction requests
+CREATE TABLE IF NOT EXISTS section_extraction_requests (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    document_version_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    section_id TEXT,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'expired')),
+    reviewed_by TEXT,
+    review_comment TEXT,
+    reviewed_at TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (document_version_id) REFERENCES document_versions(version_id),
+    FOREIGN KEY (section_id) REFERENCES document_sections(section_id),
+    FOREIGN KEY (requested_by) REFERENCES users(user_id),
+    FOREIGN KEY (reviewed_by) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_requests_document ON section_extraction_requests(document_id);
+CREATE INDEX IF NOT EXISTS idx_extraction_requests_status ON section_extraction_requests(status);
+
+-- Generated section extracts
+CREATE TABLE IF NOT EXISTS section_extractions (
+    id TEXT PRIMARY KEY,
+    request_id TEXT,
+    document_version_id TEXT NOT NULL,
+    section_id TEXT,
+    generated_by TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    page_count INTEGER NOT NULL,
+    watermark_applied INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (request_id) REFERENCES section_extraction_requests(id),
+    FOREIGN KEY (document_version_id) REFERENCES document_versions(version_id),
+    FOREIGN KEY (section_id) REFERENCES document_sections(section_id),
+    FOREIGN KEY (generated_by) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_section_extractions_version ON section_extractions(document_version_id);
+
 -- Document versions
 CREATE TABLE IF NOT EXISTS document_versions (
     version_id TEXT PRIMARY KEY,
@@ -2525,6 +2596,19 @@ async def seed_db():
                 "INSERT INTO documents (document_id, title, doc_class, classification, status, owner_id, description, created_at, updated_at, created_by, updated_by, kcaa_approval_required, review_due_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 d,
             )
+
+        # Document classifications (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED)
+        classifications = [
+            ("PUBLIC", "Public Document", 1, 1, 0),
+            ("TEMPLATE", "Template Document", 1, 1, 0),
+            ("CONTROLLED", "Controlled Document", 1, 0, 0),
+            ("KCAA_APPROVED", "KCAA-Approved Manual", 1, 0, 1),
+        ]
+        for c in classifications:
+            await db.execute(
+                "INSERT OR IGNORE INTO document_classifications (code, name, requires_watermark, allow_full_download, requires_approval, created_at) VALUES (?,?,?,?,?,?)",
+                (c[0], c[1], c[2], c[3], c[4], now),
+            )
             ver_id = f"VER-{d[0]}"
             # Proper content per document instead of minimal placeholder
             doc_content_map = {
@@ -2612,6 +2696,14 @@ async def seed_db():
             """INSERT INTO app_settings (key, value, updated_at)
                VALUES (?,?,?)""",
             ("crew_currency_warning_days", "30", now),
+        )
+
+        # Controlled Document Security feature flag
+        await db.execute(
+            """INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?,?,?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            ("CONTROLLED_DOCUMENT_SECURITY_ENABLED", "true", now),
         )
 
         await db.commit()

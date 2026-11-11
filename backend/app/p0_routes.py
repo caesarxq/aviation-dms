@@ -1674,18 +1674,45 @@ async def list_document_files(doc_id: str, request: Request):
 
 @router.get("/documents/{doc_id}/file/{file_id}")
 async def download_document_file(doc_id: str, file_id: str, request: Request):
-    """Download a file attached to a document. Requires document:read permission."""
-    _check(request, "document:read")
+    """Download a file attached to a document.
+
+    Requires ``document:download`` permission. KCAA-approved documents
+    (kcaa_approval_required=1) cannot be fully downloaded and return 403.
+    All downloaded content receives an identity-bound watermark.
+    """
+    _check(request, "document:download")
+    actor = _actor(request)
     db = await get_db()
     try:
+        # Fetch file record and document classification in one query
         row = await (
             await db.execute(
-                "SELECT stored_filename, original_filename, content_type, file_path, file_sha256, file_size FROM document_files WHERE file_id=? AND document_id=?",
+                """SELECT df.stored_filename, df.original_filename, df.content_type,
+                          df.file_path, df.file_sha256, df.file_size,
+                          d.kcaa_approval_required, d.title, d.doc_class, d.classification
+                   FROM document_files df
+                   JOIN documents d ON df.document_id = d.document_id
+                   WHERE df.file_id=? AND df.document_id=?""",
                 (file_id, doc_id),
             )
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Document file not found")
+
+        # Block complete download of KCAA-approved documents for all users
+        if row["kcaa_approval_required"] == 1:
+            await log_audit_event(
+                "document", doc_id, "file_download_blocked_kcaa", actor,
+                {"file_id": file_id, "original_filename": row["original_filename"],
+                 "reason": "kcaa_approved_no_full_download"},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "FULL_DOWNLOAD_RESTRICTED",
+                    "message": "Complete download is not permitted for this KCAA-approved document.",
+                },
+            )
 
         path = Path(row["file_path"])
         try:
@@ -1701,22 +1728,39 @@ async def download_document_file(doc_id: str, file_id: str, request: Request):
         except FileNotFoundError as exc:
             raise HTTPException(status_code=409, detail="Stored file is missing") from exc
 
-        content_hash = hashlib.sha256(content).hexdigest()
+        content_hash = hashlib.sha256(bytes(content)).hexdigest()
         if len(content) != row["file_size"] or not hmac.compare_digest(content_hash, row["file_sha256"]):
             raise HTTPException(status_code=409, detail="Stored file no longer matches its retained record")
 
+        # Apply identity-bound watermark before delivery
+        from .watermark import apply_watermark
+        user_roles = getattr(request.state, "user_roles", []) or []
+        actor_roles = ",".join(sorted(user_roles)) if user_roles else "unknown"
+        watermarked = apply_watermark(
+            content=bytes(content),
+            content_type=row["content_type"],
+            user_identity=actor,
+            employee_id=None,
+            document_title=row["title"],
+            document_revision="01.01.00",
+            classification=row["classification"],
+            extract_reference=None,
+        )
+
         await log_audit_event(
-            "document", doc_id, "file_downloaded", _actor(request),
-            {"file_id": file_id, "original_filename": row["original_filename"], "file_sha256": row["file_sha256"]},
+            "document", doc_id, "file_downloaded", actor,
+            {"file_id": file_id, "original_filename": row["original_filename"],
+             "file_sha256": row["file_sha256"], "watermarked": True},
         )
 
         return Response(
-            content=bytes(content),
+            content=watermarked,
             media_type=row["content_type"],
             headers={
                 "Content-Disposition": f'attachment; filename="{row["original_filename"]}"',
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
+                "X-Watermarked": "true",
             },
         )
     finally:
