@@ -1,6 +1,6 @@
 """P0 API routes."""
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, FileResponse, Response
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -10,6 +10,7 @@ import bcrypt
 import hashlib
 import hmac
 import os
+import stat
 import ipaddress
 import secrets
 import asyncio
@@ -22,6 +23,23 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
+from .upload_safety import (
+    UploadMalwareDetected,
+    UploadQuotaExceeded,
+    UploadSafeguardConfigurationError,
+    UploadScannerUnavailable,
+    UploadStorageUnavailable,
+    ensure_upload_capacity,
+    load_upload_safety_policy,
+    remove_upload_file,
+    scan_upload_bytes,
+    store_upload_file,
+    upload_storage_lock,
+    upload_request_limit,
+)
+from .upload_validation import UploadContentInvalid, UploadValidationUnavailable, validate_upload_content
+from .backup_scheduler import BackupScheduler
+from .backup_create import BackupCreateError
 
 router = APIRouter()
 TRUSTED_FRONTEND_IP = os.getenv("DMS_TRUSTED_FRONTEND_IP", "172.31.254.3")
@@ -1040,7 +1058,11 @@ async def create_version(ver: DocumentVersionCreate, request: Request):
     return DocumentVersionResponse(version_id=ver_id, document_id=ver.document_id, version_number=ver.version_number, state="draft", content=ver.content, change_summary=ver.change_summary, approved_by=None, approved_at=None, kcaa_approved=0, kcaa_approved_by=None, kcaa_approved_at=None, published_at=None, kcaa_reference=None, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
-@router.post("/versions/{version_id}/kcaa-evidence", status_code=201)
+@router.post(
+    "/versions/{version_id}/kcaa-evidence",
+    status_code=201,
+    dependencies=[Depends(upload_request_limit)],
+)
 async def upload_kcaa_approval_evidence(version_id: str, request: Request, reference: str = ""):
     """Retain a KCAA approval artifact and compute its digest server-side."""
     _check(request, "document:update")
@@ -1049,6 +1071,10 @@ async def upload_kcaa_approval_evidence(version_id: str, request: Request, refer
         raise HTTPException(status_code=422, detail="A KCAA approval reference of 1-200 characters is required")
     if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/pdf":
         raise HTTPException(status_code=415, detail="KCAA approval evidence must be a PDF")
+    try:
+        upload_policy = load_upload_safety_policy()
+    except UploadSafeguardConfigurationError as exc:
+        raise HTTPException(status_code=503, detail="Upload safeguards are not configured") from exc
     content_length = request.headers.get("content-length")
     if content_length:
         try:
@@ -1074,38 +1100,68 @@ async def upload_kcaa_approval_evidence(version_id: str, request: Request, refer
     uploaded_at = now_iso()
     committed = False
     try:
-        with path.open("xb") as stored_file:
-            stored_file.write(content)
-        db = await get_db()
-        try:
-            version = await (await db.execute(
-                "SELECT state FROM document_versions WHERE version_id = ?", (version_id,)
-            )).fetchone()
-            if not version:
-                raise HTTPException(status_code=404, detail="Version not found")
-            if version["state"] != "approved":
-                raise HTTPException(status_code=409, detail="KCAA evidence can only be attached to an internally approved version")
-            await db.execute("BEGIN IMMEDIATE")
-            await db.execute(
-                """INSERT INTO kcaa_approval_evidence
-                   (evidence_id, version_id, reference, stored_filename, file_path, file_sha256,
-                    file_size, uploaded_by, uploaded_at, status)
-                   VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
-                (evidence_id, version_id, reference, stored_filename, str(path), file_sha256, len(content), actor, uploaded_at),
-            )
-            await log_audit_event("kcaa_approval_evidence", evidence_id, "uploaded", actor, {
-                "version_id": version_id, "reference": reference, "file_sha256": file_sha256,
-            }, db=db)
-            await db.commit()
-            committed = True
-        except Exception:
-            await db.rollback()
-            raise
-        finally:
-            await db.close()
-    except Exception:
+        async with upload_storage_lock():
+            try:
+                ensure_upload_capacity(len(content), upload_policy, extra_roots=(KCAA_EVIDENCE_DIR,))
+            except UploadQuotaExceeded as exc:
+                raise HTTPException(status_code=507, detail="Upload storage quota has been reached") from exc
+            except UploadStorageUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+            try:
+                await scan_upload_bytes(content, upload_policy)
+            except UploadMalwareDetected as exc:
+                raise HTTPException(status_code=422, detail="File was rejected by malware screening") from exc
+            except UploadScannerUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload malware scanner is unavailable") from exc
+            try:
+                await validate_upload_content(content, ".pdf", MAX_KCAA_EVIDENCE_BYTES)
+            except UploadContentInvalid as exc:
+                raise HTTPException(status_code=415, detail="KCAA evidence is not a structurally valid PDF") from exc
+            except UploadValidationUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Isolated PDF validation is unavailable") from exc
+            try:
+                path = store_upload_file(path, content)
+            except UploadStorageUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+
+            db = await get_db()
+            try:
+                version = await (await db.execute(
+                    "SELECT state FROM document_versions WHERE version_id = ?", (version_id,)
+                )).fetchone()
+                if not version:
+                    raise HTTPException(status_code=404, detail="Version not found")
+                if version["state"] != "approved":
+                    raise HTTPException(status_code=409, detail="KCAA evidence can only be attached to an internally approved version")
+                await db.execute("BEGIN IMMEDIATE")
+                await db.execute(
+                    """INSERT INTO kcaa_approval_evidence
+                       (evidence_id, version_id, reference, stored_filename, file_path, file_sha256,
+                        file_size, uploaded_by, uploaded_at, status)
+                       VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
+                    (evidence_id, version_id, reference, stored_filename, str(path), file_sha256, len(content), actor, uploaded_at),
+                )
+                await log_audit_event("kcaa_approval_evidence", evidence_id, "uploaded", actor, {
+                    "version_id": version_id, "reference": reference, "file_sha256": file_sha256,
+                }, db=db)
+                await db.commit()
+                committed = True
+            except Exception:
+                await db.rollback()
+                raise
+            finally:
+                await db.close()
+    except Exception as exc:
         if not committed and path.exists():
-            path.unlink()
+            try:
+                remove_upload_file(path)
+            except UploadStorageUnavailable as cleanup_exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Upload cleanup failed; storage reconciliation is required",
+                ) from cleanup_exc
+        if isinstance(exc, UploadStorageUnavailable):
+            raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
         raise
     return {
         "evidence_id": evidence_id, "version_id": version_id, "reference": reference,
@@ -1114,7 +1170,10 @@ async def upload_kcaa_approval_evidence(version_id: str, request: Request, refer
     }
 
 
-@router.post("/versions/{version_id}/kcaa-evidence/{evidence_id}/verify")
+@router.post(
+    "/versions/{version_id}/kcaa-evidence/{evidence_id}/verify",
+    dependencies=[Depends(upload_request_limit)],
+)
 async def verify_kcaa_approval_evidence(version_id: str, evidence_id: str, request: Request):
     """Independently review retained KCAA evidence before it can satisfy publication control."""
     _check(request, "document:approve")
@@ -1155,21 +1214,47 @@ async def verify_kcaa_approval_evidence(version_id: str, evidence_id: str, reque
         await db.close()
 
 
-@router.get("/versions/{version_id}/kcaa-evidence/{evidence_id}/file")
+@router.get(
+    "/versions/{version_id}/kcaa-evidence/{evidence_id}/file",
+    dependencies=[Depends(upload_request_limit)],
+)
 async def download_kcaa_approval_evidence(version_id: str, evidence_id: str, request: Request):
     _check(request, "document:read")
     db = await get_db()
     try:
         evidence = await (await db.execute(
-            "SELECT stored_filename FROM kcaa_approval_evidence WHERE evidence_id=? AND version_id=?",
+            "SELECT stored_filename, file_sha256, file_size FROM kcaa_approval_evidence WHERE evidence_id=? AND version_id=?",
             (evidence_id, version_id),
         )).fetchone()
         if not evidence:
             raise HTTPException(status_code=404, detail="KCAA evidence not found")
         path = _validated_kcaa_evidence_path(evidence["stored_filename"])
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="KCAA evidence file not found")
-        return FileResponse(path, media_type="application/pdf", filename=evidence["stored_filename"])
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise HTTPException(status_code=409, detail="KCAA evidence file is not a regular file")
+                content = bytearray()
+                while chunk := source.read(64 * 1024):
+                    if len(content) + len(chunk) > MAX_KCAA_EVIDENCE_BYTES:
+                        raise HTTPException(status_code=413, detail="Stored KCAA evidence exceeds the size limit")
+                    content.extend(chunk)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=409, detail="Stored KCAA evidence file is missing") from exc
+        content_hash = hashlib.sha256(content).hexdigest()
+        if len(content) != evidence["file_size"] or not evidence["file_sha256"] or not hmac.compare_digest(
+            content_hash, evidence["file_sha256"]
+        ):
+            raise HTTPException(status_code=409, detail="KCAA evidence file no longer matches its retained record")
+        return Response(
+            content=bytes(content),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{evidence["stored_filename"]}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     finally:
         await db.close()
 
@@ -1766,6 +1851,40 @@ async def system_admin_observability(request: Request):
         }
     finally:
         await db.close()
+
+
+# --- Backup management (system administrator only) ---
+@router.get("/backup/status")
+async def backup_status(request: Request):
+    """Return backup scheduler status and last run result."""
+    _check(request, "backup:read")
+    backup_scheduler = getattr(request.app.state, "backup_scheduler", None)
+    if backup_scheduler is None:
+        return {
+            "enabled": os.getenv("DMS_BACKUP_ENABLED", "false").strip().lower() == "true",
+            "running": False,
+            "reason": "scheduler_not_initialized",
+        }
+    return backup_scheduler.status()
+
+
+@router.post("/backup/run")
+async def backup_run(request: Request):
+    """Manually trigger one backup cycle. System administrator only."""
+    _check(request, "backup:run")
+    backup_scheduler = getattr(request.app.state, "backup_scheduler", None)
+    if backup_scheduler is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Backup scheduler is not initialized. Set DMS_BACKUP_ENABLED=true and configure DMS_BACKUP_DATA_ROOT and DMS_BACKUP_DEST_ROOT.",
+        )
+    try:
+        result = await backup_scheduler.run_once()
+        return result
+    except BackupCreateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Backup failed: {exc}")
 
 
 # --- Evidence Pack ---

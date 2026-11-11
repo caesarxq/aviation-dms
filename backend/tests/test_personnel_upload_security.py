@@ -30,11 +30,38 @@ def _valid_image_bytes(image_format):
     return output.getvalue()
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
+def _configure_upload_safeguards_for_each_test(monkeypatch):
+    monkeypatch.setenv("DMS_UPLOAD_QUOTA_SCOPE", "system")
+    monkeypatch.setenv("DMS_UPLOAD_STORAGE_QUOTA_BYTES", str(100 * 1024 * 1024))
+    monkeypatch.setenv("DMS_CLAMD_HOST", "127.0.0.1")
+    monkeypatch.setenv("DMS_CLAMD_PORT", "3310")
+    monkeypatch.setenv("DMS_CLAMD_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DMS_CLAMD_MAX_TIMEOUT_SECONDS", "30")
 
+    async def clean_scan(payload, policy):
+        return None
+
+    monkeypatch.setattr(p2_routes, "scan_upload_bytes", clean_scan)
+
+
+@pytest.fixture
 def upload_dir(tmp_path, monkeypatch):
     root = tmp_path / "private-uploads"
     monkeypatch.setattr(p2_routes, "UPLOAD_DIR", root)
+    monkeypatch.setenv("UPLOAD_DIR", str(root))
+    monkeypatch.setenv("KCAA_EVIDENCE_DIR", str(tmp_path / "kcaa-evidence"))
+    monkeypatch.setenv("AUDIT_REPORT_EVIDENCE_DIR", str(tmp_path / "attachments"))
+    monkeypatch.setenv("DMS_UPLOAD_STORAGE_QUOTA_BYTES", str(100 * 1024 * 1024))
+    monkeypatch.setenv("DMS_CLAMD_HOST", "127.0.0.1")
+    monkeypatch.setenv("DMS_CLAMD_PORT", "3310")
+    monkeypatch.setenv("DMS_CLAMD_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DMS_CLAMD_MAX_TIMEOUT_SECONDS", "30")
+
+    async def clean_scan(payload, policy):
+        return None
+
+    monkeypatch.setattr(p2_routes, "scan_upload_bytes", clean_scan)
     return root
 
 
@@ -436,8 +463,8 @@ def test_download_serves_the_validated_snapshot_if_storage_path_is_replaced(clie
     stored_path = upload_dir / f"{uploaded['upload_id']}.pdf"
     original_resolve = p2_routes._resolve_personnel_upload_file
 
-    def resolve_then_replace(row):
-        snapshot = original_resolve(row)
+    async def resolve_then_replace(row):
+        snapshot = await original_resolve(row)
         stored_path.write_bytes(_valid_pdf_bytes("Replacement credential"))
         return snapshot
 
@@ -475,6 +502,85 @@ def test_upload_verification_requires_independent_review_and_rejection_reason(cl
 
     second_decision = client.patch(f"/api/p2/personnel/uploads/{upload_id}/verify", json={"verification_status": "verified"}, headers=reviewer_headers)
     assert second_decision.status_code == 409
+
+
+def test_personnel_file_validation_happens_before_sqlite_write_transaction(
+    client, admin_headers, monkeypatch
+):
+    import os
+    from app import p2_routes
+
+    uploaded = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=admin_headers,
+    ).json()
+    original_resolver = p2_routes._resolve_personnel_upload_file
+    validation_sees_unlocked_db = False
+
+    async def inspect_before_validation(upload):
+        nonlocal validation_sees_unlocked_db
+        connection = sqlite3.connect(os.environ["DMS_DB_PATH"], timeout=0.05)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.rollback()
+            validation_sees_unlocked_db = True
+        finally:
+            connection.close()
+        return await original_resolver(upload)
+
+    monkeypatch.setattr(p2_routes, "_resolve_personnel_upload_file", inspect_before_validation)
+    verified = client.patch(
+        f"/api/p2/personnel/uploads/{uploaded['upload_id']}/verify",
+        json={"verification_status": "verified"},
+        headers={"X-Role": "head_operations", "X-Actor": "u-ops"},
+    )
+
+    assert verified.status_code == 200, verified.text
+    assert validation_sees_unlocked_db is True
+
+
+def test_personnel_verification_rejects_metadata_changed_after_file_validation(
+    client, admin_headers, monkeypatch
+):
+    import os
+    from app import p2_routes
+
+    uploaded = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=admin_headers,
+    ).json()
+    original_resolver = p2_routes._resolve_personnel_upload_file
+
+    async def validate_then_change_metadata(upload):
+        content = await original_resolver(upload)
+        connection = sqlite3.connect(os.environ["DMS_DB_PATH"])
+        try:
+            connection.execute(
+                "UPDATE personnel_uploads SET document_type = ? WHERE upload_id = ?",
+                ("changed_after_validation", upload["upload_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        return content
+
+    monkeypatch.setattr(p2_routes, "_resolve_personnel_upload_file", validate_then_change_metadata)
+    response = client.patch(
+        f"/api/p2/personnel/uploads/{uploaded['upload_id']}/verify",
+        json={"verification_status": "verified"},
+        headers={"X-Role": "head_operations", "X-Actor": "u-ops"},
+    )
+
+    assert response.status_code == 409
+    stored = client.get("/api/p2/personnel/uploads", params={"status": "pending"}, headers=admin_headers)
+    assert stored.status_code == 200
+    stored_record = next(item for item in stored.json() if item["upload_id"] == uploaded["upload_id"])
+    assert stored_record["verification_status"] == "pending"
+    assert stored_record["document_type"] == "changed_after_validation"
 
 
 def test_credential_subject_cannot_verify_upload_created_by_another_operator(client, admin_headers):
@@ -800,6 +906,117 @@ def test_upload_failure_rolls_back_database_row_and_file(client, safety_headers,
     listed = client.get("/api/p2/personnel/uploads/u-safety", headers=safety_headers)
     assert listed.status_code == 200
     assert {entry["upload_id"] for entry in listed.json()} == existing_ids
+
+
+def test_personnel_upload_fails_closed_when_safety_policy_is_unconfigured(
+    client, safety_headers, upload_dir, monkeypatch
+):
+    for name in (
+        "DMS_UPLOAD_QUOTA_SCOPE",
+        "DMS_UPLOAD_STORAGE_QUOTA_BYTES",
+        "DMS_CLAMD_HOST",
+        "DMS_CLAMD_PORT",
+        "DMS_CLAMD_TIMEOUT_SECONDS",
+        "DMS_CLAMD_MAX_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    response = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        headers=safety_headers,
+    )
+
+    assert response.status_code == 503
+    assert not list(upload_dir.glob("*"))
+
+
+def test_personnel_upload_rejects_malware_without_persisting_file_or_row(
+    client, safety_headers, upload_dir, monkeypatch
+):
+    before = client.get("/api/p2/personnel/uploads/u-safety", headers=safety_headers)
+    assert before.status_code == 200
+    prior_ids = {row["upload_id"] for row in before.json()}
+
+    async def infected(payload, policy):
+        raise p2_routes.UploadMalwareDetected("test detection")
+
+    monkeypatch.setattr(p2_routes, "scan_upload_bytes", infected)
+    response = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=safety_headers,
+    )
+
+    assert response.status_code == 422
+    assert not list(upload_dir.glob("*"))
+    after = client.get("/api/p2/personnel/uploads/u-safety", headers=safety_headers)
+    assert {row["upload_id"] for row in after.json()} == prior_ids
+
+
+def test_personnel_upload_scans_before_parsing_untrusted_content(
+    client, safety_headers, upload_dir, monkeypatch
+):
+    async def infected(payload, policy):
+        raise p2_routes.UploadMalwareDetected("test detection")
+
+    async def parser_should_not_run(*args, **kwargs):
+        raise AssertionError("untrusted parser ran before malware screening")
+
+    monkeypatch.setattr(p2_routes, "scan_upload_bytes", infected)
+    monkeypatch.setattr(p2_routes, "_validate_personnel_upload_content", parser_should_not_run)
+    response = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=safety_headers,
+    )
+
+    assert response.status_code == 422
+    assert not list(upload_dir.glob("*"))
+
+
+def test_personnel_upload_blocks_when_quota_is_exhausted(
+    client, safety_headers, upload_dir, monkeypatch
+):
+    before = client.get("/api/p2/personnel/uploads/u-safety", headers=safety_headers)
+    assert before.status_code == 200
+    prior_ids = {row["upload_id"] for row in before.json()}
+
+    def exhausted(*args, **kwargs):
+        raise p2_routes.UploadQuotaExceeded("test quota")
+
+    monkeypatch.setattr(p2_routes, "ensure_upload_capacity", exhausted)
+    response = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=safety_headers,
+    )
+
+    assert response.status_code == 507
+    assert not list(upload_dir.glob("*"))
+    after = client.get("/api/p2/personnel/uploads/u-safety", headers=safety_headers)
+    assert {row["upload_id"] for row in after.json()} == prior_ids
+
+
+def test_personnel_upload_fails_closed_when_scanner_is_unavailable(
+    client, safety_headers, upload_dir, monkeypatch
+):
+    async def unavailable(payload, policy):
+        raise p2_routes.UploadScannerUnavailable("test outage")
+
+    monkeypatch.setattr(p2_routes, "scan_upload_bytes", unavailable)
+    response = client.post(
+        "/api/p2/personnel/uploads/file",
+        data={"license_type": "pilot_license", "document_type": "license_copy"},
+        files={"file": ("license.pdf", _valid_pdf_bytes(), "application/pdf")},
+        headers=safety_headers,
+    )
+
+    assert response.status_code == 503
+    assert not list(upload_dir.glob("*"))
 
 
 def test_staff_can_list_other_person_uploads_with_read_permission(client, admin_headers):

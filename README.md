@@ -115,7 +115,7 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 
 | Role | Access | Key capabilities |
 |------|--------|------------------|
-| `system_admin` | L4 | All permissions, observability |
+| `system_admin` | L4 | Broad administration and audit import; cannot verify provenance |
 | `accountable_manager` | L4 | Organization overview, approve/publish |
 | `head_quality` | L3 | Document approve/publish, QA, audits |
 | `head_safety` | L3 | Safety SMS, occurrences, investigations |
@@ -128,7 +128,7 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | `flight_ops_officer` | L2 | Missions, safety read |
 | `dg_coordinator` | L2 | Dangerous goods, safety read |
 | `records_custodian` | L2 | Retention, legal holds |
-| `independent_auditor` | L2 | Audit/compliance read |
+| `independent_auditor` | L2 | Audit/compliance read and narrow source-provenance verification |
 | `occurrence_reporter` | L1 | Safety read and occurrence reporting |
 | `as_contracted` | L1 | Baseline read-only access; contract-specific scope is assigned separately |
 

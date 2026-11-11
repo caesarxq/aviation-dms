@@ -19,7 +19,7 @@ PERMISSIONS = [
     "change_request:approve", "distribution:manage", "retention:manage", "legal_hold:manage",
     "compliance:read", "compliance:manage", "audit:read", "audit:manage",
     "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
-    "audit_report:read", "audit_report:create", "organization:overview",
+    "audit_report:read", "audit_report:create", "audit_report:import", "audit_report:provenance_verify", "organization:overview",
     "safety:read", "safety:create", "safety:update", "safety:close",
     "risk_assessment:approve",
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
@@ -27,10 +27,13 @@ PERMISSIONS = [
     "aircraft:view", "flight:release", "security:read_sensitive", "security:manage",
     "personnel:read", "personnel:view", "personnel:manage",
     "settings:read", "settings:manage",
+    "backup:read", "backup:run",
 ]
 
 ROLE_PERMISSIONS = {
-    "system_admin": set(PERMISSIONS),
+    # Audit provenance must be attested by an independent auditor, not by the
+    # import operator, even though system_admin has broad control-plane access.
+    "system_admin": set(PERMISSIONS) - {"audit_report:provenance_verify"},
     "accountable_manager": {
         "document:read", "document:approve", "document:publish", "document:propose",
         "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
@@ -97,7 +100,7 @@ ROLE_PERMISSIONS = {
     "independent_auditor": {
         "document:read", "audit:read", "audit:manage", "compliance:read",
         "safety:read", "roc:read", "aircraft:read", "personnel:read", "personnel:view",
-        "audit_finding:read", "audit_report:read",
+        "audit_finding:read", "audit_report:read", "audit_report:provenance_verify",
     },
     "as_contracted": {"document:read", "safety:read", "roc:read", "aircraft:read"},
 }
@@ -117,7 +120,7 @@ ROLE_DESCRIPTIONS = {
     "dg_coordinator": "Dangerous-goods coordination and operational safety reporting.",
     "occurrence_reporter": "Restricted occurrence and safety reporting only.",
     "records_custodian": "Records retention, legal holds, and controlled records access.",
-    "independent_auditor": "Independent audit and compliance review access. Read-only on safety and operational records; no operational write authority (SMS-KFL §2.6).",
+    "independent_auditor": "Independent audit/compliance review and source-provenance verification. Read-only on safety and operational records; no operational write authority (SMS-KFL §2.6).",
     "as_contracted": "Read-only access limited to assigned operational and safety information.",
 }
 

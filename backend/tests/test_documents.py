@@ -1,10 +1,36 @@
 import asyncio
 import hashlib
+import stat
 import uuid
+from io import BytesIO
 import pytest
+from pypdf import PdfWriter
 
 from app import p0_auth, p0_routes
 from app.database import get_db
+
+
+@pytest.fixture
+def upload_safety_enabled(monkeypatch):
+    monkeypatch.setenv("DMS_UPLOAD_QUOTA_SCOPE", "system")
+    monkeypatch.setenv("DMS_UPLOAD_STORAGE_QUOTA_BYTES", str(100 * 1024 * 1024))
+    monkeypatch.setenv("DMS_CLAMD_HOST", "127.0.0.1")
+    monkeypatch.setenv("DMS_CLAMD_PORT", "3310")
+    monkeypatch.setenv("DMS_CLAMD_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DMS_CLAMD_MAX_TIMEOUT_SECONDS", "30")
+
+    async def clean_scan(payload, policy):
+        return None
+
+    monkeypatch.setattr(p0_routes, "scan_upload_bytes", clean_scan)
+
+
+def _valid_pdf_bytes():
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 @pytest.fixture
@@ -122,7 +148,97 @@ class TestDocumentVersioning:
         assert resp.status_code == 403
         assert "KCAA" in resp.json()["detail"]
 
-    def test_kcaa_publication_requires_retained_verified_evidence(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers):
+    def test_kcaa_evidence_upload_fails_closed_when_safety_policy_is_unconfigured(
+        self, client, admin_headers, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
+        for name in (
+            "DMS_UPLOAD_QUOTA_SCOPE",
+            "DMS_UPLOAD_STORAGE_QUOTA_BYTES",
+            "DMS_CLAMD_HOST",
+            "DMS_CLAMD_PORT",
+            "DMS_CLAMD_TIMEOUT_SECONDS",
+            "DMS_CLAMD_MAX_TIMEOUT_SECONDS",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+        response = client.post(
+            "/api/p0/versions/not-a-real-version/kcaa-evidence?reference=test",
+            content=b"",
+            headers={**admin_headers, "Content-Type": "application/pdf"},
+        )
+
+        assert response.status_code == 503
+        assert not list(tmp_path.iterdir())
+
+    def test_kcaa_evidence_rejects_malware_before_storage(
+        self, client, admin_headers, tmp_path, monkeypatch, upload_safety_enabled
+    ):
+        monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
+
+        async def infected(payload, policy):
+            raise p0_routes.UploadMalwareDetected("test detection")
+
+        monkeypatch.setattr(p0_routes, "scan_upload_bytes", infected)
+        response = client.post(
+            "/api/p0/versions/not-a-real-version/kcaa-evidence?reference=test",
+            content=_valid_pdf_bytes(),
+            headers={**admin_headers, "Content-Type": "application/pdf"},
+        )
+
+        assert response.status_code == 422
+        assert not list(tmp_path.iterdir())
+
+    def test_kcaa_evidence_blocks_when_storage_quota_is_exhausted(
+        self, client, admin_headers, tmp_path, monkeypatch, upload_safety_enabled
+    ):
+        monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
+
+        def exhausted(*args, **kwargs):
+            raise p0_routes.UploadQuotaExceeded("test quota")
+
+        monkeypatch.setattr(p0_routes, "ensure_upload_capacity", exhausted)
+        response = client.post(
+            "/api/p0/versions/not-a-real-version/kcaa-evidence?reference=test",
+            content=_valid_pdf_bytes(),
+            headers={**admin_headers, "Content-Type": "application/pdf"},
+        )
+
+        assert response.status_code == 507
+        assert not list(tmp_path.iterdir())
+
+    def test_kcaa_evidence_fails_closed_when_scanner_is_unavailable(
+        self, client, admin_headers, tmp_path, monkeypatch, upload_safety_enabled
+    ):
+        monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
+
+        async def unavailable(payload, policy):
+            raise p0_routes.UploadScannerUnavailable("test outage")
+
+        monkeypatch.setattr(p0_routes, "scan_upload_bytes", unavailable)
+        response = client.post(
+            "/api/p0/versions/not-a-real-version/kcaa-evidence?reference=test",
+            content=_valid_pdf_bytes(),
+            headers={**admin_headers, "Content-Type": "application/pdf"},
+        )
+
+        assert response.status_code == 503
+        assert not list(tmp_path.iterdir())
+
+    def test_kcaa_evidence_rejects_malformed_pdf_with_valid_signature(
+        self, client, admin_headers, tmp_path, monkeypatch, upload_safety_enabled
+    ):
+        monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
+        response = client.post(
+            "/api/p0/versions/not-a-real-version/kcaa-evidence?reference=test",
+            content=b"%PDF-1.7 not a structurally valid PDF",
+            headers={**admin_headers, "Content-Type": "application/pdf"},
+        )
+
+        assert response.status_code == 415
+        assert not list(tmp_path.iterdir())
+
+    def test_kcaa_publication_requires_retained_verified_evidence(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers, upload_safety_enabled):
         monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
         version = client.post(
             "/api/p0/versions",
@@ -139,7 +255,7 @@ class TestDocumentVersioning:
         )
         assert rejected_unverified.status_code == 422
 
-        evidence_bytes = b"%PDF-1.7\\nKCAA approval certificate test artifact"
+        evidence_bytes = _valid_pdf_bytes()
         uploaded = client.post(
             f"/api/p0/versions/{version_id}/kcaa-evidence?reference=KCAA-APPROVAL-2026-001",
             content=evidence_bytes,
@@ -150,6 +266,14 @@ class TestDocumentVersioning:
         expected_hash = hashlib.sha256(evidence_bytes).hexdigest()
         assert evidence["file_sha256"] == expected_hash
         assert (tmp_path / evidence["stored_filename"]).read_bytes() == evidence_bytes
+        download = client.get(
+            f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence['evidence_id']}/file",
+            headers=admin_headers,
+        )
+        assert download.status_code == 200
+        assert download.content == evidence_bytes
+        assert download.headers["cache-control"] == "no-store"
+        assert download.headers["x-content-type-options"] == "nosniff"
 
         self_verify = client.post(
             f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence['evidence_id']}/verify",
@@ -164,7 +288,14 @@ class TestDocumentVersioning:
         assert verified.json()["status"] == "verified"
         accountable_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
         stored_file = tmp_path / evidence["stored_filename"]
+        assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
+        assert stat.S_IMODE(stored_file.stat().st_mode) == 0o600
         stored_file.write_bytes(b"%PDF-1.7 tampered")
+        tampered_download = client.get(
+            f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence['evidence_id']}/file",
+            headers=admin_headers,
+        )
+        assert tampered_download.status_code == 409
         tampered = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_evidence_id={evidence['evidence_id']}",
             headers=accountable_headers,
@@ -186,7 +317,7 @@ class TestDocumentVersioning:
         published = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=publisher_headers)
         assert published.status_code == 200, published.text
 
-    def test_kcaa_approval_chain_requires_a_distinct_publisher(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers):
+    def test_kcaa_approval_chain_requires_a_distinct_publisher(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers, upload_safety_enabled):
         monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
         version = client.post(
             "/api/p0/versions",
@@ -197,7 +328,7 @@ class TestDocumentVersioning:
         client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=librarian_headers)
         client.patch(f"/api/p0/versions/{version_id}/state?state=approved", headers=admin_headers)
 
-        evidence_bytes = b"%PDF-1.7\\nDistinct publisher approval artifact"
+        evidence_bytes = _valid_pdf_bytes()
         uploaded = client.post(
             f"/api/p0/versions/{version_id}/kcaa-evidence?reference=KCAA-DISTINCT-PUBLISHER",
             content=evidence_bytes,

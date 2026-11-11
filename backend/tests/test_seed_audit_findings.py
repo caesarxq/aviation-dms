@@ -8,6 +8,22 @@ from app import database, p3_routes
 import app.seed_audit_findings as audit_seed
 
 
+@pytest.fixture(autouse=True)
+def _configure_seed_evidence_safeguards(monkeypatch):
+    monkeypatch.setenv("DMS_UPLOAD_QUOTA_SCOPE", "system")
+    monkeypatch.setenv("DMS_UPLOAD_STORAGE_QUOTA_BYTES", str(100 * 1024 * 1024))
+    monkeypatch.setenv("DMS_CLAMD_HOST", "127.0.0.1")
+    monkeypatch.setenv("DMS_CLAMD_PORT", "3310")
+    monkeypatch.setenv("DMS_CLAMD_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DMS_CLAMD_MAX_TIMEOUT_SECONDS", "30")
+    monkeypatch.setenv("DMS_AUDIT_EVIDENCE_MAX_BYTES", str(10 * 1024 * 1024))
+
+    async def clean_scan(payload, policy):
+        return None
+
+    monkeypatch.setattr(p3_routes, "scan_upload_bytes", clean_scan)
+
+
 def _valid_pdf_bytes(title="Audit source evidence"):
     from io import BytesIO
     from pypdf import PdfWriter
@@ -24,6 +40,7 @@ def test_external_audit_payload_preserves_confirmed_count_and_gap():
     finding_numbers = [str(finding[0]) for finding in audit_seed.FINDINGS]
     assert finding_numbers == [str(number) for number in [*range(1, 32), *range(33, 40)]]
     assert audit_seed.AUDIT_EVIDENCE_SHA256 == "db99508fabee281f86c52fc182c1f54926538e53a298857b0a9b2a12ad156efd"
+    assert audit_seed.AUDIT_DATA["evidence_file"] == "attachments/SAFETY AND SECURITY SEPTEMBER  2026 AUDIT REPORT.pdf"
 
 
 def test_external_seed_requires_explicit_development_import_mode(monkeypatch):

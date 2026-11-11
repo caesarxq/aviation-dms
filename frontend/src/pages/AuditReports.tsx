@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { auditApi } from "../api/audit";
@@ -6,15 +6,16 @@ import type { AuditReport } from "../api/audit";
 import { FileText, Plus, RefreshCw } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useAuth } from "../auth/AuthContext";
+import { AuditReportImportWorkflow } from "../components/AuditReportImportWorkflow";
+
+const AUDIT_REPORT_PAGE_SIZE = 50;
+const AUDIT_REPORT_STATUSES = ["open", "in_progress", "closed", "cancelled"];
 
 export function AuditReports() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
-  const { data: reports = [], isLoading, isError, refetch } = useQuery({
-    queryKey: ["audit-reports"],
-    queryFn: () => auditApi.listAuditReports(),
-  });
+  const todayUtc = new Date().toISOString().slice(0, 10);
   const [showForm, setShowForm] = useState(false);
   const [auditNumber, setAuditNumber] = useState("");
   const [auditDate, setAuditDate] = useState("");
@@ -24,18 +25,31 @@ export function AuditReports() {
   const [regulatoryBasis, setRegulatoryBasis] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [reportOffset, setReportOffset] = useState(0);
   const [mutationError, setMutationError] = useState("");
-  const filteredReports = useMemo(() => reports.filter((report: AuditReport) => {
-    const query = search.trim().toLowerCase();
-    const matchesSearch = !query || [report.audit_number, report.scope, report.regulatory_basis]
-      .some((value) => String(value ?? "").toLowerCase().includes(query));
-    return matchesSearch && (!statusFilter || report.status === statusFilter);
-  }), [reports, search, statusFilter]);
+  const {
+    data: fetchedReports = [],
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ["audit-reports", reportOffset, search, statusFilter],
+    queryFn: () => auditApi.listAuditReports({
+      limit: AUDIT_REPORT_PAGE_SIZE + 1,
+      offset: reportOffset,
+      search: search.trim() || undefined,
+      status: statusFilter || undefined,
+    }),
+  });
+  const hasNextPage = fetchedReports.length > AUDIT_REPORT_PAGE_SIZE;
+  const reports = fetchedReports.slice(0, AUDIT_REPORT_PAGE_SIZE);
 
   const createMutation = useMutation({
     mutationFn: (data: any) => auditApi.createAuditReport(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["audit-reports"] });
+      setReportOffset(0);
       setShowForm(false);
       setAuditNumber("");
       setAuditDate("");
@@ -106,12 +120,18 @@ export function AuditReports() {
                 onChange={(e) => setAuditNumber(e.target.value)}
               />
             </FormField>
-            <FormField htmlFor="audit_date" label="Audit Date" required>
+            <FormField
+              htmlFor="audit_date"
+              label="Audit Date"
+              hint="Historical source audits must use the provenance import workflow."
+              required
+            >
               <input
                 id="audit_date"
                 name="audit_date"
                 type="date"
                 className="app-input"
+                min={todayUtc}
                 value={auditDate}
                 onChange={(e) => setAuditDate(e.target.value)}
               />
@@ -145,7 +165,7 @@ export function AuditReports() {
           </div>
           <button
             type="button"
-            disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
+            disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
             onClick={() =>
               createMutation.mutate({
                 audit_number: auditNumber,
@@ -163,16 +183,20 @@ export function AuditReports() {
         </div>
       )}
 
+      {(hasPermission("audit_report:import") || hasPermission("audit_report:provenance_verify")) && (
+        <AuditReportImportWorkflow />
+      )}
+
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" className="app-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search audit reports…" />
+            <input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" className="app-input" value={search} onChange={(event) => { setSearch(event.target.value); setReportOffset(0); }} placeholder="Search audit reports…" />
           </div>
-          <select id="audit-report-status" name="status" aria-label="Filter audit reports by status" className="app-input w-full md:w-auto" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          <select id="audit-report-status" name="status" aria-label="Filter audit reports by status" className="app-input w-full md:w-auto" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setReportOffset(0); }}>
             <option value="">All statuses</option>
-            {Array.from(new Set<string>(reports.map((report: AuditReport) => report.status))).map((status) => <option key={status} value={status}>{status.replace(/_/g, " ")}</option>)}
+            {AUDIT_REPORT_STATUSES.map((status) => <option key={status} value={status}>{status.replace(/_/g, " ")}</option>)}
           </select>
-          <div className="text-sm font-semibold text-kfl-text">Audit Reports ({filteredReports.length})</div>
+          <div className="text-sm font-semibold text-kfl-text">Audit Reports</div>
         </div>
 
         {isError ? (
@@ -187,15 +211,15 @@ export function AuditReports() {
         ) : reports.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
             <FileText size={26} className="mx-auto mb-2 text-kfl-muted" />
-            <p className="text-sm font-bold text-kfl-text">No audit reports recorded.</p>
-            <p className="mt-1 text-xs text-kfl-muted">
-              Create your first audit engagement to begin tracking findings.
+            <p className="text-sm font-bold text-kfl-text">
+              {search.trim() || statusFilter ? "No audit reports match these filters." : "No audit reports recorded."}
             </p>
+            {!search.trim() && !statusFilter && <p className="mt-1 text-xs text-kfl-muted">
+              Create your first audit engagement to begin tracking findings.
+            </p>}
           </div>
         ) : (
-          filteredReports.length === 0 ? (
-            <div className="p-10 text-center text-sm text-kfl-muted">No audit reports match these filters.</div>
-          ) : <div className="overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
                 <tr>
@@ -217,7 +241,7 @@ export function AuditReports() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {filteredReports.map((r: AuditReport) => (
+                {reports.map((r: AuditReport) => (
                   <tr key={r.audit_id} className="transition hover:bg-kfl-surface-subtle group">
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">
                       {r.audit_number}
@@ -263,6 +287,33 @@ export function AuditReports() {
               </tbody>
             </table>
           </div>
+        )}
+        {!isError && !isLoading && (reportOffset > 0 || hasNextPage) && (
+          <footer className="flex items-center justify-between gap-3 border-t border-kfl-border p-4">
+            <span role="status" className="text-xs text-kfl-muted">
+              Showing {reportOffset + 1}–{reportOffset + reports.length}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="app-btn-secondary"
+                aria-label="Previous audit reports"
+                disabled={reportOffset === 0 || isFetching}
+                onClick={() => setReportOffset(Math.max(0, reportOffset - AUDIT_REPORT_PAGE_SIZE))}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="app-btn-secondary"
+                aria-label="Next audit reports"
+                disabled={!hasNextPage || isFetching}
+                onClick={() => setReportOffset(reportOffset + AUDIT_REPORT_PAGE_SIZE)}
+              >
+                Next
+              </button>
+            </div>
+          </footer>
         )}
       </section>
     </div>

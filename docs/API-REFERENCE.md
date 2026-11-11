@@ -2,7 +2,7 @@
 
 ## Authentication
 
-All API routes are prefixed with `/api/p0`, `/api/p1`, or `/api/p2`. Authentication is **session-cookie based** (HTTP-only `__Host-kfl_session` + `__Host-kfl_csrf` CSRF pair). JWT/Bearer authentication is **not implemented** in this release.
+All API routes are prefixed with `/api/p0`, `/api/p1`, `/api/p2`, or `/api/p3`. Authentication is **session-cookie based** (HTTP-only `__Host-kfl_session` + `__Host-kfl_csrf` CSRF pair). JWT/Bearer authentication is **not implemented** in this release.
 
 ### Session lifecycle
 
@@ -70,13 +70,40 @@ For the literal canonical ID `u-safety/security`, URL-encode the slash as `%2F` 
 | `/api/p2/maintenance-records` | GET/POST | List/create maintenance records | `aircraft:read`/`aircraft:manage` |
 | `/api/p2/aircraft-insurance` | GET/POST | List/create aircraft insurance records | `aircraft:read`/`aircraft:manage` |
 
+## P3 — Audit reports and provenance
+
+| Endpoint | Method | Description | Auth |
+|---|---|---|---|
+| `/api/p3/audit-reports` | GET | List audit reports; supports `status`, literal `search`, `limit` (1–100), and `offset`; deterministic order is audit date descending then ID ascending | `audit_report:read` |
+| `/api/p3/audit-reports` | POST | Create an in-app report; assigned auditor must be an active independent auditor | `audit_report:create` |
+| `/api/p3/audit-reports/{audit_id}/evidence` | GET | Download a hash-checked report evidence PDF | `audit_report:read` |
+| `/api/p3/audit-findings` | GET/POST | List/create findings | `audit_finding:read`/`audit_finding:create` |
+| `/api/p3/audit-findings/{finding_id}` | GET/PATCH | Read/update a finding | `audit_finding:read`/`audit_finding:update` |
+| `/api/p3/audit-findings/{finding_id}/car` | POST | Create a corrective action from a finding | `audit_finding:update` |
+| `/api/p3/audit-findings/summary` | GET | Finding summary | `audit_finding:read` |
+| `/api/p3/audit-report-imports` | POST | Stage a historical report and findings; creates no live report or findings | `audit_report:import` (`system_admin` only) |
+| `/api/p3/audit-report-imports` | GET | List staged/imported/rejected candidates (filter by status, limit, offset) | `audit_report:import` or `audit_report:provenance_verify` |
+| `/api/p3/audit-report-imports/{import_id}` | GET | Read candidate metadata, source identity, hashes, and findings | `audit_report:import` or `audit_report:provenance_verify` |
+| `/api/p3/audit-report-imports/{import_id}/evidence` | GET | Download the source PDF after hash verification | `audit_report:import` or `audit_report:provenance_verify` |
+| `/api/p3/audit-report-imports/{import_id}/verify` | POST | Recheck stored hashes and atomically publish report/findings after independent attestation | `audit_report:provenance_verify` (`independent_auditor` only) |
+| `/api/p3/audit-report-imports/{import_id}/reject` | POST | Reject a pending import with a recorded reason | `audit_report:provenance_verify` (`independent_auditor` only) |
+
+The import candidate must include the literal source auditor ID/name, a source PDF checksum, report metadata, and all findings. The server recomputes and stores a canonical payload hash; verification compares the date, scope, regulatory basis, identities, evidence reference/digest, and other duplicated report fields against that hashed payload. The source auditor, auditee, import operator, and verifier must be distinct principals; alias-aware checks enforce separation. Only the independent verifier can finalize the import; after evidence validation, one short transaction re-reads and checks candidate state/digest before atomically creating report/finding rows and finalizing the import. A verified checksum and verifier attestation do not by themselves prove the source's authenticity; the verifier must compare the source PDF and every finding against the controlled source. No historical audit has been imported by this workflow yet.
+
+- `POST /api/p3/audit-reports` is for in-app current/future audit records. If `audit_date` is earlier than the current UTC date, it returns 422 and requires the historical provenance-import workflow instead.
+- `POST /api/p3/audit-report-imports` accepts `audit_number`, `audit_date`, `source_auditor_id`, `source_auditor_name`, `auditee_id`, optional `scope`/`regulatory_basis`, `evidence_file`, lowercase `expected_evidence_sha256`, and a `findings` array. The PDF must already be retained under the application `attachments/` evidence root; this API does not upload files. Before use, evidence must pass the explicit `DMS_AUDIT_EVIDENCE_MAX_BYTES` limit, shared quota/scanner configuration, malware screening, and bounded validator-service PDF parsing; the endpoint returns a service-unavailable error if required safeguards are unconfigured.
+- P3 mutations are admitted by ASGI before Pydantic parses the body. Non-import mutation bodies are capped at 128 KiB; import creation additionally requires a positive `DMS_P3_IMPORT_BODY_MAX_BYTES`, which defaults empty in Compose and keeps that endpoint fail-closed until explicitly configured. Reverse-proxy limits and worker-count memory budgets still require deployment validation.
+- `POST /api/p3/audit-report-imports/{import_id}/verify` requires `source_checksum_confirmed`, `findings_reconciled`, and at least 20 characters of `verification_notes` from a different active independent-auditor principal.
+- `POST /api/p3/audit-report-imports/{import_id}/reject` accepts a `reason` and records the independent auditor's rejection. Rejected candidates publish no report or findings and may be resubmitted for review.
+- The browser staging and review controls are on `/audit-reports`, gated by `audit_report:import` and `audit_report:provenance_verify`. The PDF must already be retained under `attachments/`; the UI does not upload files. The workflow is implemented locally, not deployed. Compose defaults the evidence-size limit and scanner/quota settings to empty, so the file-reference endpoints remain fail-closed until approved configuration is supplied.
+
 ## Role-Based Access Control
 
 16 roles are defined with explicit permission allow-lists. Unknown roles receive no permissions.
 
 | Role | Access Level | Key Permissions |
 |---|---|---|
-| system_admin | L4 | All permissions |
+| system_admin | L4 | Broad administration and import; no provenance verification |
 | accountable_manager | L4 | Approve, publish, flight release, security manage |
 | head_quality | L3 | Document approve/publish, audit manage, safety close |
 | head_safety | L3 | Safety create/update/close, occurrence investigate |
@@ -89,7 +116,7 @@ For the literal canonical ID `u-safety/security`, URL-encode the slash as `%2F` 
 | flight_ops_officer | L2 | Safety create |
 | dg_coordinator | L2 | Safety create |
 | records_custodian | L2 | Retention/legal hold manage |
-| independent_auditor | L2 | Audit manage, safety read only |
+| independent_auditor | L2 | Audit read and narrow source-provenance verification; safety read only |
 | occurrence_reporter | L1 | Occurrence report, safety create |
 | as_contracted | L1 | Read-only (document, safety, roc, aircraft) |
 

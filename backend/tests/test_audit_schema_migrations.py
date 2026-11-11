@@ -26,6 +26,39 @@ def test_fresh_install_creates_distinct_audit_tables_and_car_foreign_key(tmp_pat
         conn.close()
 
 
+def test_upgrade_adds_audit_provenance_import_table_idempotently(tmp_path, monkeypatch):
+    path = tmp_path / "pre-provenance-import.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(database.SCHEMA)
+    conn.execute(
+        """INSERT INTO users (user_id, username, email, full_name, role, created_at, updated_at)
+           VALUES ('u-admin', 'admin', 'admin@example.test', 'Admin', 'system_admin', 'created', 'updated')"""
+    )
+    conn.execute("DROP INDEX idx_audit_report_imports_status_created")
+    conn.execute("DROP INDEX uq_audit_report_imports_active_number")
+    conn.execute("DROP TABLE audit_report_imports")
+    conn.commit()
+    conn.close()
+
+    _init_at(path, monkeypatch)
+    _init_at(path, monkeypatch)
+
+    conn = sqlite3.connect(path)
+    try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "audit_report_imports" in tables
+        assert conn.execute("SELECT full_name FROM users WHERE user_id='u-admin'").fetchone() == ("Admin",)
+        indexes = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='audit_report_imports'"
+        )}
+        assert {"idx_audit_report_imports_status_created", "uq_audit_report_imports_active_number"} <= indexes
+        foreign_keys = conn.execute("PRAGMA foreign_key_list(audit_report_imports)").fetchall()
+        assert any(row[2] == "users" and row[3] == "source_auditor_id" for row in foreign_keys)
+        assert any(row[2] == "audit_reports" and row[3] == "audit_id" for row in foreign_keys)
+    finally:
+        conn.close()
+
+
 def test_upgrade_migrates_legacy_internal_findings_without_losing_fields(tmp_path, monkeypatch):
     path = tmp_path / "legacy-internal.db"
     conn = sqlite3.connect(path)

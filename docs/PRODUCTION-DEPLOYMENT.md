@@ -9,7 +9,7 @@ Local development should use the backend and Vite commands in the README. The ro
 - Store the bootstrap token and SMTP password in separate protected files outside the repository; never print them into shell logs, put them in command-line arguments, or commit them. The backend container runs as UID/GID `10001:10001`, and file-backed Compose secrets are bind mounts: the host files must be readable by that identity. Use a root-owned secret directory and files owned by `root:10001` with mode `0440` (or an equivalent ACL). Do not use root-only mode `0600`, which prevents the backend from reading the mounted secret. Verify access with a disposable container before startup.
 - A real SMTP service/account for password-reset and notification delivery.
 - A backup location and an independently tested restore procedure before importing operational records; backups must include `/app/data/dms.db`, `/app/data/kcaa-evidence/`, `/app/data/attachments/`, and `/app/data/uploads/`.
-- An approved retention, storage-quota, and file-scanning policy for personnel uploads. The current API limits each file to 10 MiB, checks its declared type/signature, and constrains credential metadata to the UI's controlled values, but does not enforce cumulative quotas or malware scanning. Personal history and staff queues are paginated. File writes and SQLite commits are not one atomic operation; no orphan reconciliation job exists, so monitor storage and do not remove files without a DB/path cross-check.
+- An approved retention/legal-hold policy, system storage-quota scope/value, and scanner service before uploads are enabled. The API keeps the existing 10 MiB per-file limits; uploads now fail closed unless the approved quota settings and an internal ClamAV-compatible scanner endpoint are configured. Compose defaults those settings to empty. A read-only reconciliation CLI reports missing/unmatched file references but never deletes or repairs files; do not dispose of files without a documented DB/path cross-check and Records Custodian approval.
 - Approved, current source manuals, authority evidence, and named/effective delegations for each workflow that will be activated.
 
 ## Required environment
@@ -24,10 +24,33 @@ Set these in the deployment environment or an ignored root `.env` file. Use real
 - `SMTP_PASS_SECRET_FILE`: absolute host-side path to a protected file containing only the SMTP password; Compose mounts it at `/run/secrets/smtp_pass`. Do not place the production password in `.env`, shell history, or `docker-compose.yml`.
 - `RATE_LIMIT_REQUESTS_PER_MIN` (default `100`), `RATE_LIMIT_WINDOW_SECONDS` (default `60`), and `RATE_LIMIT_MAX_CLIENTS` (default `10000`): per-client-IP API throttling controls; the limiter covers `/api/p0` through `/api/p3`, not `/health`. Tune only after staging load checks, especially where multiple users share a public NAT. The limiter is process-local; use a shared store or edge enforcement before adding backend workers or replicas.
 - `SESSION_TTL_SECONDS` (default `28800`, sliding) and `SESSION_ABSOLUTE_MAX_SECONDS` (default `86400`): session lifetime controls. The absolute maximum prevents sliding activity from extending a session indefinitely.
+- `DMS_UPLOAD_QUOTA_SCOPE` and `DMS_UPLOAD_STORAGE_QUOTA_BYTES`: both are required before either file-upload endpoint accepts data. The only implemented scope is `system`; it counts bytes under `UPLOAD_DIR`, `KCAA_EVIDENCE_DIR`, and `AUDIT_REPORT_EVIDENCE_DIR`. Leave both unset until the Records Custodian approves the scope and limit. No numeric quota is approved by this guide.
+- `DMS_CLAMD_HOST`, `DMS_CLAMD_PORT`, `DMS_CLAMD_TIMEOUT_SECONDS`, and `DMS_CLAMD_MAX_TIMEOUT_SECONDS`: an internal ClamAV-compatible `clamd` INSTREAM endpoint plus a finite scan timeout no greater than the explicitly approved maximum. Compose runs `clamd` as a service on the default network at `clamd:3310`; the backend connects to it via `DMS_CLAMD_HOST=clamd` / `DMS_CLAMD_PORT=3310`. The clamd container runs with dropped Linux capabilities, `no-new-privileges`, resource limits (1 GiB memory, 1 CPU, 32 PIDs), and no host port publishing. Virus definition updates are performed by running `freshclam` against the clamd container; the database volume (`clamd_data`) persists definitions across restarts. Missing/invalid configuration, an infected result, timeout, malformed response, or scanner outage blocks the upload. Maintain and monitor signature-database freshness outside the DMS.
+- `DMS_UPLOAD_VALIDATOR_URL`: Compose pins this to the internal `upload-validator` service on the isolated `upload_validator` network. Do not override it to a public or untrusted endpoint; the backend accepts only the fixed internal hostname in production.
+- `DMS_AUDIT_EVIDENCE_MAX_BYTES`: a positive, explicitly approved per-file limit for pre-retained P3 audit evidence. Compose defaults it to empty; P3 evidence reads/references fail closed until it is set. No size value is approved by this guide.
+- `DMS_P3_IMPORT_BODY_MAX_BYTES`: a positive maximum for JSON provenance-import requests. Compose defaults it to empty; import requests return HTTP 503 until Backend/IT approves/configures a bounded value. A 128 KiB ASGI limit covers other P3 mutation bodies; both limits are enforced before FastAPI/Pydantic buffers and parses request bodies, with admission shared across the API's per-process request semaphore.
 - `DMS_TRUSTED_FRONTEND_IP`: exact reverse-proxy peer allowed to supply `X-Forwarded-For`; Compose sets this to `172.31.254.3` to match the frontend container.
 - `FLIGHT_RELEASE_ENABLED` (default `false`): leave disabled until accountable postholders sign the controlled source-to-rule mapping and required evidence is linked to exact effective sources. This controls only the flight-release API; it does not make mission planning or risk assessment operationally approved.
 
 Compose refuses to start if required values are absent. The bootstrap token and SMTP password are mounted as Docker secrets at `/run/secrets/kfl_bootstrap_token` and `/run/secrets/smtp_pass`; neither secret is passed in the backend environment. The API does not publish port 8000 to the host. `DEV_MODE` is fixed to false, the session cookie is Secure, and CORS/auth origins are restricted to the configured HTTPS host. Caddy automatically obtains and renews certificates. Backend readiness checks the database, and Compose waits for the backend and frontend health checks before starting dependent services.
+
+## Upload safeguards and remaining gates
+
+- Personnel credentials and KCAA approval evidence are scanned before they are persisted; a clean result is mandatory. The quota check is serialized across local workers and counts the configured upload, KCAA-evidence, and audit-attachment roots. Quota and scanner settings are runtime gates; their Compose defaults are empty, so upload requests return HTTP 503 until the authorized settings and scanner service are supplied.
+- `DMS_UPLOAD_QUOTA_SCOPE=system` is the only scope currently implemented. The code does not choose a storage limit; Records Custodian approval is required before configuration. If a different scope is approved, implement and test that scope before setting the environment.
+- Personnel and KCAA evidence files retain their existing 10 MiB per-file limits and format-specific validation. A shared two-request semaphore bounds admitted request bodies per backend process, including P3 mutations before Pydantic parsing; non-import P3 mutations have a 128 KiB body cap and import creation requires explicitly configured `DMS_P3_IMPORT_BODY_MAX_BYTES`. The validator client is asynchronous and cancellation closes its connection under a seven-second total deadline, so it does not retain a background thread after request cancellation. Budget up to two API payload buffers per backend worker plus two validator-service buffers per service instance, then multiply by worker/replica count; enforce reverse-proxy request-body limits before enabling uploads. PDF/image parsing runs in a separate restricted validator container and a killable child process with a five-second timeout, bounded concurrency, CPU/file-size/file-descriptor/core limits, and Linux resource restrictions. KCAA evidence is served only when the stored size and SHA-256 still match the same bounded byte snapshot. P3 audit evidence remains pre-retained under `attachments/` and is not uploaded by its API; references are size-bounded by `DMS_AUDIT_EVIDENCE_MAX_BYTES`, malware-scanned, and structurally parsed in the validator service before use. Compose runs that service as UID/GID 10002 on an internal-only network, with no DMS data volume or Docker secrets, a read-only root filesystem, dropped Linux capabilities, `no-new-privileges`, and CPU/memory/process/file-descriptor limits. In production, the backend accepts only the fixed internal validator URL; missing/unreachable service fails closed. This Compose isolation has not been exercised in a running Docker deployment, so Backend/IT must verify the actual network and mount isolation before enabling uploads.
+- Retention and legal-hold tables (`retention_rules`, `legal_holds`) are implemented and seeded. RR-023 sets 36 months (3 years) retention for general operational records; RR-025 sets lifetime retention for metadata records. Tables are **not connected to automatic file disposition** — do not automatically purge rejected, pending, or legacy files. File writes and SQLite commits are still separate operations; interruptions can leave unmatched files or rows. The report-only inventory command is:
+
+  ```bash
+  (cd backend && python -m app.upload_reconciliation \
+    --db "$RESTORE_CANDIDATE/dms.db" \
+    --uploads-root "$RESTORE_CANDIDATE/uploads" \
+    --kcaa-root "$RESTORE_CANDIDATE/kcaa-evidence" \
+    --attachments-root "$RESTORE_CANDIDATE/attachments" \
+    --verify-hashes)
+  ```
+
+  It opens SQLite read-only and compares row paths/sizes with filesystem entries. `--verify-hashes` additionally reads retained file bytes and compares them with stored SHA-256 values. It never deletes, restores, or repairs anything. Run only against an explicitly selected isolated candidate. Review unmatched/missing entries with the Records Custodian; do not automate disposition until the policy and grace period are approved.
 
 ## Client IP forwarding and network plan
 
@@ -49,7 +72,7 @@ After initial administrator setup, remove/rotate the bootstrap-token file and re
 
 The persistent `/app/data` volume contains the SQLite database, KCAA evidence, audit attachments, and personnel uploads. Back up the complete directory as one set; do not copy only `dms.db`. For a consistent filesystem-level backup, pause backend writes:
 
-Audit-report evidence is stored under `/app/data/attachments/` by default; the backend image does not package controlled audit PDFs. Provision each evidence file from an authorized, verified source before setting its `evidence_file` record or enabling its download link. The API parses the PDF structure and records a SHA-256 when a report is created; downloads are served from a snapshot only after the digest matches. Existing report rows with a null digest fail closed with HTTP 409 until controlled, documented revalidation is completed; do not silently calculate a replacement digest for legacy evidence. A digest detects later byte changes but does not establish source authenticity, approval, or immutable custody. Maintain an independently controlled provenance record and do not replace files in place.
+Audit-report evidence is stored under `/app/data/attachments/` by default; the backend image does not package controlled audit PDFs. Provision each evidence file from an authorized, verified source before setting its `evidence_file` record or enabling its download link. Before P3 evidence is referenced or served, the API enforces the explicitly configured `DMS_AUDIT_EVIDENCE_MAX_BYTES`, scans the bounded snapshot, validates PDF structure in the killable child worker, and verifies/records SHA-256 as applicable. Missing size, quota, or scanner configuration fails closed. The P2 personnel-verification and P3 provenance-verification routes currently validate retained evidence while holding SQLite write transactions; refactor them to validate before acquiring write locks and recheck the candidate state/digest under a short transaction before operational use. Normal in-app report creation rejects audit dates earlier than the current UTC date; historical source reports must use the provenance-import workflow, and responsible postholders must confirm this UTC cutoff before operational use. Existing report rows with a null digest fail closed with HTTP 409 until controlled, documented revalidation is completed; do not silently calculate a replacement digest for legacy evidence. A digest detects later byte changes but does not establish source authenticity, approval, or immutable custody. Maintain an independently controlled provenance record and do not replace files in place.
 
 The historical audit seeder is not a deployment or recovery command. It requires a disposable private scratch database and explicit development/import flags; it also verifies the pinned source-PDF digest and curated-payload digest. `AUDIT_IMPORT_SOURCE_CHECKSUM_CONFIRMED=true` and `AUDIT_IMPORT_SOURCE_RECONCILED=true` are operator attestations: set them only after independently confirming the approved source checksum and comparing every finding number and content field against that source. No audit import is authorized by these code gates alone.
 
@@ -66,6 +89,28 @@ sudo docker compose start backend
 ```
 
 If the copy fails, start the backend immediately with `sudo docker compose start backend`. Encrypt and transfer the backup to access-controlled off-host storage. Before relying on a backup, restore the complete directory to an isolated staging volume, verify `PRAGMA integrity_check`, confirm the KCAA evidence and upload files are present, and exercise representative reads. Record the restore result and timestamp.
+
+### Isolated backup candidate validation
+
+The repository provides a local validator for a **stopped, isolated backup copy or restored candidate**. It does not connect to OCI/Object Storage, copy data, start the application, run migrations, or modify the candidate. Never run it against the live `/app/data` volume. It refuses the repository's active `backend/data` directory and requires an explicit isolated-candidate confirmation.
+
+Create a SHA-256 manifest on the captured backup copy **before off-host transfer**:
+
+```bash
+(cd backend && python -m app.backup_validation create-manifest \
+  --data-root "$BACKUP_COPY" --confirm-isolated-candidate)
+```
+
+After restoring that backup into a new, isolated candidate directory, verify it read-only:
+
+```bash
+(cd backend && python -m app.backup_validation verify \
+  --data-root "$RESTORE_CANDIDATE" --confirm-isolated-candidate)
+```
+
+The verifier checks the manifest against every file, runs SQLite quick/integrity/foreign-key checks, requires all tables declared by the current application schema plus critical columns for identity, document, audit, and evidence tables, inventories referenced files, and verifies stored file hashes. A pre-migration or truncated database is blocked; the validator does not run migrations. Exit `0` means these data-integrity checks passed; exit `2` means a blocker was found. The manifest is a transfer-integrity aid, not a digital signature or proof of source authenticity. Generating a manifest only after downloading an unmanifested backup does not prove that the remote copy matches the source. The result does not establish RPO/RTO, off-host custody, service recovery, or operational/regulatory readiness.
+
+No genuine off-host drill is complete until the Accountable Manager approves the recovery objectives and acceptance criteria, infrastructure supplies an authorized destination and isolated restore target, and the owner records a successful restore. Keep staging unchanged unless separately authorized.
 
 ## Staging and deployment checks
 

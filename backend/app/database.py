@@ -414,6 +414,39 @@ CREATE TABLE IF NOT EXISTS audit_findings (
 CREATE INDEX IF NOT EXISTS idx_audit_findings_audit ON audit_findings(audit_id);
 CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status);
 
+-- Historical audit imports remain quarantined until an independent provenance review.
+CREATE TABLE IF NOT EXISTS audit_report_imports (
+    import_id TEXT PRIMARY KEY,
+    audit_number TEXT NOT NULL,
+    audit_date TEXT NOT NULL,
+    source_auditor_id TEXT NOT NULL,
+    source_auditor_name TEXT NOT NULL,
+    auditee_id TEXT NOT NULL,
+    scope TEXT,
+    regulatory_basis TEXT,
+    evidence_file TEXT NOT NULL,
+    evidence_sha256 TEXT NOT NULL CHECK (length(evidence_sha256) = 64),
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL CHECK (length(payload_sha256) = 64),
+    imported_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_verification'
+        CHECK (status IN ('pending_verification', 'imported', 'rejected')),
+    verified_by TEXT,
+    verified_at TEXT,
+    verification_notes TEXT,
+    audit_id TEXT UNIQUE,
+    FOREIGN KEY (source_auditor_id) REFERENCES users(user_id),
+    FOREIGN KEY (auditee_id) REFERENCES users(user_id),
+    FOREIGN KEY (imported_by) REFERENCES users(user_id),
+    FOREIGN KEY (verified_by) REFERENCES users(user_id),
+    FOREIGN KEY (audit_id) REFERENCES audit_reports(audit_id)
+);
+CREATE INDEX IF NOT EXISTS idx_audit_report_imports_status_created
+    ON audit_report_imports(status, created_at DESC, import_id ASC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_audit_report_imports_active_number
+    ON audit_report_imports(audit_number) WHERE status IN ('pending_verification', 'imported');
+
 -- Safety actions
 CREATE TABLE IF NOT EXISTS safety_actions (
     action_id TEXT PRIMARY KEY,
@@ -2356,6 +2389,8 @@ async def seed_db():
             ("RR-020", "Aircraft Register", "Aircraft registration and airworthiness records", 10, 10, "Aircraft deregistration", "Permanent archive", "S3"),
             ("RR-021", "Manual Index", "Manual and document index records", 5, 7, "Document obsolescence", "Secure archive then destroy", "S1"),
             ("RR-022", "Safety Reports", "Monthly/quarterly/annual safety reports", 5, 7, "Report period end", "Secure archive then destroy", "S2"),
+            ("RR-023", "General Operational Records", "General business and operational records", 3, 3, "Record creation", "Secure archive then destroy", "S2"),
+            ("RR-025", "Metadata Records", "Audit trail metadata, system logs, and legal hold records", -1, -1, "Record creation", "Permanent archive", "S3"),
         ]
         for r in retention_rules:
             await db.execute(

@@ -15,6 +15,16 @@ services:
       RATE_LIMIT_MAX_CLIENTS: "${RATE_LIMIT_MAX_CLIENTS:-10000}"
       SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-28800}"
       SESSION_ABSOLUTE_MAX_SECONDS: "${SESSION_ABSOLUTE_MAX_SECONDS:-86400}"
+      # File uploads fail closed until an approved quota and internal scanner are configured.
+      DMS_UPLOAD_QUOTA_SCOPE: "${DMS_UPLOAD_QUOTA_SCOPE:-system}"
+      DMS_UPLOAD_STORAGE_QUOTA_BYTES: "${DMS_UPLOAD_STORAGE_QUOTA_BYTES:-30000000000}"
+      DMS_CLAMD_HOST: "${DMS_CLAMD_HOST:-clamd}"
+      DMS_CLAMD_PORT: "${DMS_CLAMD_PORT:-3310}"
+      DMS_CLAMD_TIMEOUT_SECONDS: "${DMS_CLAMD_TIMEOUT_SECONDS:-30}"
+      DMS_CLAMD_MAX_TIMEOUT_SECONDS: "${DMS_CLAMD_MAX_TIMEOUT_SECONDS:-60}"
+      DMS_AUDIT_EVIDENCE_MAX_BYTES: "${DMS_AUDIT_EVIDENCE_MAX_BYTES:-10485760}"
+      DMS_P3_IMPORT_BODY_MAX_BYTES: "${DMS_P3_IMPORT_BODY_MAX_BYTES:-5242880}"
+      DMS_UPLOAD_VALIDATOR_URL: "http://upload-validator:9100/validate"
       DMS_DB_PATH: /app/data/dms.db
       UPLOAD_DIR: /app/data/uploads
       SESSION_COOKIE_SECURE: "true"
@@ -33,12 +43,87 @@ services:
       - smtp_pass
     volumes:
       - dms_data:/app/data
+    networks:
+      - default
+      - upload_validator
+    depends_on:
+      upload-validator:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+
+  upload-validator:
+    image: kfl-aviation-dms-backend:${DMS_RELEASE_TAG:?Set DMS_RELEASE_TAG to a unique build identifier}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.upload_validation_service:app", "--host", "0.0.0.0", "--port", "9100"]
+    user: "10002:10002"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 16
+    mem_limit: 768m
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 64
+        hard: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    environment:
+      PYTHONNOUSERSITE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    expose:
+      - "9100"
+    networks:
+      - upload_validator
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  clamd:
+    image: clamav-dms:latest
+    command: ["clamd", "--foreground", "--config-file=/etc/clamav/clamd.conf"]
+    entrypoint: [""]
+    user: "root"
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 1g
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 64
+        hard: 64
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+      - /run/clamav:rw,noexec,nosuid,size=16m
+    volumes:
+      - ./clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamd_data:/var/lib/clamav
+    expose:
+      - "3310"
+    # Port 3310 is NOT published to the host — internal network access only
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "clamdscan", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   frontend:
@@ -84,6 +169,7 @@ volumes:
   dms_data: {}
   caddy_data: {}
   caddy_config: {}
+  clamd_data: {}
 
 networks:
   default:
@@ -92,6 +178,8 @@ networks:
     ipam:
       config:
         - subnet: 172.31.254.0/24
+  upload_validator:
+    internal: true
 
 secrets:
   kfl_bootstrap_token:

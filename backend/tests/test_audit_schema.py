@@ -1,5 +1,6 @@
 import sqlite3
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -25,7 +26,7 @@ def test_quality_and_external_audit_findings_use_distinct_working_tables(client,
         "/api/p3/audit-reports",
         json={
             "audit_number": f"EXT-{uuid.uuid4().hex[:10]}",
-            "audit_date": "2026-11-02",
+            "audit_date": datetime.now(timezone.utc).date().isoformat(),
             "scope": "External audit",
             "auditor_id": "u-auditor",
             "auditee_id": "u-admin",

@@ -14,7 +14,30 @@
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 	}
 
-	reverse_proxy frontend:80
+	# API routes -> backend (port 8000)
+	reverse_proxy /api/* backend:8000 {
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+		transport {
+			response_header_timeout 30s
+			dial_timeout 10s
+			tls_timeout 10s
+		}
+	}
+
+	# Upload body limit: application-level enforcement (P3 body guard middleware + per-file caps)
+	# Reverse proxy buffers sized for 10 MiB uploads; reverse_proxy does not enforce body size,
+	# limits are enforced by the API before FastAPI/Pydantic parses request bodies.
+
+	# All other routes -> frontend (port 80)
+	reverse_proxy frontend:80 {
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+	}
 }
 
 www.{$DMS_HOSTNAME} {

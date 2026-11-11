@@ -8,7 +8,16 @@ def test_all_roles_defined():
 
 def test_system_admin_has_all_permissions():
     admin = ROLE_PERMISSIONS["system_admin"]
-    assert admin == set(PERMISSIONS)
+    assert admin == set(PERMISSIONS) - {"audit_report:provenance_verify"}
+
+
+def test_audit_import_and_provenance_verification_are_separate_capabilities():
+    assert has_permission("system_admin", "audit_report:import")
+    assert not has_permission("independent_auditor", "audit_report:import")
+    assert has_permission("independent_auditor", "audit_report:provenance_verify")
+    assert not has_permission("system_admin", "audit_report:provenance_verify")
+    assert not has_permission("head_quality", "audit_report:import")
+    assert not has_permission("head_quality", "audit_report:provenance_verify")
 
 
 def test_librarian_cannot_approve():

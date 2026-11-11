@@ -43,7 +43,7 @@ AUDIT_DATA = {
     "audit_date": "2026-09-28",
     "scope": "Safety and Security",
     "regulatory_basis": "KCARs 2018, KCAA CL: O-SMS003 routine SMS assessment, AVSEC checklist",
-    "evidence_file": "attachments/SAFETY AND SECURITY SEPTEMBER 2026 AUDIT REPORT.pdf",
+    "evidence_file": "attachments/SAFETY AND SECURITY SEPTEMBER  2026 AUDIT REPORT.pdf",
 }
 
 # Expected SHA-256 of the reviewed source PDF. Import also requires an
@@ -273,7 +273,7 @@ async def seed_audit_findings():
     evidence_path = _validated_audit_report_evidence_path(AUDIT_DATA["evidence_file"])
     if evidence_path is None:
         raise RuntimeError("The authorized audit evidence PDF must exist and validate under attachments/ before import")
-    evidence_snapshot, evidence_sha256, _ = _snapshot_audit_evidence(
+    evidence_snapshot, evidence_sha256, _ = await _snapshot_audit_evidence(
         evidence_path,
         expected_sha256=AUDIT_EVIDENCE_SHA256,
     )

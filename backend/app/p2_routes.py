@@ -1,5 +1,5 @@
 """P2 API routes - Document Proposals/Annotations, Personnel Licenses, Aircraft Insurance."""
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 from starlette.datastructures import UploadFile
@@ -9,18 +9,30 @@ import uuid
 import json
 import os
 import stat
-from io import BytesIO
 from pathlib import Path
 import hashlib
 from urllib.parse import quote
-from PIL import Image
-from pypdf import PdfReader
 
 from .database import DB_PATH, get_db
 from .audit import log_audit_event
 from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
+from .upload_safety import (
+    UploadMalwareDetected,
+    UploadQuotaExceeded,
+    UploadSafeguardConfigurationError,
+    UploadScannerUnavailable,
+    UploadStorageUnavailable,
+    ensure_upload_capacity,
+    load_upload_safety_policy,
+    remove_upload_file,
+    scan_upload_bytes,
+    store_upload_file,
+    upload_storage_lock,
+    upload_request_limit,
+)
+from .upload_validation import UploadContentInvalid, UploadValidationUnavailable, validate_upload_content
 
 router = APIRouter()
 
@@ -1003,7 +1015,6 @@ _UPLOAD_TYPES = {
     ".jpg": ("image/jpeg", b"\xff\xd8\xff"),
     ".jpeg": ("image/jpeg", b"\xff\xd8\xff"),
 }
-_UPLOAD_IMAGE_FORMATS = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG"}
 MAX_PERSONNEL_IMAGE_PIXELS = 40_000_000
 
 
@@ -1030,30 +1041,19 @@ def _contained_upload_path(root: Path, filename: str) -> Path:
     return target
 
 
-def _validate_personnel_upload_content(content: bytes, extension: str) -> None:
-    """Require format-aware parsing in addition to MIME and signature checks."""
+async def _validate_personnel_upload_content(content: bytes, extension: str) -> None:
+    """Require bounded, isolated format-aware parsing after MIME/signature checks."""
     file_type = _UPLOAD_TYPES.get(extension)
     if file_type is None or not content.startswith(file_type[1]):
         raise ValueError("File signature does not match its declared type")
     try:
-        if extension == ".pdf":
-            reader = PdfReader(BytesIO(content), strict=True)
-            if reader.is_encrypted or len(reader.pages) < 1:
-                raise ValueError("PDF is encrypted or contains no pages")
-            return
-
-        expected_format = _UPLOAD_IMAGE_FORMATS[extension]
-        with Image.open(BytesIO(content)) as image:
-            if image.format != expected_format:
-                raise ValueError("Image format does not match its extension")
-            if image.width < 1 or image.height < 1 or image.width * image.height > MAX_PERSONNEL_IMAGE_PIXELS:
-                raise ValueError("Image dimensions exceed the allowed limit")
-            image.verify()
-        with Image.open(BytesIO(content)) as decoded_image:
-            if decoded_image.format != expected_format:
-                raise ValueError("Image format does not match its extension")
-            decoded_image.load()
-    except Exception as exc:
+        await validate_upload_content(
+            content,
+            extension,
+            MAX_PERSONNEL_UPLOAD_BYTES,
+            MAX_PERSONNEL_IMAGE_PIXELS,
+        )
+    except UploadContentInvalid as exc:
         raise ValueError("File is not a structurally valid supported credential") from exc
 
 
@@ -1100,7 +1100,7 @@ def _has_recorded_review_identities(upload: dict) -> bool:
     )
 
 
-def _resolve_personnel_upload_file(row: dict) -> bytes:
+async def _resolve_personnel_upload_file(row: dict) -> bytes:
     root = Path(UPLOAD_DIR).resolve()
     upload_id = str(row.get("upload_id") or "")
     filename = str(row.get("file_name") or "")
@@ -1159,9 +1159,11 @@ def _resolve_personnel_upload_file(row: dict) -> bytes:
     if hasher.hexdigest() != row["file_sha256"]:
         raise HTTPException(status_code=409, detail="Stored upload checksum does not match its record")
     try:
-        _validate_personnel_upload_content(snapshot, extension)
+        await _validate_personnel_upload_content(snapshot, extension)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="Stored upload is not a structurally valid credential file") from exc
+    except UploadValidationUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Isolated file validation is unavailable") from exc
     return snapshot
 
 
@@ -1181,13 +1183,17 @@ async def _canonical_person_id(db, person_id: str) -> str:
     return alias["canonical_user_id"] if alias else person_id
 
 
-@router.post("/personnel/uploads/file")
+@router.post("/personnel/uploads/file", dependencies=[Depends(upload_request_limit)])
 async def create_personnel_upload_file(request: Request):
     """Upload a credential for the authenticated person, or for staff-managed personnel."""
     _check(request, "personnel:view")
     actor = _actor(request)
     if not actor:
         raise HTTPException(status_code=401, detail="Authenticated principal required")
+    try:
+        upload_policy = load_upload_safety_policy()
+    except UploadSafeguardConfigurationError as exc:
+        raise HTTPException(status_code=503, detail="Upload safeguards are not configured") from exc
 
     body_limit = MAX_PERSONNEL_UPLOAD_BYTES + 64 * 1024
     raw_length = request.headers.get("content-length")
@@ -1264,66 +1270,81 @@ async def create_personnel_upload_file(request: Request):
 
             upload_id = _gen_id("UPL")
             root = UPLOAD_DIR.resolve()
-            root.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chmod(root, 0o700)
             saved_path = _contained_upload_path(root, f"{upload_id}{extension}")
             file_size = 0
             file_content = bytearray()
             file_hasher = hashlib.sha256()
-            try:
-                descriptor = os.open(saved_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(descriptor, "wb") as target:
-                    while True:
-                        chunk = await file.read(64 * 1024)
-                        if not chunk:
-                            break
-                        file_size += len(chunk)
-                        if file_size > MAX_PERSONNEL_UPLOAD_BYTES:
-                            raise HTTPException(status_code=413, detail="Upload exceeds the 10 MiB limit")
-                        file_content.extend(chunk)
-                        file_hasher.update(chunk)
-                        target.write(chunk)
-                    target.flush()
-                    os.fsync(target.fileno())
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_PERSONNEL_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Upload exceeds the 10 MiB limit")
+                file_content.extend(chunk)
+                file_hasher.update(chunk)
+            async with upload_storage_lock():
                 try:
-                    _validate_personnel_upload_content(bytes(file_content), extension)
+                    ensure_upload_capacity(file_size, upload_policy, extra_roots=(UPLOAD_DIR,))
+                except UploadQuotaExceeded as exc:
+                    raise HTTPException(status_code=507, detail="Upload storage quota has been reached") from exc
+                except UploadStorageUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+                try:
+                    await scan_upload_bytes(file_content, upload_policy)
+                except UploadMalwareDetected as exc:
+                    raise HTTPException(status_code=422, detail="File was rejected by malware screening") from exc
+                except UploadScannerUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload malware scanner is unavailable") from exc
+                try:
+                    await _validate_personnel_upload_content(bytes(file_content), extension)
                 except ValueError as exc:
                     raise HTTPException(status_code=415, detail="File content is not a structurally valid supported credential") from exc
-            except Exception:
-                if saved_path.exists():
-                    saved_path.unlink()
-                raise
+                except UploadValidationUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Isolated file validation is unavailable") from exc
+                try:
+                    saved_path = store_upload_file(saved_path, file_content)
+                except UploadStorageUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
 
-            now = now_iso()
-            await db.execute(
-                """INSERT INTO personnel_uploads
-                   (upload_id, person_id, license_type, document_type, file_name,
-                    file_path, file_size, file_sha256, content_type, verification_status,
-                    created_at, updated_at, created_by, updated_by)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    upload_id, requested_person, license_type, document_type,
-                    display_name, str(saved_path), file_size, file_hasher.hexdigest(),
-                    expected_content_type, "pending", now, now, actor, actor,
-                ),
-            )
-            await log_audit_event("personnel_upload", upload_id, "uploaded", actor, {
-                "person_id": requested_person,
-                "license_type": license_type,
-                "file_name": display_name,
-                "file_size": file_size,
-                "file_sha256": file_hasher.hexdigest(),
-            }, db=db)
-            await db.commit()
-            row_committed = True
-            async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
-                row = await cur.fetchone()
-            return _personnel_upload_response(row) if row else {"upload_id": upload_id}
-        except Exception:
+                now = now_iso()
+                await db.execute(
+                    """INSERT INTO personnel_uploads
+                       (upload_id, person_id, license_type, document_type, file_name,
+                        file_path, file_size, file_sha256, content_type, verification_status,
+                        created_at, updated_at, created_by, updated_by)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        upload_id, requested_person, license_type, document_type,
+                        display_name, str(saved_path), file_size, file_hasher.hexdigest(),
+                        expected_content_type, "pending", now, now, actor, actor,
+                    ),
+                )
+                await log_audit_event("personnel_upload", upload_id, "uploaded", actor, {
+                    "person_id": requested_person,
+                    "license_type": license_type,
+                    "file_name": display_name,
+                    "file_size": file_size,
+                    "file_sha256": file_hasher.hexdigest(),
+                }, db=db)
+                await db.commit()
+                row_committed = True
+                async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
+                    row = await cur.fetchone()
+                return _personnel_upload_response(row) if row else {"upload_id": upload_id}
+        except Exception as exc:
             if not row_committed:
                 await _rollback_safely(db)
             if not row_committed and saved_path and saved_path.exists():
-                saved_path.unlink()
+                try:
+                    remove_upload_file(saved_path)
+                except UploadStorageUnavailable as cleanup_exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Upload cleanup failed; storage reconciliation is required",
+                    ) from cleanup_exc
+            if isinstance(exc, UploadStorageUnavailable):
+                raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
             raise
         finally:
             await db.close()
@@ -1384,7 +1405,10 @@ async def list_personnel_upload_queue(
         await db.close()
 
 
-@router.get("/personnel/uploads/{upload_id}/file")
+@router.get(
+    "/personnel/uploads/{upload_id}/file",
+    dependencies=[Depends(upload_request_limit)],
+)
 async def download_personnel_upload(upload_id: str, request: Request):
     role = _role(request)
     if not any(has_permission(role, permission) for permission in ("personnel:view", "personnel:read", "personnel:manage")):
@@ -1403,7 +1427,7 @@ async def download_personnel_upload(upload_id: str, request: Request):
                 raise HTTPException(status_code=403, detail="No verified personnel mapping for this principal")
         elif not (has_permission(role, "personnel:read") or has_permission(role, "personnel:manage")):
             raise HTTPException(status_code=403, detail="Permission denied: personnel:read")
-        content = _resolve_personnel_upload_file(upload)
+        content = await _resolve_personnel_upload_file(upload)
         return Response(
             content=content,
             media_type=upload["content_type"],
@@ -1467,7 +1491,10 @@ async def list_personnel_uploads(
         await db.close()
 
 
-@router.patch("/personnel/uploads/{upload_id}/verify")
+@router.patch(
+    "/personnel/uploads/{upload_id}/verify",
+    dependencies=[Depends(upload_request_limit)],
+)
 async def verify_personnel_upload(upload_id: str, body: PersonnelUploadVerification, request: Request):
     """Verify or reject a crew upload with an independent, auditable review."""
     _check(request, "personnel:manage")
@@ -1481,7 +1508,6 @@ async def verify_personnel_upload(upload_id: str, body: PersonnelUploadVerificat
 
     db = await get_db()
     try:
-        await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
             row = await cur.fetchone()
         if not row:
@@ -1493,7 +1519,23 @@ async def verify_personnel_upload(upload_id: str, body: PersonnelUploadVerificat
             raise HTTPException(status_code=409, detail="Upload lacks a recorded uploader or credential subject identity; review is blocked")
         if same_principal(request, upload.get("created_by")) or same_principal(request, upload.get("person_id")):
             raise HTTPException(status_code=403, detail="The uploader or credential subject cannot verify or reject their own upload")
-        _resolve_personnel_upload_file(upload)
+        await _resolve_personnel_upload_file(upload)
+
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM personnel_uploads WHERE upload_id = ?", (upload_id,)) as cur:
+            current_row = await cur.fetchone()
+        if current_row is None:
+            raise HTTPException(status_code=409, detail="Upload review state changed; reload and retry")
+        current_upload = dict(current_row)
+        if current_upload.get("verification_status") != "pending":
+            raise HTTPException(status_code=409, detail="Only pending uploads can be reviewed")
+        if current_upload != upload:
+            raise HTTPException(status_code=409, detail="Upload record changed during review; reload and retry")
+        if not _has_recorded_review_identities(current_upload):
+            raise HTTPException(status_code=409, detail="Upload lacks a recorded uploader or credential subject identity; review is blocked")
+        if same_principal(request, current_upload.get("created_by")) or same_principal(request, current_upload.get("person_id")):
+            raise HTTPException(status_code=403, detail="The uploader or credential subject cannot verify or reject their own upload")
+        upload = current_upload
 
         now = now_iso()
         verified_by = actor if status == "verified" else None

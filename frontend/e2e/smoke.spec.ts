@@ -485,10 +485,31 @@ test.describe("Change Requests", () => {
   });
 });
 
+test.describe("Audit report provenance import", () => {
+  test("system administrator can stage metadata without receiving verifier controls or uploading a PDF", async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto("/audit-reports");
+    await expect(page.getByRole("heading", { name: "Audit Reports" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Historical Audit Provenance" })).toBeVisible();
+    await page.getByRole("button", { name: "Stage Historical Import" }).click();
+    await expect(page.getByLabel("Source Auditor ID")).toBeVisible();
+    await expect(page.getByLabel("Existing Source PDF Path")).toBeVisible();
+    await expect(page.getByText(/This screen does not upload files/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Verify and Import" })).toHaveCount(0);
+    const results = await new AxeBuilder({ page })
+      .exclude("iframe")
+      .exclude('[contenteditable="true"]')
+      .disableRules(["color-contrast"])
+      .analyze();
+    const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
+    expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
+  });
+});
+
 test.describe("Accessibility", () => {
-  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests", "/organization-overview"]) {
+  for (const route of ["/documents", "/documents/DOC-001/edit", "/documents/DOC-001/view", "/hazards", "/risk-assessments", "/investigations", "/safety-actions", "/audit-trail", "/audit-reports", "/distributions", "/training", "/maintenance", "/crew", "/duties", "/crew-qualifications", "/change-requests", "/organization-overview"]) {
     test(`${route} has no automated accessibility violations`, async ({ page }) => {
-      if (route === "/documents/DOC-001/edit" || route === "/organization-overview") await loginAsAdmin(page);
+      if (route === "/documents/DOC-001/edit" || route === "/organization-overview" || route === "/audit-reports") await loginAsAdmin(page);
       await page.goto(route);
       await page.waitForLoadState("networkidle");
       const results = await new AxeBuilder({ page })

@@ -8,6 +8,8 @@ from .p0_routes import router as p0_router
 from .p1_routes import router as p1_router
 from .p2_routes import router as p2_router
 from .p3_routes import router as p3_router
+from .upload_safety import P3RequestBodyLimitMiddleware
+from .backup_scheduler import BackupScheduler
 
 from contextlib import asynccontextmanager
 
@@ -21,9 +23,18 @@ async def lifespan(app):
         app.state.scheduler = scheduler
     except Exception as e:
         print(f"Scheduler start failed: {e}")
+    try:
+        backup_scheduler = BackupScheduler()
+        if backup_scheduler.enabled:
+            await backup_scheduler.start()
+            app.state.backup_scheduler = backup_scheduler
+    except Exception as e:
+        print(f"Backup scheduler start failed: {e}")
     yield
     if hasattr(app.state, "scheduler"):
         await app.state.scheduler.stop()
+    if hasattr(app.state, "backup_scheduler"):
+        await app.state.backup_scheduler.stop()
 
 app = FastAPI(title="KFL Aviation DMS", version="1.0.0", lifespan=lifespan)
 
@@ -49,6 +60,7 @@ from .rate_limiter import RateLimitMiddleware
 # Starlette executes the last-added middleware outermost. Keep CORS and security
 # headers outside the limiter so 429 responses retain browser-facing headers;
 # the limiter still runs before auth and covers unauthorized requests.
+app.add_middleware(P3RequestBodyLimitMiddleware)
 app.add_middleware(P0AuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
