@@ -24,8 +24,7 @@ export default function AdminObservability() {
   const queryClient = useQueryClient();
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string[]>>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
-  const [inviteUsername, setInviteUsername] = useState("");
-  const [inviteRoles, setInviteRoles] = useState<string[]>([]);
+  const [inviteEmails, setInviteEmails] = useState<Record<string, string>>({});
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
@@ -105,10 +104,10 @@ export default function AdminObservability() {
     }
   }
 
-  async function handleInvite() {
+  async function handleInvite(userId: string, roles: string[]) {
     setInviteError("");
     setInviteNotice("");
-    const email = inviteUsername.trim();
+    const email = inviteEmails[userId]?.trim() || "";
     if (!email) {
       setInviteError("Enter an email address.");
       return;
@@ -117,18 +116,18 @@ export default function AdminObservability() {
       setInviteError("Enter a valid email address.");
       return;
     }
-    setInvitingUserId(email);
+    setInvitingUserId(userId);
     try {
-      const inviteResponse = await api.post("/p0/auth/invites", { username: email, roles: inviteRoles.length > 0 ? inviteRoles : undefined });
+      const user = data?.user_profiles?.find((u: any) => u.user_id === userId);
+      const inviteResponse = await api.post("/p0/auth/invites", { username: user?.username || userId, email, roles });
       setIssuedInvites((prev) => [...prev, {
-        user_id: inviteResponse.data?.user_id || email,
-        full_name: inviteResponse.data?.full_name || email,
+        user_id: inviteResponse.data?.user_id || userId,
+        full_name: inviteResponse.data?.full_name || user?.full_name || userId,
         invite_code: inviteResponse.data.invite_code,
         setup_url: inviteResponse.data.setup_url,
       }]);
       setInviteNotice(`Invite issued for ${email}. Share the code securely with the user.`);
-      setInviteUsername("");
-      setInviteRoles([]);
+      setInviteEmails((prev) => ({ ...prev, [userId]: "" }));
       await queryClient.invalidateQueries({ queryKey: ["admin-observability"] });
     } catch (cause: any) {
       setInviteError(cause?.response?.data?.detail || "Unable to issue invite. Retry or check administrator access.");
@@ -508,10 +507,9 @@ export default function AdminObservability() {
                           <input
                             id={`invite-email-${controlKey}`}
                             type="email"
-                            value={inviteUsername === user.user_id ? inviteUsername : user.email || user.username}
+                            value={inviteEmails[user.user_id] ?? (user.email || user.username)}
                             onChange={(event) => {
-                              setInviteUsername(user.user_id);
-                              setInviteUsername(event.target.value);
+                              setInviteEmails((prev) => ({ ...prev, [user.user_id]: event.target.value }));
                             }}
                             className="w-full rounded border border-kfl-border bg-white px-2 py-1 text-xs text-kfl-text"
                           />
@@ -521,7 +519,7 @@ export default function AdminObservability() {
                             className="app-btn-secondary px-3 py-1.5 text-xs"
                             disabled={invitingUserId === user.user_id}
                             aria-label={`Issue invite for ${user.full_name}`}
-                            onClick={() => void handleInvite()}
+                            onClick={() => void handleInvite(user.user_id, selectedRoles)}
                           >
                             {invitingUserId === user.user_id ? "Sending…" : "Issue invite"}
                           </button>
