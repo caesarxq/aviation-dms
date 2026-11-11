@@ -1830,12 +1830,44 @@ async def system_admin_observability(request: Request):
             "SELECT COUNT(*) AS count FROM audit_events WHERE timestamp >= datetime('now', '-24 hours')"
         )
         audit_last_24h = (await audit_cursor.fetchone())["count"]
+
+        # Backup scheduler status
+        backup_scheduler = getattr(request.app.state, "backup_scheduler", None)
+        backup_status = None
+        if backup_scheduler is not None:
+            backup_status = backup_scheduler.status()
+        else:
+            backup_status = {
+                "enabled": os.getenv("DMS_BACKUP_ENABLED", "false").strip().lower() == "true",
+                "running": False,
+                "reason": "scheduler_not_initialized",
+            }
+
+        # Scanner status: attempt a lightweight clamd connectivity probe
+        scanner_status = await _probe_scanner_status()
+
         scheduler = getattr(request.app.state, "scheduler", None)
         scheduler_task = getattr(scheduler, "_task", None) if scheduler else None
         scheduler_running = bool(scheduler and getattr(scheduler, "_running", False) and scheduler_task and not scheduler_task.done())
         return {
             "generated_at": now_iso(),
-            "health": {"status": "ok", "scheduler": "running" if scheduler_running else "not_started"},
+            "health": {
+                "status": "ok",
+                "scheduler": "running" if scheduler_running else "not_started",
+                "backup": {
+                    "enabled": backup_status.get("enabled", False),
+                    "running": backup_status.get("running", False),
+                    "run_count": backup_status.get("run_count", 0),
+                    "failure_count": backup_status.get("failure_count", 0),
+                    "last_error": backup_status.get("last_error"),
+                    "last_accepted": (
+                        backup_status.get("last_result", {}).get("accepted")
+                        if backup_status.get("last_result")
+                        else None
+                    ),
+                },
+                "scanner": scanner_status,
+            },
             "database": {"status": "ok" if integrity and integrity[0] == "ok" else "degraded", "integrity": integrity[0] if integrity else "unknown"},
             "tables": table_counts,
             "users": {"total": len(users), "active": sum(1 for user in users if user["is_active"]), "inactive": sum(1 for user in users if not user["is_active"])},
@@ -1853,6 +1885,54 @@ async def system_admin_observability(request: Request):
         await db.close()
 
 
+async def _probe_scanner_status() -> dict:
+    """Lightweight clamd connectivity probe: attempt a TCP handshake.
+
+    Returns a status dict without scanning any file. Never blocks longer than
+    2 seconds so the observability endpoint stays responsive.
+    """
+    import socket as _socket
+
+    try:
+        policy = load_upload_safety_policy()
+    except UploadSafeguardConfigurationError:
+        return {"configured": False, "reachable": None, "detail": "scanner not configured"}
+
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(policy.clamd_host, policy.clamd_port),
+            timeout=2.0,
+        )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (ConnectionError, OSError):
+            pass
+        return {
+            "configured": True,
+            "reachable": True,
+            "host": policy.clamd_host,
+            "port": policy.clamd_port,
+            "detail": "clamd reachable",
+        }
+    except asyncio.TimeoutError:
+        return {
+            "configured": True,
+            "reachable": False,
+            "host": policy.clamd_host,
+            "port": policy.clamd_port,
+            "detail": "clamd unreachable (timeout)",
+        }
+    except (OSError, ConnectionError) as exc:
+        return {
+            "configured": True,
+            "reachable": False,
+            "host": policy.clamd_host,
+            "port": policy.clamd_port,
+            "detail": f"clamd unreachable ({exc})",
+        }
+
+
 # --- Backup management (system administrator only) ---
 @router.get("/backup/status")
 async def backup_status(request: Request):
@@ -1866,6 +1946,31 @@ async def backup_status(request: Request):
             "reason": "scheduler_not_initialized",
         }
     return backup_scheduler.status()
+
+
+@router.get("/backup/history")
+async def backup_history(request: Request, limit: int = 20):
+    """Return recent backup audit events for the system administrator."""
+    _check(request, "backup:read")
+    from .audit import query_audit_events
+
+    db = await get_db()
+    try:
+        events = await query_audit_events(
+            entity_type="backup",
+            entity_id="backup",
+            limit=limit,
+        )
+        return {"events": [dict(e) for e in events]}
+    finally:
+        await db.close()
+
+
+@router.post("/scanner/test")
+async def scanner_test(request: Request):
+    """Test clamd connectivity. System administrator only."""
+    _check(request, "backup:read")
+    return await _probe_scanner_status()
 
 
 @router.post("/backup/run")
