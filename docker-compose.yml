@@ -16,14 +16,20 @@ services:
       SESSION_TTL_SECONDS: "${SESSION_TTL_SECONDS:-28800}"
       SESSION_ABSOLUTE_MAX_SECONDS: "${SESSION_ABSOLUTE_MAX_SECONDS:-86400}"
       # File uploads fail closed until an approved quota and internal scanner are configured.
+      # Approved: DMS_UPLOAD_STORAGE_QUOTA_BYTES=30000000000 (30 GB, Records Custodian)
       DMS_UPLOAD_QUOTA_SCOPE: "${DMS_UPLOAD_QUOTA_SCOPE:-system}"
       DMS_UPLOAD_STORAGE_QUOTA_BYTES: "${DMS_UPLOAD_STORAGE_QUOTA_BYTES:-30000000000}"
+      # Approved: DMS_CLAMD_TIMEOUT_SECONDS=60, DMS_CLAMD_MAX_TIMEOUT_SECONDS=60
       DMS_CLAMD_HOST: "${DMS_CLAMD_HOST:-clamd}"
       DMS_CLAMD_PORT: "${DMS_CLAMD_PORT:-3310}"
-      DMS_CLAMD_TIMEOUT_SECONDS: "${DMS_CLAMD_TIMEOUT_SECONDS:-30}"
+      DMS_CLAMD_TIMEOUT_SECONDS: "${DMS_CLAMD_TIMEOUT_SECONDS:-60}"
       DMS_CLAMD_MAX_TIMEOUT_SECONDS: "${DMS_CLAMD_MAX_TIMEOUT_SECONDS:-60}"
+      # Approved: DMS_AUDIT_EVIDENCE_MAX_BYTES=10485760 (10 MiB, Records Custodian)
       DMS_AUDIT_EVIDENCE_MAX_BYTES: "${DMS_AUDIT_EVIDENCE_MAX_BYTES:-10485760}"
+      # Approved: DMS_P3_IMPORT_BODY_MAX_BYTES=5242880 (5 MiB, System Administrator)
       DMS_P3_IMPORT_BODY_MAX_BYTES: "${DMS_P3_IMPORT_BODY_MAX_BYTES:-5242880}"
+      # Approved restore target: RPO=2 days, RTO=5 hours (Accountable Manager)
+      # Backup destination: 10.20.173.120:~/dms-backups/ (ubuntu via bastion 145.241.152.126)
       DMS_UPLOAD_VALIDATOR_URL: "http://upload-validator:9100/validate"
       DMS_DB_PATH: /app/data/dms.db
       UPLOAD_DIR: /app/data/uploads
@@ -56,6 +62,18 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    mem_limit: 1536m
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 1024
+      nproc:
+        soft: 128
+        hard: 128
+      core:
+        soft: 0
+        hard: 0
 
   upload-validator:
     image: kfl-aviation-dms-backend:${DMS_RELEASE_TAG:?Set DMS_RELEASE_TAG to a unique build identifier}
@@ -68,13 +86,19 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 16
+    pids_limit: 32
     mem_limit: 768m
     cpus: 1.0
     ulimits:
       nofile:
-        soft: 64
-        hard: 64
+        soft: 512
+        hard: 512
+      nproc:
+        soft: 32
+        hard: 32
+      core:
+        soft: 0
+        hard: 0
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     environment:
@@ -100,13 +124,19 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
-    pids_limit: 32
+    pids_limit: 64
     mem_limit: 1g
     cpus: 1.0
     ulimits:
       nofile:
+        soft: 1024
+        hard: 1024
+      nproc:
         soft: 64
         hard: 64
+      core:
+        soft: 0
+        hard: 0
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
       - /run/clamav:rw,noexec,nosuid,size=16m
