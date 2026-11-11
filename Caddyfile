@@ -3,7 +3,6 @@
 }
 
 roc.kfl.ke {
-	tls internal
 	encode gzip zstd
 
 	header {
