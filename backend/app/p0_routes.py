@@ -1,5 +1,5 @@
 """P0 API routes."""
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, Response
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -45,6 +45,8 @@ router = APIRouter()
 TRUSTED_FRONTEND_IP = os.getenv("DMS_TRUSTED_FRONTEND_IP", "172.31.254.3")
 KCAA_EVIDENCE_DIR = Path(os.getenv("KCAA_EVIDENCE_DIR", str(Path(DB_PATH).parent / "kcaa-evidence")))
 MAX_KCAA_EVIDENCE_BYTES = 10 * 1024 * 1024
+DMS_DOCUMENT_STORAGE_DIR = Path(os.getenv("DMS_DOCUMENT_STORAGE_DIR", str(Path(DB_PATH).parent / "document_files")))
+MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024
 
 
 def _validated_kcaa_evidence_path(stored_filename: str) -> Path:
@@ -1537,6 +1539,185 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
             kcaa_approved=0,
             created_at=now,
             updated_at=now,
+        )
+    finally:
+        await db.close()
+
+
+# --- Document file upload/download ---
+
+DMS_DOCUMENT_STORAGE_DIR = Path(os.getenv("DMS_DOCUMENT_STORAGE_DIR", str(Path(DB_PATH).parent / "document_files")))
+
+MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/documents/{doc_id}/file", response_model=DocumentFile)
+async def upload_document_file(
+    doc_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    version_id: Optional[str] = None,
+):
+    """Upload a binary file (PDF, HTML, JSON) as a source document attachment."""
+    _check(request, "document:update")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        )
+        doc_row = await cursor.fetchone()
+        if not doc_row:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Empty file upload")
+
+        file_sha256 = hashlib.sha256(content).hexdigest()
+        file_size = len(content)
+        uploaded_at = now_iso()
+        file_id = _gen_id("DOCFILE")
+        stored_filename = f"{file_id}_{file.filename}"
+        root = DMS_DOCUMENT_STORAGE_DIR.resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        file_path = root / stored_filename
+        file_path_local: Path | None = file_path
+
+        committed = False
+        try:
+            async with upload_storage_lock():
+                try:
+                    upload_policy = load_upload_safety_policy()
+                    ensure_upload_capacity(file_size, upload_policy, extra_roots=(root,))
+                except UploadQuotaExceeded as exc:
+                    raise HTTPException(status_code=507, detail="Upload storage quota has been reached") from exc
+                except UploadStorageUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+                try:
+                    await scan_upload_bytes(content, upload_policy)
+                except UploadMalwareDetected as exc:
+                    raise HTTPException(status_code=422, detail="File was rejected by malware screening") from exc
+                except UploadScannerUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload malware scanner is unavailable") from exc
+                try:
+                    await validate_upload_content(content, Path(file.filename or "").suffix or ".bin", MAX_UPLOAD_FILE_BYTES)
+                except UploadContentInvalid as exc:
+                    raise HTTPException(status_code=415, detail="File is not structurally valid") from exc
+                except UploadValidationUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Isolated file validation is unavailable") from exc
+                try:
+                    path = store_upload_file(file_path, content)
+                except UploadStorageUnavailable as exc:
+                    raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                """INSERT INTO document_files
+                   (file_id, document_id, version_id, stored_filename, original_filename,
+                    content_type, file_path, file_sha256, file_size, uploaded_by, uploaded_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    file_id, doc_id, version_id, stored_filename, file.filename or "unknown",
+                    file.content_type or "application/octet-stream", str(path),
+                    file_sha256, file_size, actor, uploaded_at,
+                ),
+            )
+            await log_audit_event(
+                "document", doc_id, "file_uploaded", actor,
+                {"file_id": file_id, "original_filename": file.filename, "file_sha256": file_sha256, "file_size": file_size},
+                db=db,
+            )
+            await db.commit()
+            committed = True
+        except Exception:
+            await db.rollback()
+            raise
+        finally:
+            await db.close()
+    except Exception as exc:
+        if not committed and file_path_local is not None and file_path_local.exists():
+            try:
+                remove_upload_file(file_path_local)
+            except UploadStorageUnavailable:
+                pass
+        raise
+    return DocumentFile(
+        file_id=file_id,
+        document_id=doc_id,
+        version_id=version_id,
+        stored_filename=stored_filename,
+        original_filename=file.filename or "unknown",
+        content_type=file.content_type or "application/octet-stream",
+        file_sha256=file_sha256,
+        file_size=file_size,
+        uploaded_by=actor,
+        uploaded_at=uploaded_at,
+    )
+
+
+@router.get("/documents/{doc_id}/files", response_model=List[DocumentFile])
+async def list_document_files(doc_id: str, request: Request):
+    """List all files attached to a document."""
+    _check(request, "document:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM document_files WHERE document_id = ? ORDER BY uploaded_at DESC",
+            (doc_id,),
+        )
+        rows = await cursor.fetchall()
+        return [DocumentFile(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/documents/{doc_id}/file/{file_id}")
+async def download_document_file(doc_id: str, file_id: str, request: Request):
+    """Download a file attached to a document. Requires document:read permission."""
+    _check(request, "document:read")
+    db = await get_db()
+    try:
+        row = await (
+            await db.execute(
+                "SELECT stored_filename, original_filename, content_type, file_path, file_sha256, file_size FROM document_files WHERE file_id=? AND document_id=?",
+                (file_id, doc_id),
+            )
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document file not found")
+
+        path = Path(row["file_path"])
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise HTTPException(status_code=409, detail="Stored file is not a regular file")
+                content = bytearray()
+                while chunk := source.read(64 * 1024):
+                    if len(content) + len(chunk) > MAX_UPLOAD_FILE_BYTES:
+                        raise HTTPException(status_code=413, detail="Stored file exceeds the size limit")
+                    content.extend(chunk)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=409, detail="Stored file is missing") from exc
+
+        content_hash = hashlib.sha256(content).hexdigest()
+        if len(content) != row["file_size"] or not hmac.compare_digest(content_hash, row["file_sha256"]):
+            raise HTTPException(status_code=409, detail="Stored file no longer matches its retained record")
+
+        await log_audit_event(
+            "document", doc_id, "file_downloaded", _actor(request),
+            {"file_id": file_id, "original_filename": row["original_filename"], "file_sha256": row["file_sha256"]},
+        )
+
+        return Response(
+            content=bytes(content),
+            media_type=row["content_type"],
+            headers={
+                "Content-Disposition": f'attachment; filename="{row["original_filename"]}"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     finally:
         await db.close()

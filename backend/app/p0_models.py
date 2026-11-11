@@ -151,6 +151,23 @@ class DocumentVersionResponse(BaseModel):
     updated_by: str
 
 
+class DocumentFile(BaseModel):
+    file_id: str
+    document_id: str
+    version_id: Optional[str] = None
+    stored_filename: str
+    original_filename: str
+    content_type: str
+    file_sha256: str
+    file_size: int
+    uploaded_by: str
+    uploaded_at: str
+
+
+class DocumentFileUploadRequest(BaseModel):
+    version_id: Optional[str] = None
+
+
 class ChangeRequestCreate(BaseModel):
     document_id: str
     version_id: Optional[str] = None

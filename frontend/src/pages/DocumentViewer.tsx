@@ -1,11 +1,25 @@
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { ArrowLeft, Copy, Check, X, Maximize2, Minimize2, ListTree } from "lucide-react";
+import {
+  ArrowLeft,
+  Copy,
+  Check,
+  X,
+  Maximize2,
+  Minimize2,
+  ListTree,
+  Download,
+} from "lucide-react";
 import { useRef, useEffect, useState, useCallback } from "react";
-import { DocumentOutline, buildOutlineFromHtml, type OutlineItem } from "../components/documents/DocumentOutline";
+import {
+  DocumentOutline,
+  buildOutlineFromHtml,
+  type OutlineItem,
+} from "../components/documents/DocumentOutline";
 
-const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'>';
+const DOCUMENT_CSP =
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'>';
 
 function addDocumentCsp(source: string): string {
   const isHtmlDocument = /<(?:!doctype\s+html|html\b|head\b|body\b|div\b|p\b|h[1-6]\b|table\b|span\b|section\b)/i.test(source);
@@ -67,7 +81,6 @@ function applyAnnotationHighlights(doc: Document, annotations: any[]) {
   }
 }
 
-
 export function DocumentViewer() {
   const { docId } = useParams();
   const viewerShellRef = useRef<HTMLDivElement>(null);
@@ -78,6 +91,28 @@ export function DocumentViewer() {
     queryKey: ["doc-content", docId],
     queryFn: () => api.get(`/p0/documents/${docId}/content`).then((r: any) => r.data),
     enabled: !!docId,
+  });
+  const { data: attachedFiles = [] } = useQuery({
+    queryKey: ["doc-files", docId],
+    queryFn: () => api.get(`/p0/documents/${docId}/files`).then((r: any) => r.data),
+    enabled: !!docId,
+  });
+  const downloadFileMutation = useMutation({
+    mutationFn: async ({ fileId, originalFilename }: { fileId: string; originalFilename: string }) => {
+      const response = await api.get(`/p0/documents/${docId}/file/${fileId}`, {
+        responseType: "blob",
+      });
+      const contentType = response.headers["content-type"] as string;
+      const blob = new Blob([response.data], { type: contentType });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = originalFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    },
   });
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const parentObservedDocumentRef = useRef<Document | null>(null);
@@ -158,9 +193,7 @@ export function DocumentViewer() {
       const selectedRange = frameWindow?.getSelection();
       const selected = selectedRange?.toString().trim() || "";
       if (!selected || !selectedRange?.rangeCount) return;
-      selectionOpenerRef.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : iframeRef.current;
+      selectionOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : iframeRef.current;
       const frameRect = iframeRef.current?.getBoundingClientRect();
       const range = selectedRange.getRangeAt(0);
       const rangeRect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
@@ -181,7 +214,7 @@ export function DocumentViewer() {
     if (selection) annotationCommentRef.current?.focus();
   }, [selection]);
 
-  useEffect(() => () => {
+  useEffect(() => {
     if (parentObservedDocumentRef.current && selectionHandlerRef.current) {
       parentObservedDocumentRef.current.removeEventListener("mouseup", selectionHandlerRef.current);
       parentObservedDocumentRef.current.removeEventListener("keyup", selectionHandlerRef.current);
@@ -209,11 +242,7 @@ export function DocumentViewer() {
     setActiveOutlineAnchor(item.anchorId);
     const frameDocument = iframeRef.current?.contentDocument;
     if (!frameDocument) return;
-    const selector = item.anchorId.startsWith("page-")
-      ? ".pf"
-      : item.anchorId.startsWith("heading-")
-        ? ".t"
-        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+    const selector = item.anchorId.startsWith("page-") ? ".pf" : item.anchorId.startsWith("heading-") ? ".t" : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
     const target = frameDocument.querySelectorAll(selector)[item.blockIndex] as HTMLElement | undefined;
     if (!target) return;
     target.scrollIntoView?.({ behavior: "auto", block: "center" });
@@ -271,6 +300,21 @@ export function DocumentViewer() {
           >
             <Copy size={16} /> Copy Content
           </button>
+          {attachedFiles.length > 0 && (
+            <div className="flex items-center gap-2 border-l border-kfl-border pl-3">
+              <div className="text-xs text-kfl-muted">Attached files:</div>
+              {attachedFiles.map((f: any) => (
+                <button
+                  key={f.file_id}
+                  onClick={() => downloadFileMutation.mutate({ fileId: f.file_id, originalFilename: f.original_filename })}
+                  className="app-btn-secondary px-2 py-1 text-xs hover:bg-kfl-blue/10"
+                  title={`Download ${f.original_filename} (${f.file_size} bytes)`}
+                >
+                  <Download size={12} /> {f.original_filename.length > 20 ? `${f.original_filename.slice(0, 17)}…` : f.original_filename}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => window.history.back()}
             className="app-btn-secondary px-3 py-2 flex items-center gap-1"
@@ -279,7 +323,6 @@ export function DocumentViewer() {
           </button>
         </div>
       </header>
-
       {selection && (
         <div
           className="fixed z-50 max-w-sm rounded border border-kfl-border bg-white p-3 shadow-lg"
@@ -289,22 +332,31 @@ export function DocumentViewer() {
         >
           <p className="mb-2 text-xs text-kfl-muted">Selected: "{selection.text}"</p>
           <div className="mb-2 flex gap-2">
-            <button type="button" onClick={() => setAnnotationType("comment")} className="app-btn-secondary px-2 py-1 text-xs">Comment</button>
-            <button type="button" onClick={() => setAnnotationType("highlight")} className="app-btn-secondary px-2 py-1 text-xs">Highlight</button>
+            <button type="button" onClick={() => setAnnotationType("comment")} className="app-btn-secondary px-2 py-1 text-xs">
+              Comment
+            </button>
+            <button type="button" onClick={() => setAnnotationType("highlight")} className="app-btn-secondary px-2 py-1 text-xs">
+              Highlight
+            </button>
           </div>
-          <label htmlFor="document-annotation-comment" className="mb-1 block text-xs font-semibold">Comment</label>
+          <label htmlFor="document-annotation-comment" className="mb-1 block text-xs font-semibold">
+            Comment
+          </label>
           <textarea ref={annotationCommentRef} id="document-annotation-comment" name="content" className="app-input mb-2 w-full" rows={2} value={annotationContent} onChange={(event) => setAnnotationContent(event.target.value)} />
-          <label htmlFor="document-annotation-target" className="mb-1 block text-xs font-semibold">Target reference</label>
+          <label htmlFor="document-annotation-target" className="mb-1 block text-xs font-semibold">
+            Target reference
+          </label>
           <input id="document-annotation-target" name="target_ref" className="app-input mb-2 w-full" value={annotationTarget} onChange={(event) => setAnnotationTarget(event.target.value)} placeholder="Optional section reference" />
           <div className="flex justify-end gap-2">
-            <button type="button" className="app-btn-secondary px-3 py-1 text-xs" onClick={closeAnnotationDialog}>Cancel</button>
+            <button type="button" className="app-btn-secondary px-3 py-1 text-xs" onClick={closeAnnotationDialog}>
+              Cancel
+            </button>
             <button type="button" className="app-btn-primary px-3 py-1 text-xs" onClick={submitAnnotation} disabled={createMutation.isPending}>
               {createMutation.isPending ? "Saving…" : "Add Annotation"}
             </button>
           </div>
         </div>
       )}
-
       <section className="app-surface p-5">
         <div className={`flex gap-4 ${isFullscreen ? "h-[calc(100vh-170px)]" : "h-[calc(100vh-220px)]"}`}>
           {showOutline && (
@@ -346,9 +398,13 @@ export function DocumentViewer() {
                   </div>
                   <div className="flex gap-1">
                     {a.status !== "resolved" && (
-                      <button onClick={() => handleResolve(a.annotation_id)} className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1"><Check size={12} /> Resolve</button>
+                      <button onClick={() => handleResolve(a.annotation_id)} className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1">
+                        <Check size={12} /> Resolve
+                      </button>
                     )}
-                    <button onClick={() => handleDismiss(a.annotation_id)} className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1"><X size={12} /> Dismiss</button>
+                    <button onClick={() => handleDismiss(a.annotation_id)} className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1">
+                      <X size={12} /> Dismiss
+                    </button>
                   </div>
                 </div>
                 <div className="text-sm text-kfl-secondary mb-2">{a.target_ref || "No target reference"}</div>

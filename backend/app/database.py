@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS documents (
     updated_by TEXT NOT NULL
 );
 
+-- Document files (binary attachments: PDF, HTML, JSON source files)
+CREATE TABLE IF NOT EXISTS document_files (
+    file_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    version_id TEXT,
+    stored_filename TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id),
+    FOREIGN KEY (version_id) REFERENCES document_versions(version_id)
+);
+CREATE INDEX IF NOT EXISTS idx_document_files_document ON document_files(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_files_version ON document_files(version_id);
+
 -- Document versions
 CREATE TABLE IF NOT EXISTS document_versions (
     version_id TEXT PRIMARY KEY,
@@ -2104,6 +2123,30 @@ async def init_db():
         }
         for column, column_type in doc_source_columns.items():
             await _add_column_if_missing(db, "documents", column, column_type)
+        # Create document_files table if it doesn't exist (new table for binary file attachments)
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS document_files (
+                file_id TEXT PRIMARY KEY,
+                document_id TEXT NOT NULL,
+                version_id TEXT,
+                stored_filename TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_sha256 TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                uploaded_by TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL,
+                FOREIGN KEY (document_id) REFERENCES documents(document_id),
+                FOREIGN KEY (version_id) REFERENCES document_versions(version_id)
+            )"""
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_document_files_document ON document_files(document_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_document_files_version ON document_files(version_id)"
+        )
         await _add_column_if_missing(db, "roc_register", "authorized_registrations", "TEXT")
         await _add_column_if_missing(db, "aircraft", "opspec_authorized", "INTEGER NOT NULL DEFAULT 0")
         await _add_column_if_missing(db, "personnel_uploads", "file_sha256", "TEXT")
