@@ -4,8 +4,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    expose:
-      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
     environment:
       DEV_MODE: "false"
       FLIGHT_RELEASE_ENABLED: "${FLIGHT_RELEASE_ENABLED:-false}"
@@ -161,8 +161,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    expose:
-      - "80"
+    ports:
+      - "127.0.0.1:8080:80"
     depends_on:
       backend:
         condition: service_healthy
