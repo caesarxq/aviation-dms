@@ -175,7 +175,6 @@ services:
     restart: unless-stopped
     networks:
       default:
-        ipv4_address: 172.31.254.3
 
   https_proxy:
     image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5

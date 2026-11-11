@@ -2,44 +2,43 @@
 	email {$ACME_EMAIL}
 }
 
-{$DMS_HOSTNAME} {
-	encode gzip zstd
+:443 {
 
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-		Referrer-Policy "no-referrer"
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-	}
+	host roc.kfl.ke {
+		encode gzip zstd
 
-	# API routes -> backend (port 8000)
-	reverse_proxy /api/* backend:8000 {
-		header_up Host {upstream_hostport}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-For {remote}
-		header_up X-Forwarded-Proto {scheme}
-		transport {
-			response_header_timeout 30s
-			dial_timeout 10s
-			tls_timeout 10s
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Referrer-Policy "no-referrer"
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		}
+
+		# API routes -> backend (port 8000) with 10 MiB body limit
+		reverse_proxy /api/* backend:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote}
+			header_up X-Forwarded-For {remote}
+			header_up X-Forwarded-Proto {scheme}
+			transport {
+				response_header_timeout 30s
+				dial_timeout 10s
+				tls_timeout 10s
+			}
+		}
+
+		# All other routes -> frontend (port 80) with 1 MiB body limit
+		reverse_proxy frontend:80 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote}
+			header_up X-Forwarded-For {remote}
+			header_up X-Forwarded-Proto {scheme}
 		}
 	}
 
-	# Upload body limit: application-level enforcement (P3 body guard middleware + per-file caps)
-	# Reverse proxy buffers sized for 10 MiB uploads; reverse_proxy does not enforce body size,
-	# limits are enforced by the API before FastAPI/Pydantic parses request bodies.
-
-	# All other routes -> frontend (port 80)
-	reverse_proxy frontend:80 {
-		header_up Host {upstream_hostport}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-For {remote}
-		header_up X-Forwarded-Proto {scheme}
+	host www.roc.kfl.ke {
+		redir https://roc.kfl.ke{uri} permanent
 	}
-}
-
-www.{$DMS_HOSTNAME} {
-	redir https://{$DMS_HOSTNAME}{uri} permanent
 }
