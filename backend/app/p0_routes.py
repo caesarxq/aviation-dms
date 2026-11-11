@@ -1818,6 +1818,208 @@ async def get_document_section(doc_id: str, section_id: str, request: Request):
         await db.close()
 
 
+# --- Controlled Document Security: Heading-Based Extraction ---
+@router.post(
+    "/documents/{doc_id}/sections/extract-heading",
+    response_model=HeadingBasedExtractResponse,
+)
+async def extract_by_heading(
+    doc_id: str,
+    body: HeadingBasedExtractRequest,
+    request: Request,
+):
+    """Extract content from a source PDF by heading anchor.
+
+    Finds the section matching the heading, extracts the page range from the
+    source PDF, applies an identity-bound watermark, and stores the extract
+    for download. Requires document.section.extract permission.
+    """
+    _check(request, "document.section.extract")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        # Verify document exists and has a source file
+        cursor = await db.execute(
+            """SELECT d.document_id, d.title, d.classification, df.file_path,
+                      df.file_sha256, df.content_type
+               FROM documents d
+               LEFT JOIN document_files df ON d.document_id = df.document_id
+               WHERE d.document_id = ?""",
+            (doc_id,),
+        )
+        doc_row = await cursor.fetchone()
+        if not doc_row:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        if not doc_row["file_path"]:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "NO_SOURCE_FILE",
+                    "message": "No source PDF file is attached to this document.",
+                },
+            )
+
+        # Find the section matching the heading
+        cursor = await db.execute(
+            """SELECT section_id, section_number, heading, start_page, end_page,
+                      document_version_id, sensitivity, extraction_allowed
+               FROM document_sections
+               WHERE document_id = ? AND heading = ?""",
+            (doc_id, body.heading),
+        )
+        section = await cursor.fetchone()
+
+        if not section:
+            # Heading not found in section register - fail closed
+            await log_audit_event(
+                "document", doc_id, "heading_extraction_not_found", actor,
+                {"heading": body.heading},
+                db=db,
+            )
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "HEADING_NOT_FOUND",
+                    "message": f"Heading '{body.heading}' not found in the section register.",
+                },
+            )
+
+        if not section["extraction_allowed"]:
+            await log_audit_event(
+                "document", doc_id, "heading_extraction_blocked", actor,
+                {"heading": body.heading, "section_id": section["section_id"]},
+                db=db,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "EXTRACTION_NOT_ALLOWED",
+                    "message": "Extraction is not permitted for this section.",
+                },
+            )
+
+        start_page = section["start_page"]
+        end_page = section["end_page"]
+        pages = list(range(start_page, end_page + 1))
+
+        # Read the source PDF
+        source_path = Path(doc_row["file_path"])
+        try:
+            descriptor = os.open(str(source_path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as source:
+                pdf_bytes = bytearray()
+                while chunk := source.read(64 * 1024):
+                    pdf_bytes.extend(chunk)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=409, detail="Source file is missing") from exc
+
+        # Extract pages using pypdfium2 and pypdf
+        import pypdfium2 as pdfium
+        from pypdf import PdfReader, PdfWriter
+        import io
+
+        pdf_document = pdfium.PdfDocument(io.BytesIO(bytes(pdf_bytes)))
+        total_pages = len(pdf_document)
+
+        # Validate page range
+        if start_page < 1 or end_page > total_pages:
+            await log_audit_event(
+                "document", doc_id, "heading_extraction_invalid_range", actor,
+                {"heading": body.heading, "start_page": start_page,
+                 "end_page": end_page, "total_pages": total_pages},
+                db=db,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "INVALID_PAGE_RANGE",
+                    "message": f"Page range {start_page}-{end_page} is outside document bounds (1-{total_pages}).",
+                },
+            )
+
+        reader = PdfReader(io.BytesIO(bytes(pdf_bytes)))
+        writer = PdfWriter()
+
+        for page_num in pages:
+            writer.add_page(reader.pages[page_num - 1])
+
+        output_buffer = io.BytesIO()
+        writer.write(output_buffer)
+        extracted_pdf_bytes = output_buffer.getvalue()
+
+        # Apply watermark
+        from .watermark import apply_watermark
+        watermarked = apply_watermark(
+            content=extracted_pdf_bytes,
+            content_type="application/pdf",
+            user_identity=actor,
+            employee_id=None,
+            document_title=doc_row["title"],
+            document_revision="01.01.00",
+            classification=doc_row["classification"],
+            extract_reference=f"heading:{body.heading}",
+        )
+
+        # Store the extract
+        extraction_id = _gen_id("SECTRACT")
+        storage_key = f"extracts/{extraction_id}.pdf"
+        storage_path = DMS_DOCUMENT_STORAGE_DIR / storage_key
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        file_sha256 = hashlib.sha256(watermarked).hexdigest()
+        with open(storage_path, "wb") as f:
+            f.write(watermarked)
+
+        created_at = now_iso()
+
+        # Record in section_extractions table
+        await db.execute(
+            """INSERT INTO section_extractions
+               (id, request_id, document_version_id, section_id, generated_by,
+                storage_key, file_hash, page_count, watermark_applied, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                extraction_id,
+                None,  # No request_id for direct heading extraction
+                section["document_version_id"],
+                section["section_id"],
+                actor,
+                storage_key,
+                file_sha256,
+                len(pages),
+                1,
+                created_at,
+            ),
+        )
+
+        await log_audit_event(
+            "document", doc_id, "heading_extraction_generated", actor,
+            {"extraction_id": extraction_id, "heading": body.heading,
+             "section_id": section["section_id"], "pages": pages},
+            db=db,
+        )
+        await db.commit()
+
+        return HeadingBasedExtractResponse(
+            extraction_id=extraction_id,
+            document_id=doc_id,
+            section_id=section["section_id"],
+            pages_extracted=pages,
+            watermark_applied=True,
+            download_url=f"/api/documents/extractions/{extraction_id}/download",
+            created_at=created_at,
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
 # --- Controlled Document Security: Section Extraction Requests ---
 @router.post(
     "/documents/{doc_id}/sections/{section_id}/extract",

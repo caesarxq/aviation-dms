@@ -430,3 +430,20 @@ class DocumentPermissionResponse(BaseModel):
     valid_until: Optional[str]
     created_by: str
     created_at: str
+
+
+# --- Controlled Document Security: Heading-Based Extraction Models ---
+
+class HeadingBasedExtractRequest(BaseModel):
+    heading: str
+    reason: Optional[str] = None
+
+
+class HeadingBasedExtractResponse(BaseModel):
+    extraction_id: str
+    document_id: str
+    section_id: Optional[str]
+    pages_extracted: list[int]
+    watermark_applied: bool
+    download_url: str
+    created_at: str
