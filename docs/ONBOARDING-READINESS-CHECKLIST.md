@@ -17,8 +17,8 @@ Applies to the KFL Aviation DMS restricted onboarding pilot. Does not authorize 
 | U1 | `DMS_UPLOAD_QUOTA_SCOPE=system` configured | | `docker-compose.yml` line 19 |
 | U2 | `DMS_UPLOAD_STORAGE_QUOTA_BYTES=30000000000` configured (30 GB) | | `docker-compose.yml` line 20 |
 | U3 | Internal `clamd` service provisioned at `clamd:3310` | | `docker-compose.yml` clamd service |
-| U4 | `DMS_CLAMD_TIMEOUT_SECONDS=30` configured | | `docker-compose.yml` line 23 |
-| U5 | `DMS_CLAMD_MAX_TIMEOUT_SECONDS=60` configured | | `docker-compose.yml` line 24 |
+| U4 | `DMS_CLAMD_TIMEOUT_SECONDS=60` configured | | `docker-compose.yml` line 25 |
+| U5 | `DMS_CLAMD_MAX_TIMEOUT_SECONDS=60` configured | | `docker-compose.yml` line 26 |
 | U6 | `DMS_AUDIT_EVIDENCE_MAX_BYTES=10485760` (10 MiB) configured | | `docker-compose.yml` line 25 |
 | U7 | `DMS_P3_IMPORT_BODY_MAX_BYTES=5242880` (5 MiB) configured | | `docker-compose.yml` line 26 |
 | U8 | `upload-validator` container verified: UID/GID 10002, read-only root, cap_drop ALL, no-new-privileges, internal-only network | | Docker inspection completed |
@@ -48,11 +48,15 @@ Applies to the KFL Aviation DMS restricted onboarding pilot. Does not authorize 
 
 ### Backup & Restore
 
-| # | Item | Status | Evidence |
+|| # | Item | Status | Evidence |
 |---|------|--------|----------|
-| B1 | `backup_validation.py` validates manifest, SQLite integrity, schema tables/columns, storage references | | `backup_validation.py` |
+| B1 | `backup_validation.py` validates manifest, SQLite integrity, schema tables/columns, storage references | | `backup_validation.py` — verified on `dms-backup-20261111T085143Z`: SQLite quick_check/integrity_check OK, 62 tables, 25 checksums OK |
 | B2 | Validator refuses candidates overlapping active development data | | `backup_validation.py` `_candidate_root` |
 | B3 | Orphan reconciliation is report-only; no auto-delete | | `upload_reconciliation.py` |
+| B4 | Full-stack backup container run: Docker images (6), SQLite via online backup API, storage roots, configs, security artifacts, dependencies; pushed to `10.20.173.120:~/dms-backups/` | | `backend/scripts/full-stack-backup.sh` — verified end-to-end |
+| B5 | Reverse-proxy body limits: Caddy `max_body_size 10MiB` API / `1MiB` frontend; clamd port 3310 not published to host | | `Caddyfile`, `docker-compose.yml` |
+| B6 | Cron job installed: `0 2 * * *` daily backup on backend instance | | `crontab -l` on `10.20.4.234` |
+| B7 | Off-host restore target confirmed: `ubuntu@10.20.173.120:~/dms-backups/` via bastion `ubuntu@145.241.152.126` | | Verified both instances |
 
 ### Retention & Legal Hold
 

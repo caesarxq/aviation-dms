@@ -59,7 +59,7 @@ Defines what is in scope and what is explicitly out of scope for the KFL Aviatio
 | P3 evidence max | 10 MiB (10485760 bytes) | `DMS_AUDIT_EVIDENCE_MAX_BYTES` |
 | P3 import body max | 5 MiB (5242880 bytes) | `DMS_P3_IMPORT_BODY_MAX_BYTES` |
 | System storage quota | 30 GB | `DMS_UPLOAD_STORAGE_QUOTA_BYTES` |
-| Scanner timeout | 30 seconds (max 60) | `DMS_CLAMD_TIMEOUT_SECONDS` / `DMS_CLAMD_MAX_TIMEOUT_SECONDS` |
+| Scanner timeout | 60 seconds | `DMS_CLAMD_TIMEOUT_SECONDS` / `DMS_CLAMD_MAX_TIMEOUT_SECONDS` |
 
 ## Identity Preservation
 
