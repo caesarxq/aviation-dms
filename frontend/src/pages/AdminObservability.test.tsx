@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../api/client";
 import AdminObservability from "./AdminObservability";
 
-vi.mock("../api/client", () => ({ default: { get: vi.fn(), put: vi.fn() } }));
-
 const userProfile = {
   user_id: "u-quality",
   username: "librarian",
@@ -47,8 +45,8 @@ function renderAdmin() {
 
 describe("AdminObservability role assignments", () => {
   beforeEach(() => {
-    vi.mocked(api.get).mockResolvedValue({ data: observability } as any);
-    vi.mocked(api.put).mockResolvedValue({ data: { user_id: "u-quality", roles: ["head_quality", "librarian", "records_custodian"] } } as any);
+    vi.spyOn(api, "get").mockResolvedValue({ data: observability } as any);
+    vi.spyOn(api, "put").mockResolvedValue({ data: { user_id: "u-quality", roles: ["head_quality", "librarian", "records_custodian"] } } as any);
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -66,7 +64,7 @@ describe("AdminObservability role assignments", () => {
   });
 
   it("displays preserved merged account IDs without offering them role editing", async () => {
-    vi.mocked(api.get).mockResolvedValue({
+    vi.spyOn(api, "get").mockResolvedValue({
       data: {
         ...observability,
         user_profiles: [
@@ -89,7 +87,7 @@ describe("AdminObservability role assignments", () => {
       role: "head_safety",
       roles: ["head_safety", "head_security"],
     };
-    vi.mocked(api.get).mockResolvedValue({
+    vi.spyOn(api, "get").mockResolvedValue({
       data: {
         ...observability,
         user_profiles: [slashUser],

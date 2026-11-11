@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 import {
   Activity,
   Database,
-  History,
+  Mail,
   Play,
   RefreshCw,
   ShieldCheck,
+  UserCircle,
   Users,
   Wifi,
 } from "lucide-react";
@@ -29,6 +30,9 @@ export default function AdminObservability() {
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
   const [issuedInvites, setIssuedInvites] = useState<{ user_id: string; full_name: string; invite_code: string; setup_url: string }[]>([]);
+  const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
+
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   const {
     data,
@@ -104,20 +108,25 @@ export default function AdminObservability() {
   async function handleInvite() {
     setInviteError("");
     setInviteNotice("");
-    if (!inviteUsername.trim()) {
-      setInviteError("Enter a username.");
+    const email = inviteUsername.trim();
+    if (!email) {
+      setInviteError("Enter an email address.");
       return;
     }
-    setInvitingUserId(inviteUsername.trim());
+    if (!EMAIL_REGEX.test(email)) {
+      setInviteError("Enter a valid email address.");
+      return;
+    }
+    setInvitingUserId(email);
     try {
-      const inviteResponse = await api.post("/p0/auth/invites", { username: inviteUsername.trim(), roles: inviteRoles.length > 0 ? inviteRoles : undefined });
+      const inviteResponse = await api.post("/p0/auth/invites", { username: email, roles: inviteRoles.length > 0 ? inviteRoles : undefined });
       setIssuedInvites((prev) => [...prev, {
-        user_id: inviteResponse.data?.user_id || inviteUsername.trim(),
-        full_name: inviteResponse.data?.full_name || inviteUsername.trim(),
+        user_id: inviteResponse.data?.user_id || email,
+        full_name: inviteResponse.data?.full_name || email,
         invite_code: inviteResponse.data.invite_code,
         setup_url: inviteResponse.data.setup_url,
       }]);
-      setInviteNotice(`Invite issued for ${inviteUsername.trim()}. Share the code securely with the user.`);
+      setInviteNotice(`Invite issued for ${email}. Share the code securely with the user.`);
       setInviteUsername("");
       setInviteRoles([]);
       await queryClient.invalidateQueries({ queryKey: ["admin-observability"] });
@@ -246,9 +255,98 @@ export default function AdminObservability() {
       </section>
 
       <section className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="app-surface overflow-hidden">
+        <section className="app-surface overflow-hidden">
           <div className="flex items-center gap-2 border-b border-kfl-border px-5 py-4">
-            <History className="text-kfl-blue" size={18} />
+            <UserCircle className="text-kfl-blue" size={18} />
+            <div>
+              <h2 className="font-bold text-kfl-text">User Onboarding Guide</h2>
+              <p className="mt-1 text-xs text-kfl-muted">Step-by-step process for onboarding a new user to Aviation DMS.</p>
+            </div>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full border border-kfl-border text-xs text-kfl-muted flex items-center justify-center">
+                {onboardingStep !== null && onboardingStep <= 1 ? (
+                  <span className="text-emerald-600 font-bold">1</span>
+                ) : (
+                  <span className="text-kfl-muted">1</span>
+                )}
+              </div>
+              <div>
+                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 1 ? "1. Invite the user" : "1. Invite the user ✓"}</div>
+                <div className="text-xs text-kfl-muted">
+                  {onboardingStep !== null && onboardingStep <= 1
+                    ? "Enter the user's email address in the invitation form below and select their roles. Click Issue invite to generate a one-time setup code."
+                    : "Enter the user's email address and select their roles, then click Issue invite."}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full border border-kfl-border text-xs text-kfl-muted flex items-center justify-center">
+                {onboardingStep !== null && onboardingStep <= 2 ? (
+                  <span className="text-emerald-600 font-bold">2</span>
+                ) : (
+                  <span className="text-kfl-muted">2</span>
+                )}
+              </div>
+              <div>
+                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 2 ? "2. Share the invite code" : "2. Share the invite code"}</div>
+                <div className="text-xs text-kfl-muted">
+                  {onboardingStep !== null && onboardingStep <= 2
+                    ? "Copy the generated invite code and setup URL. Share them securely with the new user (separate channels recommended)."
+                    : "Copy the invite code and setup URL from the issued invites table."}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full border border-kfl-border text-xs text-kfl-muted flex items-center justify-center">
+                {onboardingStep !== null && onboardingStep <= 3 ? (
+                  <span className="text-emerald-600 font-bold">3</span>
+                ) : (
+                  <span className="text-kfl-muted">3</span>
+                )}
+              </div>
+              <div>
+                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 3 ? "3. User completes password setup" : "3. User completes password setup"}</div>
+                <div className="text-xs text-kfl-muted">
+                  {onboardingStep !== null && onboardingStep <= 3
+                    ? "The user opens the setup URL, enters the invite code, and creates their password. Their account is then active."
+                    : "The user opens the setup URL and creates their password using the invite code."}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full border border-kfl-border text-xs text-kfl-muted flex items-center justify-center">
+                {onboardingStep !== null && onboardingStep <= 4 ? (
+                  <span className="text-emerald-600 font-bold">4</span>
+                ) : (
+                  <span className="text-kfl-muted">4</span>
+                )}
+              </div>
+              <div>
+                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 4 ? "4. Verify access" : "4. Verify access"}</div>
+                <div className="text-xs text-kfl-muted">
+                  {onboardingStep !== null && onboardingStep <= 4
+                    ? "Confirm the user can log in and access the features assigned to their roles. Adjust roles here if needed."
+                    : "Confirm the user can log in and access their assigned features."}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                type="button"
+                className="app-btn-secondary px-3 py-1.5 text-xs rounded"
+                onClick={() => setOnboardingStep((s) => (s === null ? 1 : s === 4 ? null : (s ?? 1) + 1))}
+              >
+                {onboardingStep === null ? "Start guide" : onboardingStep === 4 ? "Complete guide" : "Next step"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="app-surface overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-kfl-border px-5 py-4">
+            <Mail className="text-kfl-blue" size={18} />
             <div>
               <h2 className="font-bold text-kfl-text">Backup control</h2>
               <p className="mt-1 text-xs text-kfl-muted">Trigger an on-demand backup and review recent backup history.</p>
@@ -303,7 +401,7 @@ export default function AdminObservability() {
               </table>
             </div>
           </div>
-        </div>
+        </section>
 
         <div className="app-surface overflow-hidden">
           <div className="border-b border-kfl-border px-5 py-4"><h2 className="font-bold text-kfl-text">Scanner status</h2><p className="mt-1 text-xs text-kfl-muted">Malware scanner (clamd) connectivity and last probe result.</p></div>
@@ -421,7 +519,8 @@ export default function AdminObservability() {
                           <button
                             type="button"
                             className="app-btn-secondary px-3 py-1.5 text-xs"
-                            disabled={invitingUserId === user.user_id || !inviteUsername.trim()}
+                            disabled={invitingUserId === user.user_id}
+                            aria-label={`Issue invite for ${user.full_name}`}
                             onClick={() => void handleInvite()}
                           >
                             {invitingUserId === user.user_id ? "Sending…" : "Issue invite"}

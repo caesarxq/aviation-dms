@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="6" fill="#0B2942"/>
+  <!-- Drone body -->
+  <path d="M10 14h12v2H10z" fill="#E8E8E8"/>
+  <path d="M11 12h10v1H11z" fill="#1A1A1A"/>
+  <!-- Rotors -->
+  <path d="M8 10h2v2H8z" fill="#2A2A2A"/>
+  <path d="M22 10h2v2h-2z" fill="#2A2A2A"/>
+  <path d="M8 22h2v2H8z" fill="#2A2A2A"/>
+  <path d="M22 22h2v2h-2z" fill="#2A2A2A"/>
+  <!-- Rotor blades (spinning suggestion) -->
+  <path d="M7 11L9 13M9 11L7 13" stroke="#666666" strokeWidth="1.5" strokeLinecap="round"/>
+  <path d="M23 11L21 13M21 11L23 13" stroke="#666666" strokeWidth="1.5" strokeLinecap="round"/>
+  <path d="M7 23L9 21M9 23L7 21" stroke="#666666" strokeWidth="1.5" strokeLinecap="round"/>
+  <path d="M23 23L21 21M21 23L23 21" stroke="#666666" strokeWidth="1.5" strokeLinecap="round"/>
+  <!-- Landing gear -->
+  <path d="M9 16h1v2H9z" fill="#1A1A1A"/>
+  <path d="M22 16h1v2h-1z" fill="#1A1A1A"/>
+  <!-- Antenna -->
+  <path d="M15 12V10" stroke="#1A1A1A" strokeWidth="1.5" strokeLinecap="round"/>
+  <circle cx="15" cy="9.5" r="1" fill="#E8E8E8"/>
+</svg>
