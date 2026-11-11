@@ -1767,6 +1767,583 @@ async def download_document_file(doc_id: str, file_id: str, request: Request):
         await db.close()
 
 
+# --- Controlled Document Security: Section Listing ---
+@router.get("/documents/{doc_id}/sections", response_model=List[dict])
+async def list_document_sections(doc_id: str, request: Request):
+    """List the section hierarchy for a document."""
+    _check(request, "document.section.view")
+    db = await get_db()
+    try:
+        # Verify document exists
+        cursor = await db.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        cursor = await db.execute(
+            """SELECT section_id, document_id, version_id, section_number, heading,
+                      content_start_offset, content_end_offset, parent_section_id,
+                      sort_order, created_at
+               FROM document_sections
+               WHERE document_id = ?
+               ORDER BY sort_order ASC, section_number ASC""",
+            (doc_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/documents/{doc_id}/sections/{section_id}", response_model=dict)
+async def get_document_section(doc_id: str, section_id: str, request: Request):
+    """Get section metadata for a document section."""
+    _check(request, "document.section.view")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT section_id, document_id, version_id, section_number, heading,
+                      content_start_offset, content_end_offset, parent_section_id,
+                      sort_order, created_at
+               FROM document_sections
+               WHERE section_id = ? AND document_id = ?""",
+            (section_id, doc_id),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Section not found")
+        return dict(row)
+    finally:
+        await db.close()
+
+
+# --- Controlled Document Security: Section Extraction Requests ---
+@router.post(
+    "/documents/{doc_id}/sections/{section_id}/extract",
+    response_model=SectionExtractResponse,
+)
+async def request_section_extraction(
+    doc_id: str,
+    section_id: str,
+    body: SectionExtractRequest,
+    request: Request,
+):
+    """Request extraction of a document section. Creates an approval request
+    if the section is sensitive or requires approval."""
+    _check(request, "document.section.extract")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        # Verify document and section exist
+        cursor = await db.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        cursor = await db.execute(
+            """SELECT s.section_id, s.document_version_id, d.kcaa_approval_required,
+                      d.classification
+               FROM document_sections s
+               JOIN documents d ON s.document_id = d.document_id
+               WHERE s.section_id = ? AND s.document_id = ?""",
+            (section_id, doc_id),
+        )
+        section = await cursor.fetchone()
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+
+        # Determine if approval is required based on classification
+        classification = section["classification"]
+        requires_approval = classification in ("CONTROLLED", "KCAA_APPROVED")
+
+        request_id = _gen_id("EXTRACT")
+        created_at = now_iso()
+        status = "pending" if requires_approval else "auto_approved"
+        expires_at = None
+        if requires_approval:
+            from datetime import datetime, timedelta
+
+            expires_at = (datetime.utcnow() + timedelta(days=7)).isoformat()
+
+        await db.execute(
+            """INSERT INTO section_extraction_requests
+               (id, document_id, document_version_id, requested_by, section_id,
+                reason, status, expires_at, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                request_id,
+                doc_id,
+                section["document_version_id"],
+                actor,
+                section_id,
+                body.reason or "Section extraction request",
+                status,
+                expires_at,
+                created_at,
+            ),
+        )
+
+        # Auto-approval: generate the extract immediately
+        if not requires_approval:
+            extraction_id = _gen_id("SECTRACT")
+            storage_key = f"extracts/{extraction_id}.pdf"
+            await db.execute(
+                """INSERT INTO section_extractions
+                   (id, request_id, document_version_id, section_id, generated_by,
+                    storage_key, file_hash, page_count, watermark_applied, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    extraction_id,
+                    request_id,
+                    section["document_version_id"],
+                    section_id,
+                    actor,
+                    storage_key,
+                    "pending_hash",
+                    0,
+                    1,
+                    created_at,
+                ),
+            )
+            await log_audit_event(
+                "document", doc_id, "section_extracted_auto", actor,
+                {"request_id": request_id, "section_id": section_id,
+                 "extraction_id": extraction_id},
+                db=db,
+            )
+            await db.commit()
+            return SectionExtractResponse(
+                request_id=request_id,
+                document_id=doc_id,
+                document_version_id=section["document_version_id"],
+                section_id=section_id,
+                status="approved",
+                approval_required=False,
+                created_at=created_at,
+            )
+
+        await log_audit_event(
+            "document", doc_id, "section_extraction_requested", actor,
+            {"request_id": request_id, "section_id": section_id,
+             "reason": body.reason},
+            db=db,
+        )
+        await db.commit()
+        return SectionExtractResponse(
+            request_id=request_id,
+            document_id=doc_id,
+            document_version_id=section["document_version_id"],
+            section_id=section_id,
+            status="pending",
+            approval_required=True,
+            created_at=created_at,
+        )
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+@router.get("/extraction-requests", response_model=List[ExtractionRequestResponse])
+async def list_extraction_requests(request: Request, status: Optional[str] = None, limit: int = 50, offset: int = 0):
+    """List the current user's section extraction requests."""
+    _check(request, "document.section.extract")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        query = """SELECT id, document_id, document_version_id, requested_by, section_id,
+                          reason, status, reviewed_by, review_comment, reviewed_at,
+                          expires_at, created_at
+                   FROM section_extraction_requests
+                   WHERE requested_by = ?"""
+        params = [actor]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([str(limit), str(offset)])
+
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/extraction-requests/{request_id}", response_model=ExtractionRequestResponse)
+async def get_extraction_request(request_id: str, request: Request):
+    """Get the status of a section extraction request."""
+    _check(request, "document.section.extract")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, document_id, document_version_id, requested_by, section_id,
+                          reason, status, reviewed_by, review_comment, reviewed_at,
+                          expires_at, created_at
+                   FROM section_extraction_requests
+                   WHERE id = ?""",
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Extraction request not found")
+
+        # Users can only view their own requests unless they have approval rights
+        if row["requested_by"] != actor and not has_permission(
+            getattr(request.state, "user_role", ""), "document.extract.approve"
+        ):
+            raise HTTPException(status_code=403, detail="Not authorized to view this request")
+
+        return dict(row)
+    finally:
+        await db.close()
+
+
+@router.get("/extractions/{extraction_id}/download")
+async def download_section_extraction(extraction_id: str, request: Request):
+    """Download an approved section extraction. Requires document.section.extract."""
+    _check(request, "document.section.extract")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT se.id, se.request_id, se.document_version_id, se.section_id,
+                      se.generated_by, se.storage_key, se.file_hash, se.page_count,
+                      se.watermark_applied, se.created_at,
+                      d.document_id, d.title, d.classification,
+                      ser.status as request_status
+                   FROM section_extractions se
+                   JOIN document_versions dv ON se.document_version_id = dv.version_id
+                   JOIN documents d ON dv.document_id = d.document_id
+                   LEFT JOIN section_extraction_requests ser ON se.request_id = ser.id
+                   WHERE se.id = ?""",
+            (extraction_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+
+        # Verify request is approved if it has one
+        if row["request_id"] and row["request_status"] != "approved":
+            raise HTTPException(status_code=403, detail="Extraction request not approved")
+
+        # Check user has extract permission for this document
+        # (document.section.extract is already checked above)
+
+        # Read the extracted file from storage
+        storage_path = Path(row["storage_key"])
+        # Try absolute path first, then relative to storage dir
+        if not storage_path.is_absolute():
+            storage_path = DMS_DOCUMENT_STORAGE_DIR / storage_path
+
+        try:
+            descriptor = os.open(str(storage_path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as source:
+                content = bytearray()
+                while chunk := source.read(64 * 1024):
+                    content.extend(chunk)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=409, detail="Extraction file is missing") from exc
+
+        # Verify integrity
+        content_hash = hashlib.sha256(bytes(content)).hexdigest()
+        if row["file_hash"] and content_hash != row["file_hash"]:
+            raise HTTPException(status_code=409, detail="Extraction file integrity check failed")
+
+        # Apply watermark on download
+        from .watermark import apply_watermark
+        watermarked = apply_watermark(
+            content=bytes(content),
+            content_type="application/pdf",
+            user_identity=actor,
+            employee_id=None,
+            document_title=row["title"],
+            document_revision="01.01.00",
+            classification=row["classification"],
+            extract_reference=extraction_id,
+        )
+
+        await log_audit_event(
+            "document", row["document_id"], "section_extraction_downloaded", actor,
+            {"extraction_id": extraction_id, "request_id": row["request_id"]},
+        )
+
+        return Response(
+            content=watermarked,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="extract_{extraction_id}.pdf"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "X-Watermarked": "true",
+            },
+        )
+    finally:
+        await db.close()
+
+
+# --- Controlled Document Security: Extraction Approval (Admin) ---
+@router.get("/admin/extraction-requests", response_model=List[ExtractionRequestResponse])
+async def list_pending_extraction_approvals(request: Request):
+    """List extraction requests pending approval. Requires document.extract.approve."""
+    _check(request, "document.extract.approve")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, document_id, document_version_id, requested_by, section_id,
+                          reason, status, reviewed_by, review_comment, reviewed_at,
+                          expires_at, created_at
+                   FROM section_extraction_requests
+                   WHERE status = 'pending'
+                   ORDER BY created_at ASC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.post("/admin/extraction-requests/{request_id}/approve")
+async def approve_extraction_request(request_id: str, request: Request):
+    """Approve a section extraction request. Requires document.extract.approve."""
+    _check(request, "document.extract.approve")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, document_id, document_version_id, requested_by, section_id,
+                      status, expires_at
+               FROM section_extraction_requests
+               WHERE id = ?""",
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Extraction request not found")
+        if row["status"] != "pending":
+            raise HTTPException(status_code=409, detail="Request is not pending")
+        if row["requested_by"] == actor:
+            raise HTTPException(status_code=403, detail="Cannot approve your own extraction request")
+
+        # Check expiration
+        from datetime import datetime
+        if row["expires_at"]:
+            expires = datetime.fromisoformat(row["expires_at"])
+            if datetime.utcnow() > expires:
+                await db.execute(
+                    "UPDATE section_extraction_requests SET status = 'expired' WHERE id = ?",
+                    (request_id,),
+                )
+                await db.commit()
+                raise HTTPException(status_code=409, detail="Request has expired")
+
+        await db.execute(
+            """UPDATE section_extraction_requests
+               SET status = 'approved', reviewed_by = ?, reviewed_at = ?
+               WHERE id = ?""",
+            (actor, now_iso(), request_id),
+        )
+
+        await log_audit_event(
+            "document", row["document_id"], "section_extraction_approved", actor,
+            {"request_id": request_id, "section_id": row["section_id"]},
+            db=db,
+        )
+        await db.commit()
+        return {"status": "approved", "request_id": request_id}
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+@router.post("/admin/extraction-requests/{request_id}/reject")
+async def reject_extraction_request(request_id: str, request: Request):
+    """Reject a section extraction request. Requires document.extract.approve."""
+    _check(request, "document.extract.approve")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, document_id, requested_by, status
+               FROM section_extraction_requests
+               WHERE id = ?""",
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Extraction request not found")
+        if row["status"] != "pending":
+            raise HTTPException(status_code=409, detail="Request is not pending")
+        if row["requested_by"] == actor:
+            raise HTTPException(status_code=403, detail="Cannot reject your own extraction request")
+
+        await db.execute(
+            """UPDATE section_extraction_requests
+               SET status = 'rejected', reviewed_by = ?, reviewed_at = ?
+               WHERE id = ?""",
+            (actor, now_iso(), request_id),
+        )
+
+        await log_audit_event(
+            "document", row["document_id"], "section_extraction_rejected", actor,
+            {"request_id": request_id},
+            db=db,
+        )
+        await db.commit()
+        return {"status": "rejected", "request_id": request_id}
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+# --- Controlled Document Security: Document Classification ---
+@router.post("/admin/documents/{doc_id}/classify", response_model=DocumentClassificationResponse)
+async def classify_document(doc_id: str, body: DocumentClassificationRequest, request: Request):
+    """Assign a document classification (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED).
+    Requires document.policy.manage."""
+    _check(request, "document.policy.manage")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        # Verify document exists
+        cursor = await db.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Verify classification exists
+        cursor = await db.execute(
+            "SELECT code, name, requires_watermark, allow_full_download, requires_approval FROM document_classifications WHERE code = ?",
+            (body.classification_code,),
+        )
+        cls = await cursor.fetchone()
+        if not cls:
+            raise HTTPException(status_code=400, detail="Invalid classification code")
+
+        # Update document classification
+        await db.execute(
+            "UPDATE documents SET classification = ?, updated_at = ?, updated_by = ? WHERE document_id = ?",
+            (body.classification_code, now_iso(), actor, doc_id),
+        )
+
+        await log_audit_event(
+            "document", doc_id, "document_classified", actor,
+            {"classification_code": body.classification_code},
+            db=db,
+        )
+        await db.commit()
+
+        return DocumentClassificationResponse(
+            document_id=doc_id,
+            classification_code=cls["code"],
+            name=cls["name"],
+            requires_watermark=bool(cls["requires_watermark"]),
+            allow_full_download=bool(cls["allow_full_download"]),
+            requires_approval=bool(cls["requires_approval"]),
+        )
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+# --- Controlled Document Security: Document Permissions ---
+@router.get("/admin/documents/{doc_id}/permissions", response_model=List[DocumentPermissionResponse])
+async def list_document_permissions(doc_id: str, request: Request):
+    """List role-based permissions for a document. Requires document.policy.manage."""
+    _check(request, "document.policy.manage")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT id, document_id, role_id, permission_code, scope_section_id,
+                      valid_from, valid_until, created_by, created_at
+               FROM document_permissions
+               WHERE document_id = ?
+               ORDER BY created_at DESC""",
+            (doc_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.put("/admin/documents/{doc_id}/permissions", response_model=List[DocumentPermissionResponse])
+async def set_document_permissions(doc_id: str, grants: List[DocumentPermissionGrant], request: Request):
+    """Replace role-based permissions for a document. Requires document.policy.manage."""
+    _check(request, "document.policy.manage")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        # Verify document exists
+        cursor = await db.execute(
+            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            # Remove existing permissions
+            await db.execute(
+                "DELETE FROM document_permissions WHERE document_id = ?", (doc_id,)
+            )
+
+            # Insert new grants
+            for grant in grants:
+                permission_id = _gen_id("DOCPERM")
+                created_at = now_iso()
+                valid_from = grant.valid_from or created_at
+                await db.execute(
+                    """INSERT INTO document_permissions
+                       (id, document_id, role_id, permission_code, scope_section_id,
+                        valid_from, valid_until, created_by, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (
+                        permission_id, doc_id, grant.role_id, grant.permission_code,
+                        grant.scope_section_id, valid_from, grant.valid_until,
+                        actor, created_at,
+                    ),
+                )
+
+            await log_audit_event(
+                "document", doc_id, "document_permissions_updated", actor,
+                {"grant_count": len(grants)},
+                db=db,
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+        # Return the new permissions
+        cursor = await db.execute(
+            """SELECT id, document_id, role_id, permission_code, scope_section_id,
+                      valid_from, valid_until, created_by, created_at
+               FROM document_permissions
+               WHERE document_id = ?
+               ORDER BY created_at DESC""",
+            (doc_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
 # --- Change Requests ---
 @router.get("/change-requests", response_model=List[ChangeRequestResponse])
 async def list_change_requests(request: Request, status: Optional[str] = None, document_id: Optional[str] = None, limit: int = 50, offset: int = 0):

@@ -347,3 +347,86 @@ class AuthProfileUpdateRequest(BaseModel):
 
 class AuthOnboardingCompleteRequest(BaseModel):
     pass
+
+
+# --- Controlled Document Security: Section Extraction Models ---
+
+class SectionExtractRequest(BaseModel):
+    section_id: str
+    reason: Optional[str] = None
+
+
+class SectionExtractResponse(BaseModel):
+    request_id: str
+    document_id: str
+    document_version_id: str
+    section_id: str
+    status: str
+    approval_required: bool
+    created_at: str
+
+
+class ExtractionRequestResponse(BaseModel):
+    id: str
+    document_id: str
+    document_version_id: str
+    requested_by: str
+    section_id: Optional[str]
+    reason: str
+    status: str
+    reviewed_by: Optional[str]
+    review_comment: Optional[str]
+    reviewed_at: Optional[str]
+    expires_at: Optional[str]
+    created_at: str
+
+
+class SectionExtractionResponse(BaseModel):
+    id: str
+    request_id: Optional[str]
+    document_version_id: str
+    section_id: Optional[str]
+    generated_by: str
+    storage_key: str
+    file_hash: str
+    page_count: int
+    watermark_applied: bool
+    expires_at: Optional[str]
+    created_at: str
+
+
+# --- Controlled Document Security: Document Classification Models ---
+
+class DocumentClassificationRequest(BaseModel):
+    classification_code: str
+
+
+class DocumentClassificationResponse(BaseModel):
+    document_id: str
+    classification_code: str
+    name: str
+    requires_watermark: bool
+    allow_full_download: bool
+    requires_approval: bool
+
+
+# --- Controlled Document Security: Document Permission Models ---
+
+class DocumentPermissionGrant(BaseModel):
+    role_id: str
+    permission_code: str
+    scope_section_id: Optional[str] = None
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
+
+
+class DocumentPermissionResponse(BaseModel):
+    id: str
+    document_id: str
+    role_id: str
+    permission_code: str
+    scope_section_id: Optional[str]
+    valid_from: str
+    valid_until: Optional[str]
+    created_by: str
+    created_at: str
