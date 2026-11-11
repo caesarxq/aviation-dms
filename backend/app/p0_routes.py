@@ -2407,6 +2407,31 @@ async def reject_extraction_request(request_id: str, request: Request):
 
 
 # --- Controlled Document Security: Document Classification ---
+@router.get("/document-classifications", response_model=List[DocumentClassificationResponse])
+async def list_document_classifications(request: Request):
+    """List all document classifications. Requires document.policy.manage."""
+    _check(request, "document.policy.manage")
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT code, name, requires_watermark, allow_full_download, requires_approval FROM document_classifications ORDER BY code"
+        )
+        rows = await cursor.fetchall()
+        return [
+            DocumentClassificationResponse(
+                document_id="",
+                classification_code=r["code"],
+                name=r["name"],
+                requires_watermark=bool(r["requires_watermark"]),
+                allow_full_download=bool(r["allow_full_download"]),
+                requires_approval=bool(r["requires_approval"]),
+            )
+            for r in rows
+        ]
+    finally:
+        await db.close()
+
+
 @router.post("/admin/documents/{doc_id}/classify", response_model=DocumentClassificationResponse)
 async def classify_document(doc_id: str, body: DocumentClassificationRequest, request: Request):
     """Assign a document classification (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED).
