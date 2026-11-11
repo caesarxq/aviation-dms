@@ -185,7 +185,7 @@ describe("AppShell authentication screens", () => {
     const firstRender = renderShell(async () => {});
 
     expect(screen.getByRole("region", { name: "One-time workspace tips" })).toBeInTheDocument();
-    expect(screen.getByText(/shortcuts for your active role/i)).toBeInTheDocument();
+    expect(screen.getByText(/shortcuts for documents, distributions, and change requests/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Got it" }));
     expect(screen.queryByRole("region", { name: "One-time workspace tips" })).not.toBeInTheDocument();
     expect(localStorage.getItem(guideKey)).toBe("dismissed");

@@ -11,6 +11,7 @@ vi.mock("../api/client", () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
   },
 }));
 
@@ -77,8 +78,11 @@ beforeEach(() => {
       active_role: "head_safety",
       canonical_user_id: "u-safety/security",
       full_name: "Amina Njeri",
+      email: "safety@example.test",
+      department: "Operations",
     },
   } as never);
+  vi.mocked(api.put).mockResolvedValue({ status: 200, data: {} } as never);
   vi.mocked(api.post).mockResolvedValue({ status: 200, data: {} } as never);
 });
 
@@ -93,7 +97,8 @@ describe("WelcomePage", () => {
 
     expect(await screen.findByText("Amina Njeri")).toBeInTheDocument();
     expect(screen.getByText("u-safety/security")).toBeInTheDocument();
-    expect(screen.getByText("Operations")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Email/i)).toHaveValue("safety@example.test");
+    expect(screen.getByLabelText(/Department/i)).toHaveValue("Operations");
   });
 
   it("lands in the selected role's workspace after completing onboarding", async () => {
@@ -102,7 +107,7 @@ describe("WelcomePage", () => {
 
     await screen.findByLabelText("Active role for this session");
     await user.selectOptions(screen.getByLabelText("Active role for this session"), "head_security");
-    await user.click(screen.getByRole("button", { name: "Continue to work" }));
+    await user.click(screen.getByRole("button", { name: "Save corrections & continue" }));
 
     await waitFor(() => expect(screen.getByTestId("route-path")).toHaveTextContent("/security-reviews"));
   });

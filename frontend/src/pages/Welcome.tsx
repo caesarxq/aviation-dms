@@ -11,12 +11,18 @@ export function WelcomePage() {
     active_role: string;
     canonical_user_id: string;
     full_name: string;
+    email: string;
+    department: string | null;
   } | null>(null);
+  const [profileEdits, setProfileEdits] = useState<{ email: string; department: string }>({
+    email: "",
+    department: "",
+  });
+  const [editsPending, setEditsPending] = useState(false);
   const [selectedRole, setSelectedRole] = useState("");
   const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { profile, refreshProfile, switchRole } = useAuth();
+  const { profile, refreshProfile } = useAuth();
 
   useEffect(() => {
     let active = true;
@@ -25,6 +31,7 @@ export function WelcomePage() {
         if (active) {
           setOnboarding(data as any);
           setSelectedRole(data.active_role);
+          setProfileEdits({ email: data.email ?? "", department: data.department ?? "" });
         }
       })
       .catch(() => {
@@ -41,21 +48,22 @@ export function WelcomePage() {
     return <Navigate to={getPostLoginPath(profile)} replace />;
   }
 
-  async function handleComplete() {
+  async function handleSaveProfile() {
     if (!onboarding) return;
-    setError("");
-    setSubmitting(true);
+    setEditsPending(true);
     try {
-      if (selectedRole !== onboarding.active_role) {
-        await switchRole(selectedRole);
+      const updates: Record<string, string> = {};
+      if (profileEdits.email !== onboarding.email) updates.email = profileEdits.email;
+      if (profileEdits.department !== (onboarding.department ?? "")) updates.department = profileEdits.department;
+      if (Object.keys(updates).length > 0) {
+        await api.put("/p0/auth/me/profile", updates);
       }
       await api.post("/p0/auth/me/onboarding/complete");
       const completedProfile = await refreshProfile();
       navigate(getPostLoginPath(completedProfile), { replace: true });
     } catch (cause: any) {
-      setError(cause?.response?.data?.detail || "Unable to complete onboarding. Try again.");
-    } finally {
-      setSubmitting(false);
+      setEditsPending(false);
+      setError(cause?.response?.data?.detail || "Unable to save profile corrections. Try again.");
     }
   }
 
@@ -75,8 +83,32 @@ export function WelcomePage() {
             <p className="text-sm font-mono text-kfl-text">{onboarding.canonical_user_id}</p>
           </div>
           <div className="bg-kfl-surface-subtle rounded p-4">
-            <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Department</p>
-            <p className="text-sm text-kfl-text">{profile?.user.department || "Not listed — confirm with your administrator"}</p>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="welcome-email" className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Email</label>
+              <input
+                id="welcome-email"
+                type="email"
+                value={profileEdits.email}
+                onChange={(e) => setProfileEdits({ ...profileEdits, email: e.target.value })}
+                className="w-full rounded border border-kfl-border bg-white px-2 py-1 text-xs text-kfl-text"
+                placeholder={onboarding.email || "Not listed"}
+              />
+              <p className="text-[10px] text-kfl-muted">Confirm or correct your email address.</p>
+            </div>
+          </div>
+          <div className="bg-kfl-surface-subtle rounded p-4">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="welcome-department" className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Department</label>
+              <input
+                id="welcome-department"
+                type="text"
+                value={profileEdits.department}
+                onChange={(e) => setProfileEdits({ ...profileEdits, department: e.target.value })}
+                className="w-full rounded border border-kfl-border bg-white px-2 py-1 text-xs text-kfl-text"
+                placeholder={onboarding.department || "Not listed"}
+              />
+              <p className="text-[10px] text-kfl-muted">Confirm or correct your department.</p>
+            </div>
           </div>
           <div className="bg-kfl-surface-subtle rounded p-4">
             <p className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Your assigned roles</p>
@@ -103,14 +135,17 @@ export function WelcomePage() {
             </select>
           </div>
           {error && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-          <button
-            type="button"
-            onClick={handleComplete}
-            disabled={submitting}
-            className="app-btn-primary w-full disabled:opacity-60"
-          >
-            {submitting ? "Continuing…" : "Continue to work"}
-          </button>
+          {editsPending ? (
+            <button type="button" disabled className="app-btn-primary w-full opacity-60">Saving profile…</button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSaveProfile}
+              className="app-btn-primary w-full disabled:opacity-60"
+            >
+              Save corrections & continue
+            </button>
+          )}
         </div>
         <p className="mt-5 text-center text-sm"><Link to="/login" className="text-kfl-blue underline underline-offset-2">Return to sign in</Link></p>
       </section>

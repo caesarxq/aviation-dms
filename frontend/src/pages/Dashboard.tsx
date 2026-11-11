@@ -1,10 +1,11 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUpRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck, Users, Plane, Briefcase, Target } from "lucide-react";
 import { safetyApi } from "../api/safety";
 import { SafetyKPIsModal } from "../components/ui/modals/SafetyKPIsModal";
 import { useAuth } from "../auth/AuthContext";
+import { ROLE_WORKSPACES } from "../auth/permissions";
 
 function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
@@ -47,16 +48,74 @@ export function Dashboard() {
   });
   const [showKpiModal, setShowKpiModal] = useState(false);
 
+  const activeRole = profile?.user.active_role ?? profile?.user.role ?? "";
+  const workspace = ROLE_WORKSPACES[activeRole];
+  const roleLabel = activeRole.replace(/_/g, " ");
+
   const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
   const isLoading = trendsLoading || deadlinesLoading;
   const hasDataErrors = trendsError || deadlinesError;
+
+  // Role-specific metric cards
+  const roleMetrics: Array<{ label: string; value: string | number; context: string; icon: any; tone: string }> = [];
+  const showUnavailable = trendsLoading || trendsError || deadlinesLoading || deadlinesError;
+  if (activeRole === "head_operations" || activeRole === "chief_pilot" || activeRole === "flight_ops_officer") {
+    roleMetrics.push(
+      { label: "Active Missions", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.missions_count ?? 0, context: "Current operations", icon: Plane, tone: "blue" },
+      { label: "Crew On Duty", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.crew_on_duty ?? 0, context: "FDTL-compliant assignments", icon: Users, tone: "green" },
+    );
+  } else if (activeRole === "head_safety") {
+    roleMetrics.push(
+      { label: "Open Occurrences", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.open_occurrences ?? 0, context: "Awaiting classification", icon: AlertTriangle, tone: "amber" },
+      { label: "Safety Actions Overdue", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.safety_actions_overdue ?? 0, context: "Past due date", icon: CheckCircle2, tone: "red" },
+    );
+  } else if (activeRole === "head_quality" || activeRole === "accountable_manager") {
+    roleMetrics.push(
+      { label: "Audit Findings Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.audit_findings_open ?? 0, context: "Pending closure", icon: ShieldCheck, tone: "amber" },
+      { label: "Quality Audits Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.quality_audits_due ?? 0, context: "Scheduled this month", icon: Briefcase, tone: "blue" },
+    );
+  } else if (activeRole === "head_maintenance") {
+    roleMetrics.push(
+      { label: "Aircraft in Service", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.aircraft_in_service ?? 0, context: "Airworthy fleet", icon: Plane, tone: "green" },
+      { label: "Maintenance Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.maintenance_due ?? 0, context: "Scheduled inspections", icon: CalendarClock, tone: "amber" },
+    );
+  } else if (activeRole === "head_training") {
+    roleMetrics.push(
+      { label: "Personnel Qualified", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.personnel_qualified ?? 0, context: "Current qualifications", icon: Target, tone: "green" },
+      { label: "Training Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.training_due ?? 0, context: "Recency expiring", icon: CalendarClock, tone: "amber" },
+    );
+  } else if (activeRole === "dg_coordinator") {
+    roleMetrics.push(
+      { label: "DG Shipments Active", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.dg_shipments_active ?? 0, context: "In transit", icon: Plane, tone: "amber" },
+      { label: "DG Training Current", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.dg_training_current ?? 0, context: "Certified staff", icon: Users, tone: "green" },
+    );
+  } else if (activeRole === "head_security") {
+    roleMetrics.push(
+      { label: "Security Reviews Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.security_reviews_open ?? 0, context: "Pending action", icon: ShieldCheck, tone: "amber" },
+      { label: "Incidents Reported", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.security_incidents ?? 0, context: "Last 30 days", icon: AlertTriangle, tone: "red" },
+    );
+  } else if (activeRole === "records_custodian") {
+    roleMetrics.push(
+      { label: "Documents in Catalogue", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.documents_count ?? 0, context: "Controlled documents", icon: FileCheck2, tone: "blue" },
+      { label: "Distributions Pending", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.distributions_pending ?? 0, context: "Awaiting release", icon: Plane, tone: "amber" },
+    );
+  } else if (activeRole === "independent_auditor") {
+    roleMetrics.push(
+      { label: "Audit Reports Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.audit_reports_open ?? 0, context: "Awaiting review", icon: Briefcase, tone: "blue" },
+      { label: "Findings Unresolved", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.findings_unresolved ?? 0, context: "Not yet closed", icon: AlertTriangle, tone: "red" },
+    );
+  } else if (activeRole === "librarian" || activeRole === "as_contracted" || activeRole === "occurrence_reporter" || activeRole === "system_admin") {
+    roleMetrics.push(
+      { label: "System Status", value: trendsError ? "Degraded" : "Operational", context: "All services", icon: ShieldCheck, tone: trendsError ? "red" : "green" },
+    );
+  }
 
   return (
     <div className="app-page">
       <header className="app-page-header">
         <div>
-          <div className="app-eyebrow">Operations control centre</div>
-          <h1 className="app-title">Dashboard</h1>
+          <div className="app-eyebrow">{workspace ? `${roleLabel} · Primary function` : "Operations control centre"}</div>
+          <h1 className="app-title">{workspace?.home ? `Dashboard — ${roleLabel}` : "Dashboard"}</h1>
           <p className="app-subtitle">{profile?.user.full_name ? `Welcome, ${profile.user.full_name}. ` : ""}A clear view of safety, compliance, and operational commitments.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -76,10 +135,16 @@ export function Dashboard() {
       </header>
 
       <section className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Key metrics">
-        <MetricCard label="Occurrences (30 days)" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
-        <MetricCard label="Total Hazards" value={trendsLoading ? "—" : trendsError ? "Unavailable" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
-        <MetricCard label="Open Safety Actions" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="blue" />
-        <MetricCard label="Deadlines requiring attention" value={deadlinesLoading ? "—" : deadlinesError ? "Unavailable" : deadlines?.overdue_count ?? 0} context={deadlinesError ? "Deadline data unavailable" : "Overdue items"} icon={CalendarClock} tone={deadlinesError ? "blue" : deadlines?.overdue_count ? "red" : "green"} />
+        {roleMetrics.length > 0 ? roleMetrics.map((card, i) => (
+          <MetricCard key={i} label={card.label} value={card.value} context={card.context} icon={card.icon} tone={card.tone} />
+        )) : (
+          <>
+            <MetricCard label="Occurrences (30 days)" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
+            <MetricCard label="Total Hazards" value={trendsLoading ? "—" : trendsError ? "Unavailable" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
+            <MetricCard label="Open Safety Actions" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="blue" />
+            <MetricCard label="Deadlines requiring attention" value={deadlinesLoading ? "—" : deadlinesError ? "Unavailable" : deadlines?.overdue_count ?? 0} context={deadlinesError ? "Deadline data unavailable" : "Overdue items"} icon={CalendarClock} tone={deadlinesError ? "blue" : deadlines?.overdue_count ? "red" : "green"} />
+          </>
+        )}
       </section>
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr_0.85fr]">

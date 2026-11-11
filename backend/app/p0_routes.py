@@ -903,6 +903,36 @@ async def complete_onboarding(request: Request):
     return JSONResponse({"message": "Onboarding complete."}, headers={"Cache-Control": "no-store"})
 
 
+@router.put("/auth/me/profile")
+async def update_my_profile(body: AuthProfileUpdateRequest, request: Request):
+    """Update the authenticated user's own profile (email, department)."""
+    actor = _actor(request)
+    if not actor:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    updates = []
+    params: list = []
+    if body.email is not None:
+        _validate_email(body.email)
+        updates.append("email = ?")
+        params.append(body.email.strip())
+    if body.department is not None:
+        updates.append("department = ?")
+        params.append(body.department.strip())
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates.append("updated_at = ?")
+    params.append(_auth_now_iso())
+    params.append(actor)
+    db = await get_db()
+    try:
+        await db.execute(f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?", params)
+        await db.commit()
+    finally:
+        await db.close()
+    await log_audit_event("auth_session", actor, "profile_updated", actor, {"fields": updates})
+    return JSONResponse({"message": "Profile updated."}, headers={"Cache-Control": "no-store"})
+
+
 @router.post("/auth/logout")
 async def auth_logout(request: Request):
     """Revoke the authenticated server-side session and expire both browser cookies."""

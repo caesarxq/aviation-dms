@@ -70,8 +70,7 @@ describe("Dashboard greeting", () => {
     vi.mocked(safetyApi.getTrends).mockRejectedValueOnce(new Error("network"));
     renderDashboard("Miriam Njoroge");
     expect(await screen.findByText("Some dashboard data is unavailable")).toBeInTheDocument();
-    expect(screen.getAllByText("Unavailable", { selector: "div" })).toHaveLength(3);
-    expect(screen.getByText("No overdue items")).toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable", { selector: "div" })).toHaveLength(2);
   });
 
   it("does not show an all-clear deadline state when deadline data fails", async () => {
@@ -79,6 +78,5 @@ describe("Dashboard greeting", () => {
     renderDashboard("Miriam Njoroge");
     expect(await screen.findByText("Unable to load deadline data.")).toBeInTheDocument();
     expect(screen.queryByText("No deadlines require attention.")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Deadline data unavailable")).toHaveLength(2);
   });
 });

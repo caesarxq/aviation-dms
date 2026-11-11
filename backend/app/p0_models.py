@@ -323,5 +323,10 @@ class AuthOnboardingResponse(BaseModel):
     full_name: str
 
 
+class AuthProfileUpdateRequest(BaseModel):
+    email: Optional[str] = None
+    department: Optional[str] = None
+
+
 class AuthOnboardingCompleteRequest(BaseModel):
     pass
