@@ -70,6 +70,7 @@ function fixtureFor(path: string, profile: ReturnType<typeof profileFor>) {
       tables: {}, user_profiles: [], role_matrix: [],
     };
   }
+  if (path === "/api/p0/backup/history") return [];
   if (path === "/api/p3/audit-findings/summary") {
     return { total: 0, open: 0, closed: 0, by_level: {}, by_status: {}, by_area: {} };
   }
