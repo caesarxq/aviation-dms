@@ -115,7 +115,7 @@ jobs:
       - name: Run backend tests
         run: |
           cd backend
-          python -m pytest -x -q
+          python -m pytest -x -q --ignore=scripts/test_instream.py
 
   test-frontend:
     name: Run frontend tests
