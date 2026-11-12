@@ -184,6 +184,8 @@ jobs:
     needs: [test-backend, test-frontend, build]
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -218,7 +220,7 @@ jobs:
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "cd ${{ env.STAGING_DIR }} && \
-             ./scripts/deploy-staging.sh ${{ needs.build.outputs.tag }}"
+             ./scripts/deploy-staging.sh $IMAGE_TAG"
 
       - name: Verify staging health
         run: |
@@ -236,6 +238,8 @@ jobs:
     environment:
       name: production
       url: https://roc.kfl.ke
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -263,4 +267,4 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
-            "./scripts/promote-to-production.sh ${{ needs.build.outputs.tag }}"
+            "./scripts/promote-to-production.sh $IMAGE_TAG"
