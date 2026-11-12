@@ -13,7 +13,7 @@ set -euo pipefail
 
 IMAGE_TAG="${1:?Usage: deploy-staging.sh <IMAGE_TAG>}"
 REGISTRY="${REGISTRY:-ghcr.io}"
-REPO_NAME="${REPO_NAME:-kfl-aviation-dms}"
+REPO_NAME="${REPO_NAME:-caesarxq/aviation-dms}"
 STAGING_DIR="/opt/kfl-aviation-dms-staging"
 
 echo "============================================================"
