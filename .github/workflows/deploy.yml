@@ -71,6 +71,7 @@ jobs:
         with:
           context: ./backend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
@@ -82,6 +83,7 @@ jobs:
         with:
           context: ./frontend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
