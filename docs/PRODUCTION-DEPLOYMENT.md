@@ -74,6 +74,8 @@ After initial administrator setup, remove/rotate the bootstrap-token file and re
 
 The production backend uses the persistent Docker volume `kfl-aviation-dms-prod_dms_data`, mounted at `/app/data`. On the production host I found no production-specific DMS backup helper, generic DMS backup script, DMS cron entry in the root or `ubuntu` crontab, or local DMS backup artifact in the checked paths. The only matching systemd timer was `dpkg-db-backup.timer`, which backs up the OS package database, not Aviation DMS. A persistent Docker volume is not a backup. OCI-managed volume policies and off-host backup candidates were not independently inspected.
 
+The configured SMTP secret source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed; the file’s metadata was hardened to `root:10001` mode `0440`, and the backend was verified able to read it. No matching DMS/SMTP systemd or tmpfiles provisioning entry was found, so the path may not survive reboot. The Zoho credential itself has not been rotated by this action.
+
 The owner reports a successful off-host restore drill; `docs/OFF-HOST-RESTORE-DRILL-REPORT.md` records that supplied evidence. I could not tie that drill to the current production volume. Production deployment remains blocked until a production-specific backup and restore path is installed and verified.
 
 The persistent `/app/data` volume contains the SQLite database, KCAA evidence, audit attachments, and personnel uploads. Back up the complete directory as one set; do not copy only `dms.db`. For a consistent filesystem-level backup, pause backend writes:

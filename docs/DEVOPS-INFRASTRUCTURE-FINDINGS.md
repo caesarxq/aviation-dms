@@ -41,6 +41,7 @@ Run `43227041924` completed with backend tests, frontend tests, and image build 
 - Corrected trusted proxy IPs to the exact bastion private peer address and changed Caddy forwarding to `{remote_host}`, which supplies a parseable IP to the rate limiter.
 - Production deployment now fails closed unless a production-specific backup helper exists and succeeds; it no longer tears down the running stack on health failure.
 - Read-only production inspection found the production backup helper and generic backup script missing, no DMS backup cron in root or `ubuntu` crontabs, no matching DMS artifacts in the checked local paths, and only the OS `dpkg-db-backup` timer. The Docker `dms_data` volume exists, but persistence is not backup. OCI-managed volume policies and the off-host server were not independently inspected.
+- The production SMTP secret source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed. After user approval, its metadata was hardened from world-readable `0644` to `root:10001` `0440`; the backend (`10001:10001`) was verified able to read it. No matching DMS/SMTP systemd or tmpfiles provisioning entry was found, so persistence across reboot remains unresolved.
 - Prepared Zoho SMTP examples using `SMTP_PASS_SECRET_FILE` and no password value; those files are excluded from this PR until the public secret-bearing diff can be handled safely.
 - Fixed the isolated-database harness for `test_seed_audit_findings.py` and removed that file from CI exclusions.
 
