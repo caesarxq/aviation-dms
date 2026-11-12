@@ -14,19 +14,19 @@ roc.kfl.ke {
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' data:; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 	}
 
-	# API routes -> backend (port 8000) with 10 MiB body limit
-	reverse_proxy /api/* 10.20.4.234:8000 {
+	# API routes -> backend container port 8000
+	reverse_proxy /api/* backend:8000 {
 		header_up Host {upstream_hostport}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-For {remote}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
 	}
 
-	# All other routes -> frontend (port 8080 mapped from container port 80) with 1 MiB body limit
-	reverse_proxy 10.20.4.234:8080 {
+	# All other routes -> frontend container port 80
+	reverse_proxy frontend:80 {
 		header_up Host {upstream_hostport}
-		header_up X-Real-IP {remote}
-		header_up X-Forwarded-For {remote}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto {scheme}
 	}
 }

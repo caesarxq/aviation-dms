@@ -2,18 +2,19 @@
 
 ## Overview
 
-Staging (cloud instance `10.20.4.234`) → Production (new OCI instance).
+Staging is `10.20.4.234` (`stage.kfl.ke`); production is `10.20.1.69` (`roc.kfl.ke`). Caddy on bastion `145.241.152.126` terminates TLS and forwards to private instance ports.
 
-The pipeline:
-1. Builds Docker images on push to `main`
-2. Deploys to staging automatically
-3. Runs E2E + security tests on staging
-4. **Pauses for manual approval** before production
-5. Deploys the same validated image tag to production
+The checked-in workflow is designed to:
+1. Run backend/frontend tests and build Docker images for pull requests; PR builds are not published and do not deploy.
+2. On a push to `main`, wait for both test jobs and build multi-platform images; it does not change either live environment.
+3. Deploy to staging only for an explicit `workflow_dispatch` with `approve_staging=true`.
+4. Run production promotion only for an explicit `workflow_dispatch` with `environment=production`, `approve_staging=true`, and `approve_production=true`.
+
+Production promotion additionally requires the production-specific backup helper described below. No deployment is authorized by this runbook alone.
 
 ## Repositories & Secrets
 
-### GitHub Secrets Required
+### GitHub Actions Secrets Required
 
 | Secret | Description |
 |--------|-------------|
@@ -24,23 +25,35 @@ The pipeline:
 
 ### Environments
 
-- **staging**: Automatic deployment on push to `main`
-- **production**: Requires manual approval before deployment
+- **staging**: Explicit deployment via workflow dispatch with `approve_staging=true`
+- **production**: Explicit dispatch with both approval inputs; production backup preflight also required. The GitHub `production` environment has no configured reviewer rule, so these inputs are single-operator attestations, not independent approval.
 
 ## Workflow Triggers
 
-### Push to `main`
+### Pull request to `main`
 ```
-push → build → deploy staging → test staging → PAUSE (approve production) → deploy production
+pull_request → backend tests + frontend tests + multi-platform image build + Graphify (image build is not published; no deployment)
 ```
 
-### Manual dispatch (`workflow_dispatch`)
+### Push to `main`
+```
+push → backend/frontend tests → multi-platform image build/push (no deployment)
+```
+
+### Manual staging dispatch (`workflow_dispatch`)
+```bash
+gh workflow run deploy.yml -f environment=staging -f approve_staging=true
+```
+
+### Manual production dispatch (`workflow_dispatch`)
 ```bash
 gh workflow run deploy.yml \
   -f environment=production \
-  -f image_tag=canonical-v7-feature-20261112 \
+  -f approve_staging=true \
   -f approve_production=true
 ```
+
+This builds a new tag from the selected `main` revision and deploys it to staging before production. Both approval flags are required. There is no `image_tag` input for selecting an already-built image.
 
 ## Deployment Scripts
 
@@ -48,17 +61,21 @@ gh workflow run deploy.yml \
 |--------|---------|
 | `scripts/deploy-staging.sh <TAG>` | Deploy image to staging instance |
 | `scripts/deploy-prod.sh <TAG>` | Deploy image to production (with pre-deploy backup) |
-| `scripts/promote-to-production.sh <TAG>` | Promote staging-validated image to production |
+| `scripts/promote-to-production.sh <TAG>` | Operator-only SSH wrapper; see its explicit approval/key-path requirements |
+
+`promote-to-production.sh` is not the GitHub workflow path. If run manually, it requires `PRODUCTION_APPROVED=true`, `BASTION_SSH_KEY_FILE` and `PRODUCTION_SSH_KEY_FILE`, plus registry authentication on both the local Docker client and production host. Do not place key or token values on the command line.
 
 ## Production Promotion Safety
 
 Before any production deployment:
 
-1. **Pre-deployment backup** — `full-stack-backup.sh` runs on production, creating a rollback candidate on the backup server (`10.20.173.120`)
-2. **Image verification** — Manifest checked in registry before deployment
-3. **Health checks** — All 5 containers must report healthy
-4. **Smoke test** — Backend `/health` endpoint verified
-5. **Rollback on failure** — If any service fails health check, compose is torn down
+1. **Explicit authorization** — use the production workflow input gate; do not promote during routine pushes.
+2. **Production-specific backup** — `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh` must be executable and must complete successfully before images are pulled or containers changed. The existing staging backup script is not a substitute.
+3. **Image verification** — deploy the image tag built by the same workflow run and validated on staging.
+4. **Health checks** — backend, upload-validator, ClamAV, and frontend must report healthy; backend `/health` is checked inside the container.
+5. **Failure behavior** — the deployment does not run `docker compose down`. On health failure it attempts to return to the previous recorded image tag; investigate schema compatibility and backup status before any manual recovery.
+
+**Current gate:** read-only inspection found no production-specific backup helper, generic DMS backup script, root/`ubuntu` crontab backup, or local DMS backup artifact on the production host. The production data persists in Docker volume `kfl-aviation-dms-prod_dms_data`, but persistence is not backup. The only matching systemd timer is the OS `dpkg-db-backup` timer, not a DMS backup. OCI-managed volume policies and off-host candidates were not independently checked. The owner-reported off-host restore drill is documented in `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`, but I could not tie it to the current production volume. Keep production promotion blocked until a production-specific backup and restore path is verified.
 
 ## Rollback Procedure
 
@@ -68,8 +85,8 @@ If production deployment fails:
 # On production instance
 cd /opt/kfl-aviation-dms-prod
 
-# Redeploy previous image tag
-./scripts/deploy-prod.sh <PREVIOUS_TAG>
+# Redeploy a previous image tag only after confirming backup and schema compatibility.
+sudo ./scripts/deploy-prod.sh <PREVIOUS_TAG>
 
 # Or restore from backup candidate on backup server
 # Verify backup candidate first:
@@ -78,8 +95,10 @@ python3 -m backup_validation verify --data-root <candidate> --confirm-isolated-c
 
 ## Staging / Production Data Separation
 
-- Staging uses `dms_data` volume on `10.20.4.234`
-- Production uses separate `dms_data` volume on OCI instance
+- Staging uses `dms_data` volume on `10.20.4.234`; host ports are `8001` and `8081`.
+- Production uses a separate `dms_data` volume on `10.20.1.69`; host ports are `8000` and `8080`.
+- Both Compose files bind application ports to all host interfaces; OCI ingress must restrict them to the bastion/private VCN. Public direct access to application ports is not intended.
+- The Compose Caddy service is profile-gated (`local-https`) and is not started on OCI hosts; bastion Caddy is the TLS entry point.
 - **Never share volumes between environments**
 - Staging database contains test data; production database is independent
 

@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       environment:
@@ -14,14 +17,15 @@ on:
         options:
           - staging
           - production
-      image_tag:
-        description: 'Docker image tag to deploy (leave empty to build new)'
+      approve_staging:
+        description: 'Authorize updating live staging'
         required: false
-        default: ''
+        default: false
+        type: boolean
       approve_production:
-        description: 'Approve production deployment'
+        description: 'Authorize production deployment after staging validation'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 env:
@@ -34,13 +38,16 @@ env:
   STAGING_DIR: /opt/kfl-aviation-dms-staging
   BASTION_HOST: 145.241.152.126
   BASTION_USER: ubuntu
-  # Production instance private IP — set via GitHub secret or environment
-  # Obtain from: OCI console instance details
-  PROD_HOST: ${{ secrets.PROD_HOST || 'prod.kfl.ke' }}
+  # Production instance private IP — Caddy on bastion connects over the VCN
+  PROD_HOST: 10.20.1.69
+
+permissions:
+  contents: read
 
 jobs:
   build:
     name: Build Docker images
+    needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.set-tag.outputs.tag }}
@@ -57,6 +64,7 @@ jobs:
           echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
 
       - name: Log in to container registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -70,34 +78,34 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest,mode=max
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest,mode=max
 
-      - name: Verify images in registry
+      - name: Report image build result
         run: |
           echo "Backend: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}"
           echo "Frontend: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Pull request builds are not published to the registry."
+          else
+            echo "Images were published to the registry."
+          fi
 
   test-backend:
     name: Run backend tests
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -117,11 +125,10 @@ jobs:
       - name: Run backend tests
         run: |
           cd backend
-          python -m pytest -x -q --ignore=scripts/test_instream.py --ignore=tests/test_seed_audit_findings.py
+          python -m pytest -x -q --ignore=scripts/test_instream.py
 
   test-frontend:
     name: Run frontend tests
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -149,7 +156,6 @@ jobs:
 
   graphify-extract:
     name: Extract code knowledge graph
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -183,11 +189,16 @@ jobs:
 
   deploy-staging:
     name: Deploy to staging
-    needs: [test-backend, test-frontend, build]
+    needs: [build, test-backend, test-frontend]
+    if: github.event_name == 'workflow_dispatch' && inputs.approve_staging == true
     runs-on: ubuntu-latest
     environment: staging
+    concurrency:
+      group: aviation-dms-staging-deploy
+      cancel-in-progress: false
     env:
       IMAGE_TAG: ${{ needs.build.outputs.backend_tag }}
+      CR_PAT: ${{ secrets.CR_PAT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -200,60 +211,79 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_staging
           ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy to staging
+      - name: Sync staging deployment files
         run: |
+          scp -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            docker-compose.yml docker-compose.staging.yml scripts/deploy-staging.sh \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:/tmp/
+
           ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
-             mkdir -p ${{ env.STAGING_DIR }}/scripts"
+            "sudo install -m 0644 /tmp/docker-compose.yml ${{ env.STAGING_DIR }}/docker-compose.yml && \
+             sudo install -m 0644 /tmp/docker-compose.staging.yml ${{ env.STAGING_DIR }}/docker-compose.staging.yml && \
+             sudo install -d -m 0755 ${{ env.STAGING_DIR }}/scripts && \
+             sudo install -m 0755 /tmp/deploy-staging.sh ${{ env.STAGING_DIR }}/scripts/deploy-staging.sh"
 
-          scp -i ~/.ssh/id_staging \
+      - name: Authenticate staging host to GHCR
+        run: |
+          printf '%s' "$CR_PAT" | ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
-            scripts/deploy-staging.sh \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${{ env.STAGING_DIR }}/scripts/deploy-staging.sh
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin"
 
+      - name: Deploy tested images to staging
+        run: |
           ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "cd ${{ env.STAGING_DIR }} && \
-             ./scripts/deploy-staging.sh $IMAGE_TAG"
+             REGISTRY='${{ env.REGISTRY }}' REPO_NAME='${{ github.repository }}' \
+             ./scripts/deploy-staging.sh '$IMAGE_TAG'"
 
       - name: Verify staging health
         run: |
-          ssh -i ~/.ssh/id_ed25519 \
+          ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+            "for service in backend upload-validator clamd frontend; do \
+               name=\"kfl-aviation-dms-staging-\${service}-1\"; \
+               status=\$(sudo docker inspect --format='{{.State.Health.Status}}' \"\$name\"); \
+               echo \"\$service: \$status\"; \
+               test \"\$status\" = healthy || exit 1; \
+             done"
+
+      - name: Verify public staging HTTPS
+        run: curl --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 5 --max-time 20 https://stage.kfl.ke/ -o /dev/null
 
   promote-to-production:
-    name: Promote to production (requires approval)
-    needs: deploy-staging
+    name: Promote to production (requires explicit staging and production approvals)
+    needs: [deploy-staging, build]
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && inputs.approve_staging == true && inputs.approve_production == true
     runs-on: ubuntu-latest
+    concurrency:
+      group: aviation-dms-production-deploy
+      cancel-in-progress: false
     environment:
       name: production
       url: https://roc.kfl.ke
     env:
       IMAGE_TAG: ${{ needs.build.outputs.backend_tag }}
+      CR_PAT: ${{ secrets.CR_PAT }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Check production approval
-        run: |
-          if [ "${{ github.event.inputs.approve_production }}" != "true" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "ERROR: Production deployment requires explicit approval"
-            echo "Set approve_production=true in workflow_dispatch or use the production environment protection rule"
-            exit 1
-          fi
 
       - name: Set up SSH
         run: |
@@ -263,11 +293,53 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_prod
           ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Promote image to production
+      - name: Require production backup preflight
         run: |
           ssh -i ~/.ssh/id_prod \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
-            "./scripts/promote-to-production.sh $IMAGE_TAG"
+            "sudo test -x /opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh || { echo 'BLOCKED: production-specific backup script is not installed; no deployment performed'; exit 1; }"
+
+      - name: Sync production deployment files
+        run: |
+          scp -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            docker-compose.yml docker-compose.prod.yml scripts/deploy-prod.sh \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }}:/tmp/
+
+          ssh -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
+            "sudo install -m 0644 /tmp/docker-compose.yml /opt/kfl-aviation-dms-prod/docker-compose.yml && \
+             sudo install -m 0644 /tmp/docker-compose.prod.yml /opt/kfl-aviation-dms-prod/docker-compose.prod.yml && \
+             sudo install -d -m 0755 /opt/kfl-aviation-dms-prod/scripts && \
+             sudo install -m 0755 /tmp/deploy-prod.sh /opt/kfl-aviation-dms-prod/scripts/deploy-prod.sh"
+
+      - name: Authenticate production host to GHCR
+        run: |
+          printf '%s' "$CR_PAT" | ssh -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
+            "sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin"
+
+      - name: Deploy staging-validated image to production
+        run: |
+          ssh -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
+            "cd /opt/kfl-aviation-dms-prod && \
+             REGISTRY='${{ env.REGISTRY }}' REPO_NAME='${{ github.repository }}' \
+             ./scripts/deploy-prod.sh '$IMAGE_TAG'"
+
+      - name: Verify public production HTTPS
+        run: curl --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 5 --max-time 20 https://roc.kfl.ke/ -o /dev/null

@@ -1,14 +1,12 @@
 # ============================================================================
 # Aviation DMS — Docker Compose Staging Override
 # ============================================================================
-# Use with: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-# Staging runs on localhost with dev mode enabled.
-# ============================================================================
+# Use with: docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up -d
+# Staging is routed through the bastion reverse proxy; CI supplies host ports 8001/8081.
+# Compose deployment uses the same database, upload validator, and ClamAV services.
 
 services:
   backend:
-    ports:
-      - "0.0.0.0:8001:8000"
     environment:
       DEV_MODE: "true"
       FLIGHT_RELEASE_ENABLED: "false"
@@ -18,7 +16,7 @@ services:
       PUBLIC_APP_URL: "https://stage.kfl.ke"
       HOST: "0.0.0.0"
       PORT: "8000"
-      DMS_TRUSTED_FRONTEND_IP: "172.31.254.3"
+      DMS_TRUSTED_FRONTEND_IP: "10.20.4.234"
       DMS_UPLOAD_STORAGE_QUOTA_BYTES: "1073741824"
       NOTIFICATION_ENABLED: "false"
       SESSION_TTL_SECONDS: "3600"
@@ -32,22 +30,6 @@ services:
   clamd:
     expose:
       - "3310"
-
-  frontend:
-    ports:
-      - "0.0.0.0:8081:80"
-
-  https_proxy:
-    # Staging uses Caddy with self-signed certs for local HTTPS testing
-    environment:
-      DMS_HOSTNAME: "stage.kfl.ke"
-      ACME_EMAIL: "admin@localhost.local"
-    ports:
-      - "0.0.0.0:8081:80"
-    volumes:
-      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
 
 volumes:
   dms_data: {}

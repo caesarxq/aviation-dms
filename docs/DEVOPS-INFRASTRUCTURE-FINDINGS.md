@@ -1,110 +1,70 @@
 # Aviation DMS — DevOps Infrastructure Findings
 
-**Date:** 2026-11-12
-**Status:** In progress
-**Scope:** CI/CD, branch protection, secrets, restore drill, IaC
+**Updated:** 2026-11-12
+**Status:** Local remediation prepared; not committed, merged, or deployed
+**Scope:** CI/CD, branch protection, secrets, reverse proxy, backups, IaC
 
 ---
 
-## 1. GitHub Secrets — NOT CONFIGURED (Critical)
+## 1. Verified GitHub Configuration
 
-No secrets are configured in the `caesarxq/aviation-dms` repository. The CI/CD pipeline cannot execute without them.
+- Repository visibility is `PUBLIC`.
+- Actions secret names were confirmed configured: `BASTION_SSH_PRIVATE_KEY`, `STAGING_SSH_PRIVATE_KEY`, `PRODUCTION_SSH_PRIVATE_KEY`, `CR_PAT`, and `PROD_HOST`. Values were not read or recorded.
+- The updated workflow uses the private production address directly; `PROD_HOST` is no longer required by that workflow.
+- Public `main` contains SMTP password assignments in three tracked environment examples. Sanitized Zoho examples are prepared locally, but their edits are excluded from this PR because the deletion diff would repeat the old credential publicly. Treat it as exposed, rotate it, then handle history cleanup as a separately authorized operation.
 
-### Required Secrets
-
-| Secret | Purpose | How to Set |
-|--------|---------|------------|
-| `STAGING_SSH_PRIVATE_KEY` | SSH key for staging instance via bastion | `gh secret set STAGING_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
-| `PRODUCTION_SSH_PRIVATE_KEY` | SSH key for production instance via bastion | `gh secret set PRODUCTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
-| `BASTION_SSH_PRIVATE_KEY` | SSH key for bastion host (ProxyJump) | `gh secret set BASTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
-| `CR_PAT` | Container registry PAT for ghcr.io (write:packages) | `gh secret set CR_PAT` (prompt) |
-| `PROD_HOST` | Production hostname for deployment | `gh secret set PROD_HOST roc.kfl.ke` |
-
-### Commands to Run
-
-```bash
-# Authenticate first (already done)
-gh auth status
-
-# Set all five secrets (SSH keys via file redirect, others via prompt)
-gh secret set STAGING_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
-gh secret set PRODUCTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
-gh secret set BASTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
-gh secret set CR_PAT
-gh secret set PROD_HOST roc.kfl.ke
-
-# Verify
-gh secret list --repo caesarxq/aviation-dms
-```
-
-**Note:** SSH private keys are passed via file redirect (`<`) so their contents are never echoed to the terminal. `CR_PAT` and `PROD_HOST` will prompt interactively.
+Never put credential values in issues, chat, workflow logs, or committed examples. Pass registry credentials to `docker login --password-stdin`; store runtime secrets in protected host-side files.
 
 ---
 
-## 2. Branch Protection — UNAVAILABLE (Critical)
+## 2. Branch Protection — PR-ONLY, ZERO APPROVALS, ADMIN ENFORCEMENT ON
 
-GitHub branch protection rules require GitHub Pro or a public repository. The `caesarxq/aviation-dms` repository is on a free plan with a private repo.
+The owner selected zero required approvals with PR checks enforced. GitHub now requires a pull request, enforces rules for administrators, and retains strict required checks (`Build Docker images`, `Run backend tests`, `Run frontend tests`). No approval vote is required. The repository has one collaborator.
+
+The `production` environment is not configured (only `staging` exists, with no protection rules). The workflow's two boolean inputs are single-operator attestations, not independent review.
+
+The local workflow changes add a `pull_request` trigger and a non-publishing image build. Those changes are not yet in `main`; verify all three required checks report on the first PR after the workflow update is published. Do not bypass the protected branch if a check is missing; diagnose the trigger first.
+
+---
+
+## 3. CI/CD and Runtime Configuration — REMEDIATION PREPARED
+
+### Verified staging deployment failure
+
+Run `43227041924` completed with backend tests, frontend tests, and image build passing; staging failed while creating the `https_proxy` container. The Docker daemon reported that `/opt/kfl-aviation-dms-staging/Caddyfile.staging` was a directory where a file mount was expected. Both public HTTPS sites returned HTTP 200 during a later read-only check; no deployment was run during this evaluation.
+
+### Local, uncommitted fixes
+
+- Added PR triggers; tests run before image build, and PRs do not publish images or deploy.
+- Staging now syncs the Compose files and deploy script, pulls the tested GHCR images, uses `--no-build`, passes the registry credential through stdin, and excludes the containerized proxy that caused the mount failure. A staging deployment requires `workflow_dispatch` with `approve_staging=true`; pushes to `main` do not change live environments.
+- Corrected Compose port merging: staging config now renders only `8001`/`8081`, not both those ports and base `8000`/`8080`. Production renders `8000`/`8080`. Caddy is profile-gated for local standalone use; OCI uses bastion Caddy.
+- Corrected trusted proxy IPs to the exact bastion private peer address and changed Caddy forwarding to `{remote_host}`, which supplies a parseable IP to the rate limiter.
+- Production deployment now fails closed unless a production-specific backup helper exists and succeeds; it no longer tears down the running stack on health failure.
+- Read-only production inspection found the production backup helper and generic backup script missing, no DMS backup cron in root or `ubuntu` crontabs, no matching DMS artifacts in the checked local paths, and only the OS `dpkg-db-backup` timer. The Docker `dms_data` volume exists, but persistence is not backup. OCI-managed volume policies and the off-host server were not independently inspected.
+- Prepared Zoho SMTP examples using `SMTP_PASS_SECRET_FILE` and no password value; those files are excluded from this PR until the public secret-bearing diff can be handled safely.
+- Fixed the isolated-database harness for `test_seed_audit_findings.py` and removed that file from CI exclusions.
+
+### Verification run
+
+- Backend suite: `552 passed, 1 skipped` (Python 3.11).
+- Staging and production Compose render/validation passed; rendered host ports match their intended values and Caddy is absent from default OCI service sets.
+- Deployment shell scripts pass `bash -n`; workflow YAML parses; `git diff --check` passes.
+- Changes remain local and uncommitted. Staging and production were not modified.
+
+---
+
+## 4. Off-Host Restore Drill — OWNER-REPORTED COMPLETE
 
 ### Current State
-- `main` branch has **no protection** — anyone with write access can push directly
-- No required PR reviews, no status checks, no enforcement
-
-### Mitigation (Without GitHub Pro)
-
-| Practice | Implementation |
-|----------|---------------|
-| Code review | All changes go through PR review manually before merge |
-| Status checks | CI workflow runs on push; failures visible in PR checks |
-| No direct pushes | Team agreement: no direct pushes to `main` |
-| Deploy approval | Production promotion requires `approve_production=true` in workflow_dispatch |
-
-### Recommendation
-Upgrade to GitHub Pro or make the repository public to enable native branch protection. Until then, enforce through team convention and CI visibility.
+- The owner reports a successful off-host drill to `10.20.173.120`; see `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`.
+- The report records RPO under 24 hours (target: 2 days) and RTO under 2 hours (target: 5 hours), based on owner-supplied drill evidence.
+- This evaluation did not independently rerun the drill or inspect backup contents.
+- A separate production-specific pre-deploy backup script is not established by that drill report; promotion remains gated on `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`.
+- The production host read-only check confirmed that helper is absent. The owner-reported drill is not independently tied to the current production database/volume.
 
 ---
 
-## 3. CI/CD Workflow — FIXED (was High, now resolved)
-
-### Problem (Before)
-Tests ran **after** deploying to staging:
-```
-build → deploy staging → test staging → promote to production
-```
-Bad code could reach the staging environment before tests caught it.
-
-### Fix (After)
-Tests now run **before** staging deployment:
-```
-build → test-backend + test-frontend (parallel) → deploy-staging → promote-to-production
-```
-
-- `test-backend`: runs `pytest -x -q` in backend/
-- `test-frontend`: runs `npm test -- --run` and `npx tsc --noEmit` in frontend/
-- Both test jobs must pass before `deploy-staging` can run
-- `graphify-extract` runs in parallel with tests (no blocking)
-- `deploy-staging` needs both test jobs to succeed
-- `promote-to-production` needs `deploy-staging` to succeed
-
-### Commit
-`c2541e4` — Fix CI/CD: tests now gate staging deployment
-
----
-
-## 4. Off-Host Restore Drill — COMPLETE (Medium)
-
-### Current State
-- Backup server: `10.20.173.120` with verified backup candidates
-- `backup_validation.py` exists and validates manifests read-only
-- Daily cron backup: `0 2 * * *` on `10.20.4.234`
-- Full-stack backup: `backend/scripts/full-stack-backup.sh` verified end-to-end
-- **Off-host restore drill completed** — see `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`
-- All 11 DR gates passed (backup creation, manifest, off-host transfer, isolated restore, SHA-256 verification, SQLite integrity, foreign key checks, schema completeness, file inventory, hash matching, read-only verification)
-- RPO: < 24 hours (target: 2 days) — PASS
-- RTO: < 2 hours (target: 5 hours) — PASS
-
----
-
-## 5. Infrastructure as Code — NOT IMPLEMENTED (Medium)
+## 5. Infrastructure as Code — MANUAL OCI STATE
 
 ### Current State
 - Terraform directory removed (was not applied, contained uncommitted OCIDs)
@@ -119,45 +79,24 @@ build → test-backend + test-frontend (parallel) → deploy-staging → promote
 - Configuration drift between environments possible
 - OCIDs and network details not in version control
 
-### Recommendation
-When OCI credentials are available, reintroduce Terraform with:
-- Import existing production instance into Terraform state
-- Define staging and bastion as managed resources
-- Store `terraform.tfvars` as a GitHub secret (never commit)
-- Apply through CI/CD with plan/apply separation
+Terraform was removed at the owner's direction. Keep OCI changes manual until there is an approved IaC approach and a safe import plan; do not reintroduce the removed configuration as a drive-by fix.
 
 ---
 
-## 6. Summary of All Actions Taken
+## 6. Current State and Remaining Gates
 
-| Action | Status | Commit |
-|--------|--------|--------|
-| Caddy reload on bastion (`roc.kfl.ke` → production) | ✅ Done | — |
-| Staging deployment on `10.20.4.234` | ✅ Done | — |
-| Production deployment on `10.20.1.69` | ✅ Done | — |
-| Fix `database.py` indentation bug | ✅ Done | `3465d73` |
-| Fix staging port conflicts (8000→8001, 8080→8081) | ✅ Done | `3465d73` |
-| Remove Terraform infrastructure | ✅ Done | `386e99b` |
-| Add CHANGELOG, ADRs, threat model, retention, DR | ✅ Done | `a561b35` |
-| Remove staging subdomain → `stage.kfl.ke` | ✅ Done | `b034d0d` |
-| Fix staging compose for `0.0.0.0` binding | ✅ Done | `a030ad8` |
-| Fix production `DMS_TRUSTED_FRONTEND_IP` | ✅ Done | `7efecd8` |
-| Fix production SMTP to match staging | ✅ Done | `208c2a1` |
-| Remove `https_proxy` from prod compose | ✅ Done | `7efecd8` |
-| Reduce clamd CPUs to 1.0 | ✅ Done | `7efecd8` |
-| Fix CI/CD: tests gate staging deployment | ✅ Done | `c2541e4` |
-| Add Graphify to CI and CONTRIBUTING | ✅ Done | `ce48a37`, `46b9ffe` |
-| Add proactive Graphify method to CONTRIBUTING | ✅ Done | `46b9ffe` |
-| **GitHub secrets configuration** | ⏳ User action | — |
-| **Branch protection** | ⚠️ GitHub Free limitation | — |
-| **Off-host restore drill** | ✅ Complete | `docs/OFF-HOST-RESTORE-DRILL-REPORT.md` |
-| **Infrastructure as Code** | 📋 Pending OCI credentials | — |
+- `stage.kfl.ke` and `roc.kfl.ke` returned HTTP 200 at the time of this evaluation; public TCP probes for ports `111`, `8000`, `8001`, `8080`, and `8081` were closed/filtered.
+- Recent Actions runs failed at staging deployment; image builds and backend/frontend tests passed.
+- Branch protection now requires strict PR checks, zero approval votes, and applies to administrators. Confirm the local `pull_request` workflow update is published and all three required checks run on a PR before attempting merge.
+- Production promotion remains blocked: the production-specific backup helper is absent and no DMS-specific scheduled job was found on the host.
+- The local remediation is uncommitted and has not been deployed.
 
 ---
 
 ## Next Steps (Priority Order)
 
-1. **Configure GitHub secrets** (5 secrets) — enables CI/CD pipeline
-2. **Accountable Manager signs off on drill report** — final go/no-go for operational use
-3. **Reintroduce Terraform** (when OCI credentials available) — IaC for reproducibility
-4. **Upgrade GitHub plan or make repo public** — enables branch protection
+1. Rotate the SMTP credential referenced by the public repository history; decide separately whether to rewrite public history.
+2. Publish the local workflow changes through the authorized PR path; verify the three required checks report before merge. The new workflow is not yet on `main`.
+3. Do not deploy staging until the explicit workflow input is authorized; then validate the four service health checks and HTTPS endpoint.
+4. Provision and validate the production-specific backup helper against the production volume and off-host target before enabling production promotion.
+5. Public TCP probes show ports `111`, `8000`, `8001`, `8080`, and `8081` closed/filtered. Confirm the OCI NSG/security-list rules match that intent; UDP/111 was not tested.

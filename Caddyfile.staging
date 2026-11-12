@@ -23,16 +23,16 @@ localhost {
     # API routes -> backend
     reverse_proxy /api/* localhost:8000 {
         header_up Host {upstream_hostport}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
 
     # All other routes -> frontend
     reverse_proxy localhost:8080 {
         header_up Host {upstream_hostport}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
 }
