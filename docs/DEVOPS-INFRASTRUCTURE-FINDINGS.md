@@ -1,7 +1,7 @@
 # Aviation DMS — DevOps Infrastructure Findings
 
 **Updated:** 2026-11-12
-**Status:** Local remediation prepared; not committed, merged, or deployed
+**Status:** Draft PR #1 open; production backup helper and disabled systemd units installed; no DMS backup or application deployment performed
 **Scope:** CI/CD, branch protection, secrets, reverse proxy, backups, IaC
 
 ---
@@ -23,7 +23,7 @@ The owner selected zero required approvals with PR checks enforced. GitHub now r
 
 The `production` environment is not configured (only `staging` exists, with no protection rules). The workflow's two boolean inputs are single-operator attestations, not independent review.
 
-The local workflow changes add a `pull_request` trigger and a non-publishing image build. Those changes are not yet in `main`; verify all three required checks report on the first PR after the workflow update is published. Do not bypass the protected branch if a check is missing; diagnose the trigger first.
+The draft PR adds a `pull_request` trigger and a non-publishing image build. Its required backend, frontend, and image-build checks have run successfully on PR events; staging and production jobs were skipped. The workflow change is not yet in `main`. Do not bypass the protected branch if a future required check is missing; diagnose the trigger first.
 
 ---
 
@@ -33,24 +33,24 @@ The local workflow changes add a `pull_request` trigger and a non-publishing ima
 
 Run `43227041924` completed with backend tests, frontend tests, and image build passing; staging failed while creating the `https_proxy` container. The Docker daemon reported that `/opt/kfl-aviation-dms-staging/Caddyfile.staging` was a directory where a file mount was expected. Both public HTTPS sites returned HTTP 200 during a later read-only check; no deployment was run during this evaluation.
 
-### Local, uncommitted fixes
+### Draft PR #1 changes
 
 - Added PR triggers; tests run before image build, and PRs do not publish images or deploy.
 - Staging now syncs the Compose files and deploy script, pulls the tested GHCR images, uses `--no-build`, passes the registry credential through stdin, and excludes the containerized proxy that caused the mount failure. A staging deployment requires `workflow_dispatch` with `approve_staging=true`; pushes to `main` do not change live environments.
 - Corrected Compose port merging: staging config now renders only `8001`/`8081`, not both those ports and base `8000`/`8080`. Production renders `8000`/`8080`. Caddy is profile-gated for local standalone use; OCI uses bastion Caddy.
 - Corrected trusted proxy IPs to the exact bastion private peer address and changed Caddy forwarding to `{remote_host}`, which supplies a parseable IP to the rate limiter.
 - Production deployment now fails closed unless a production-specific backup helper exists and succeeds; it no longer tears down the running stack on health failure.
-- Read-only production inspection found the production backup helper and generic backup script missing, no DMS backup cron in root or `ubuntu` crontabs, no matching DMS artifacts in the checked local paths, and only the OS `dpkg-db-backup` timer. The Docker `dms_data` volume exists, but persistence is not backup. OCI-managed volume policies and the off-host server were not independently inspected.
-- Production SMTP source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed. After approval, permissions were hardened to `root:10001` `0440`; the backend can read it. The running container has `NOTIFICATION_ENABLED=true` but no `SMTP_PASS_FILE` value; the app then falls back to `SMTP_PASS`, which I did not inspect. No matching DMS/SMTP boot-time provisioning unit was found, so persistence across reboot is unverified.
+- The production-specific helper and systemd service/timer are now installed at the expected paths on `roc-app`; `systemd-analyze verify` passed. The timer is disabled. The host lacks Restic, the backup SSH identity, pinned off-host host key, and `/etc/kfl-aviation-dms-prod/backup.env`; no backup was run. The candidate off-host target and OCI-managed volume policies were not independently verified.
+- Production SMTP source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed. After approval, permissions were hardened to `root:10001` `0440`; the backend can read it. The running container has `NOTIFICATION_ENABLED=true` but no `SMTP_PASS_FILE` value; the app then falls back to `SMTP_PASS`, which I did not inspect. A direct test of the new Zoho credential for `info@kfl.ke` was accepted and the owner-provided screenshot confirms receipt, but production is not switched to it. The `/run` path may not survive reboot.
 - Prepared Zoho SMTP examples using `SMTP_PASS_SECRET_FILE` and no password value; those files are excluded from this PR until the public secret-bearing diff can be handled safely.
 - Fixed the isolated-database harness for `test_seed_audit_findings.py` and removed that file from CI exclusions.
 
 ### Verification run
 
-- Backend suite: `552 passed, 1 skipped` (Python 3.11).
+- Backend suite: `567 passed, 1 skipped` (Python 3.11; one existing warning).
 - Staging and production Compose render/validation passed; rendered host ports match their intended values and Caddy is absent from default OCI service sets.
 - Deployment shell scripts pass `bash -n`; workflow YAML parses; `git diff --check` passes.
-- Changes remain local and uncommitted. Staging and production were not modified.
+- Staging and production application containers were not deployed or restarted. The production helper files and disabled units were installed; no backup was run.
 
 ---
 
@@ -60,8 +60,7 @@ Run `43227041924` completed with backend tests, frontend tests, and image build 
 - The owner reports a successful off-host drill to `10.20.173.120`; see `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`.
 - The report records RPO under 24 hours (target: 2 days) and RTO under 2 hours (target: 5 hours), based on owner-supplied drill evidence.
 - This evaluation did not independently rerun the drill or inspect backup contents.
-- A separate production-specific pre-deploy backup script is not established by that drill report; promotion remains gated on `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`.
-- The production host read-only check confirmed that helper is absent. The owner-reported drill is not independently tied to the current production database/volume.
+- The production-specific helper now exists at `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`, but its encrypted remote repository is not configured and its timer is disabled. The owner-reported drill is not independently tied to the current production database/volume or the added `document_files/` validation.
 
 ---
 

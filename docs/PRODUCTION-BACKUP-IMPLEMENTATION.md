@@ -4,7 +4,7 @@
 
 The production deployment preflight requires `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`. This helper creates a validated DMS data candidate and stores it in an encrypted Restic SFTP repository. It never initializes a new remote repository automatically, never prunes snapshots, and fails closed when the production volume, password-file permissions, SSH identity, pinned host key, or Restic repository is unavailable.
 
-The helper and systemd units are implemented in this branch. The production host was inspected: it has volume `kfl-aviation-dms-prod_dms_data` mounted at `/app/data`, but lacks Restic, a backup SSH identity, a pinned host key for the reported off-host host, and an active DMS timer. Therefore the timer must remain disabled until the requirements below are provisioned and verified.
+The helper and systemd units are installed on `roc-app`; `systemd-analyze verify` passed. The timer is disabled, `/etc/kfl-aviation-dms-prod/backup.env` is absent, Restic is not installed, and a backup SSH identity/pinned off-host key are not configured. The helper was verified to fail closed on missing configuration; no backup was run. The production host has volume `kfl-aviation-dms-prod_dms_data` mounted at `/app/data`. Keep the timer disabled until the requirements below are provisioned and verified.
 
 ## Backup scope
 

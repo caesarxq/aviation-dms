@@ -70,11 +70,11 @@ After initial administrator setup, remove/rotate the bootstrap-token file and re
 
 ## Backup and restore
 
-### Current production-host status (read-only inspection)
+### Current production-host status
 
-The production backend uses the persistent Docker volume `kfl-aviation-dms-prod_dms_data`, mounted at `/app/data`. On the production host I found no production-specific DMS backup helper, generic DMS backup script, DMS cron entry in the root or `ubuntu` crontab, or local DMS backup artifact in the checked paths. The only matching systemd timer was `dpkg-db-backup.timer`, which backs up the OS package database, not Aviation DMS. A persistent Docker volume is not a backup. OCI-managed volume policies and off-host backup candidates were not independently inspected.
+The production backend uses the persistent Docker volume `kfl-aviation-dms-prod_dms_data`, mounted at `/app/data`. The production-specific helper and systemd service/timer units are now installed on `roc-app`; `systemd-analyze verify` passed. The timer remains disabled, no `/etc/kfl-aviation-dms-prod/backup.env` is configured, Restic is not installed, and the production host has no backup SSH identity or pinned key for the candidate off-host server. No backup was run. A persistent Docker volume is not a backup, and the previous OS `dpkg-db-backup.timer` is unrelated. OCI-managed volume policies and the off-host destination have not been independently verified.
 
-The configured SMTP secret source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed; the file’s metadata was hardened to `root:10001` mode `0440`, and the backend was verified able to read it. The running backend reports `NOTIFICATION_ENABLED=true` and an empty `SMTP_PASS_FILE`; the application falls back to `SMTP_PASS` when that file variable is empty. I did not inspect or print `SMTP_PASS`, so the mounted file is not proven to be the credential currently used by the app. No matching DMS/SMTP systemd or tmpfiles provisioning entry was found, so the `/run` path may not survive reboot. The Zoho credential itself has not been rotated by this action.
+The configured SMTP secret source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed; the file’s metadata was hardened to `root:10001` mode `0440`, and the backend was verified able to read it. The running backend reports `NOTIFICATION_ENABLED=true` and an empty `SMTP_PASS_FILE`; the application falls back to `SMTP_PASS` when that file variable is empty. I did not inspect or print `SMTP_PASS`, so the mounted file is not proven to be the credential currently used by the app. No matching DMS/SMTP systemd or tmpfiles provisioning entry was found, so the `/run` path may not survive reboot. A separate direct Zoho test using the new `info@kfl.ke` credential was accepted and the owner-provided screenshot confirms delivery; the production container has not been switched to that credential.
 
 The owner reports a successful off-host restore drill; `docs/OFF-HOST-RESTORE-DRILL-REPORT.md` records that supplied evidence. I could not tie that drill to the current production volume. Production deployment remains blocked until a production-specific backup and restore path is installed and verified.
 
@@ -86,18 +86,13 @@ The historical audit seeder is not a deployment or recovery command. It requires
 
 On upgrade, existing personnel-upload rows with a null `file_sha256` fail closed for download and verification. Inventory and re-upload or complete an authorized, documented revalidation before relying on those legacy files; do not establish a new checksum silently for an unverified file.
 
+After the destination, Restic password file, SSH identity, pinned host key, and encrypted staging filesystem are verified, run the installed helper manually:
+
 ```bash
-cd /opt/kfl-aviation-dms-prod
-backup_dir="/var/backups/kfl-dms/$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -m 700 "$backup_dir"
-compose=(sudo docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml)
-"${compose[@]}" stop backend
-container_id="$("${compose[@]}" ps -aq backend)"
-sudo docker cp "${container_id}:/app/data/." "$backup_dir/"
-"${compose[@]}" start backend
+sudo /opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ```
 
-If the copy fails, run `"${compose[@]}" start backend` immediately. Encrypt and transfer the backup to access-controlled off-host storage. Before relying on a backup, restore the complete directory to an isolated staging volume, verify `PRAGMA integrity_check`, confirm the KCAA evidence and upload files are present, and exercise representative reads. Record the restore result and timestamp.
+It uses SQLite's online backup API, copies the complete approved `/app/data` scope, validates the candidate, and transfers an encrypted Restic snapshot. It never stops/restarts the backend and does not prune snapshots. Before enabling the timer, restore a produced snapshot to an isolated target, verify schema/integrity/file hashes and representative reads, and record Accountable Manager/Records Custodian approvals for RPO, RTO, and retention.
 
 ### Isolated backup candidate validation
 

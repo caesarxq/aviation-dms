@@ -4,7 +4,7 @@ Documentation=file:/opt/kfl-aviation-dms-prod/backup-tool/README.md
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
-ConditionPathIsExecutable=/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
+ConditionFileIsExecutable=/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ConditionPathExists=/etc/kfl-aviation-dms-prod/backup.env
 
 [Service]
