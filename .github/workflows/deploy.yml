@@ -181,7 +181,7 @@ jobs:
 
   deploy-staging:
     name: Deploy to staging
-    needs: [test-backend, test-frontend]
+    needs: [test-backend, test-frontend, build]
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -218,7 +218,7 @@ jobs:
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "cd ${{ env.STAGING_DIR }} && \
-             ./scripts/deploy-staging.sh ${{ env.IMAGE_TAG }}"
+             ./scripts/deploy-staging.sh ${{ needs.build.outputs.tag }}"
 
       - name: Verify staging health
         run: |
@@ -263,4 +263,4 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
-            "./scripts/promote-to-production.sh ${{ env.IMAGE_TAG }}"
+            "./scripts/promote-to-production.sh ${{ needs.build.outputs.tag }}"
