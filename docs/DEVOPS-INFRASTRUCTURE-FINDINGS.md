@@ -87,16 +87,16 @@ Terraform was removed at the owner's direction. Keep OCI changes manual until th
 
 - `stage.kfl.ke` and `roc.kfl.ke` returned HTTP 200 at the time of this evaluation; public TCP probes for ports `111`, `8000`, `8001`, `8080`, and `8081` were closed/filtered.
 - Recent Actions runs failed at staging deployment; image builds and backend/frontend tests passed.
-- Branch protection requires strict PR checks, zero approval votes, and applies to administrators. The `pull_request` workflow is published; required checks passed on committed head `3643168`. The current local backup fixes still need their own CI run before merge.
+- Branch protection requires strict PR checks, zero approval votes, and applies to administrators. The `pull_request` workflow is published; required checks passed on current PR head `6d49b7d`.
 - Production promotion remains blocked: the production-specific helper and systemd units are installed, but the timer is disabled. Restic, repository credentials, pinned SSH identity/host key, dedicated encrypted staging mount/attestation, retention approval, and an isolated restore are still missing; no backup was run.
-- PR #1 remains draft. The final security-review fixes are local and must pass CI before they are pushed; no production application deploy or restart occurred.
+- PR #1 remains draft with the reviewed backup fixes pushed and required checks passing. No production application deployment or restart occurred.
 
 ---
 
 ## Next Steps (Priority Order)
 
 1. Complete production SMTP rotation after the backup gate; decide separately whether to remediate public repository history.
-2. Push the final reviewed backup changes to draft PR #1, verify the required checks, and merge only after the production gates and owner approvals are satisfied.
+2. Keep PR #1 in draft until the remaining production backup gates and owner approvals are satisfied; merge only after they close.
 3. Do not deploy staging until the explicit workflow input is authorized; then validate the four service health checks and HTTPS endpoint.
 4. Provision the dedicated encrypted staging volume, verify the off-host target and host key, approve recovery/retention targets, then run and restore a manual backup before enabling the timer or production promotion.
 5. Public TCP probes show ports `111`, `8000`, `8001`, `8080`, and `8081` closed/filtered. Confirm the OCI NSG/security-list rules match that intent; UDP/111 was not tested.
