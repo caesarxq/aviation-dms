@@ -203,6 +203,20 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "mkdir -p ${{ env.STAGING_DIR }}/scripts"
+
+          scp -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            scripts/deploy-staging.sh \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${{ env.STAGING_DIR }}/scripts/deploy-staging.sh
+
+          ssh -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "cd ${{ env.STAGING_DIR }} && \
              ./scripts/deploy-staging.sh ${{ env.IMAGE_TAG }}"
 
