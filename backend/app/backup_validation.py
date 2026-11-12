@@ -33,6 +33,8 @@ _REQUIRED_SCHEMA_COLUMNS = {
     "audit_report_imports": {"import_id", "audit_number", "source_auditor_id", "evidence_file", "evidence_sha256", "payload_json", "payload_sha256", "imported_by", "status"},
     "personnel_uploads": {"upload_id", "person_id", "file_path", "file_size", "file_sha256"},
     "kcaa_approval_evidence": {"evidence_id", "version_id", "file_path", "file_sha256", "file_size"},
+    "document_files": {"file_id", "document_id", "stored_filename", "file_sha256", "file_size"},
+    "section_extractions": {"id", "document_version_id", "storage_key", "file_hash"},
 }
 
 
@@ -204,6 +206,108 @@ def _sqlite_checks(database: Path) -> dict:
     }
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _document_storage_checks(database: Path, storage_root: Path) -> dict:
+    """Verify database references to source-document files and generated extracts."""
+    report = {
+        "document_files": {"records": 0, "missing_files": 0, "size_mismatches": 0, "hash_mismatches": 0, "unsafe_references": 0},
+        "section_extractions": {"records": 0, "missing_files": 0, "hash_mismatches": 0, "unsafe_references": 0},
+        "unreferenced_files": 0,
+    }
+    try:
+        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        try:
+            document_rows = connection.execute(
+                "SELECT stored_filename, file_sha256, file_size FROM document_files"
+            ).fetchall()
+            extraction_rows = connection.execute(
+                "SELECT storage_key, file_hash FROM section_extractions"
+            ).fetchall()
+        finally:
+            connection.close()
+    except (sqlite3.DatabaseError, OSError):
+        report["database_error"] = True
+        return report
+
+    referenced: set[str] = set()
+    root = storage_root.resolve(strict=False)
+
+    def inspect_reference(kind: str, relative: str, expected_hash: str, expected_size: int | None = None) -> None:
+        entry = report[kind]
+        entry["records"] += 1
+        relative_path = PurePosixPath(relative)
+        if (
+            not relative
+            or relative_path.is_absolute()
+            or any(part in {"", ".", ".."} for part in relative_path.parts)
+            or "\\" in relative
+        ):
+            entry["unsafe_references"] += 1
+            return
+        path = root.joinpath(*relative_path.parts)
+        cursor = root
+        try:
+            for part in relative_path.parts:
+                cursor = cursor / part
+                if cursor.is_symlink():
+                    entry["unsafe_references"] += 1
+                    return
+            info = path.lstat()
+        except FileNotFoundError:
+            entry["missing_files"] += 1
+            return
+        except OSError:
+            entry["unsafe_references"] += 1
+            return
+        if not stat.S_ISREG(info.st_mode):
+            entry["unsafe_references"] += 1
+            return
+        try:
+            resolved = path.resolve(strict=True)
+            if not resolved.is_relative_to(root):
+                entry["unsafe_references"] += 1
+                return
+            actual_hash = _sha256_file(resolved)
+        except (OSError, ValueError):
+            entry["unsafe_references"] += 1
+            return
+        referenced.add(relative_path.as_posix())
+        if expected_size is not None and info.st_size != expected_size:
+            entry["size_mismatches"] += 1
+        if not isinstance(expected_hash, str) or not _HASH_RE.fullmatch(expected_hash) or actual_hash != expected_hash:
+            entry["hash_mismatches"] += 1
+
+    for row in document_rows:
+        inspect_reference(
+            "document_files",
+            row["stored_filename"],
+            row["file_sha256"],
+            row["file_size"],
+        )
+    for row in extraction_rows:
+        inspect_reference(
+            "section_extractions",
+            row["storage_key"],
+            row["file_hash"],
+        )
+
+    try:
+        actual_files = {entry["path"] for entry in _file_entries(root)}
+    except (OSError, ValueError):
+        report["database_error"] = True
+        return report
+    report["unreferenced_files"] = len(actual_files - referenced)
+    return report
+
+
 def _core_schema_check(database: Path) -> dict:
     try:
         connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
@@ -300,6 +404,19 @@ def verify_backup_candidate(data_root: Path | str) -> dict:
             ):
                 blockers.append("hashless_evidence_requires_revalidation")
                 break
+    document_storage = _document_storage_checks(root / "dms.db", root / "document_files") if sqlite_report["database_present"] and sqlite_report["quick_check_ok"] and sqlite_report["integrity_check_ok"] else None
+    if document_storage is not None and (
+        document_storage.get("database_error")
+        or document_storage["unreferenced_files"]
+        or any(
+            report.get("missing_files")
+            or report.get("size_mismatches")
+            or report.get("hash_mismatches")
+            or report.get("unsafe_references")
+            for report in (document_storage["document_files"], document_storage["section_extractions"])
+        )
+    ):
+        blockers.append("document_storage_references_require_review")
     return {
         "read_only": True,
         "accepted": not blockers,
@@ -308,6 +425,7 @@ def verify_backup_candidate(data_root: Path | str) -> dict:
         "sqlite": sqlite_report,
         "core_schema": core_schema,
         "storage": storage,
+        "document_storage": document_storage,
         "scope_note": "Data-integrity checks only; this does not establish off-host custody, RPO/RTO, restore service objectives, or operational/regulatory readiness.",
     }
 

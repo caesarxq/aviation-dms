@@ -1,0 +1,34 @@
+[Unit]
+Description=Create and encrypt a production Aviation DMS backup
+Documentation=file:/opt/kfl-aviation-dms-prod/backup-tool/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionFileIsExecutable=/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
+ConditionPathExists=/etc/kfl-aviation-dms-prod/backup.env
+ConditionPathIsMountPoint=/var/lib/kfl-aviation-dms-prod-backups/staging
+ConditionPathExists=/etc/kfl-aviation-dms-prod/backup-secrets/staging-encryption.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=-/etc/kfl-aviation-dms-prod/backup.env
+ExecStart=/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
+TimeoutStartSec=6h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/kfl-aviation-dms-prod-backups

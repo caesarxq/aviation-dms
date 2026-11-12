@@ -37,6 +37,7 @@ DEFAULT_STORAGE_ROOTS = (
     "uploads",
     "kcaa-evidence",
     "attachments",
+    "document_files",
 )
 
 
@@ -130,6 +131,32 @@ def _copy_file_tree(source_root: Path, dest_root: Path) -> dict[str, dict]:
     return entries
 
 
+def _validate_source_data_root(source_root: Path, storage_roots: tuple[str, ...]) -> None:
+    """Refuse unknown or unsafe top-level entries instead of silently omitting data."""
+    allowed_files = {
+        "dms.db",
+        "dms.db-wal",
+        "dms.db-shm",
+        "dms.db-journal",
+        ".dms-upload-storage.lock",
+    }
+    allowed = allowed_files | set(storage_roots)
+    try:
+        entries = list(os.scandir(source_root))
+    except OSError as exc:
+        raise BackupCreateError("Could not inventory the active DMS data root") from exc
+    for entry in entries:
+        if entry.name not in allowed:
+            raise BackupCreateError(f"Refusing unmapped storage root: {entry.name}")
+        info = entry.stat(follow_symlinks=False)
+        if stat.S_ISLNK(info.st_mode):
+            raise BackupCreateError(f"Refusing symlink in active DMS data root: {entry.name}")
+        if entry.name in storage_roots and not stat.S_ISDIR(info.st_mode):
+            raise BackupCreateError(f"Storage root is not a regular directory: {entry.name}")
+        if entry.name in allowed_files and not stat.S_ISREG(info.st_mode):
+            raise BackupCreateError(f"Database or lock entry is not a regular file: {entry.name}")
+
+
 async def create_backup_candidate(
     source_data_root: Optional[Path | str] = None,
     dest_root: Optional[Path | str] = None,
@@ -146,12 +173,19 @@ async def create_backup_candidate(
 
     Returns the verification report dict.
     """
-    source_root = (
-        Path(source_data_root).resolve() if source_data_root else _data_root()
-    )
+    source_input = Path(source_data_root) if source_data_root else Path(DB_PATH).parent
+    if source_input.is_symlink():
+        raise BackupCreateError("Active DMS data root must not be a symlink")
+    source_root = source_input.resolve()
     dest = (
         Path(dest_root).resolve() if dest_root else _data_root().parent / "backups"
     )
+
+    if not source_root.is_dir():
+        raise BackupCreateError("Active DMS data root must be a regular directory")
+    if any(not name or Path(name).name != name or name in {".", ".."} for name in include_storage_roots):
+        raise BackupCreateError("Backup storage-root names must be safe top-level directories")
+    _validate_source_data_root(source_root, include_storage_roots)
 
     # Refuse if destination overlaps with source.
     if dest == source_root or dest.is_relative_to(source_root) or source_root.is_relative_to(dest):
@@ -196,7 +230,8 @@ async def create_backup_candidate(
         for root_name in include_storage_roots:
             source_storage = source_root / root_name
             if not source_storage.exists():
-                # Storage root may not exist yet; skip silently.
+                # Keep the expected root present in the restored candidate.
+                (candidate / root_name).mkdir(parents=True, exist_ok=True, mode=0o700)
                 continue
             dest_storage = candidate / root_name
             entries = _copy_file_tree(source_storage, dest_storage)
@@ -209,6 +244,9 @@ async def create_backup_candidate(
                         "copied_from": str(source_storage / relative),
                     }
                 )
+
+        # Fail if a new top-level store appeared while the candidate was being copied.
+        _validate_source_data_root(source_root, include_storage_roots)
 
         # --- 3. Create manifest beside the candidate ---
         manifest_report = write_backup_manifest(candidate)

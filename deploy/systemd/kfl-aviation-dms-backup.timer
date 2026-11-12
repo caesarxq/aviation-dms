@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily production Aviation DMS backup timer
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=kfl-aviation-dms-backup.service
+
+[Install]
+WantedBy=timers.target

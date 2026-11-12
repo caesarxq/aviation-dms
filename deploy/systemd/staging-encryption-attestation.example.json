@@ -1,0 +1,11 @@
+{
+  "provider": "OCI",
+  "mountpoint": "/var/lib/kfl-aviation-dms-prod-backups/staging",
+  "source": "REPLACE_WITH_EXACT_FINDMNT_SOURCE",
+  "encrypted_at_rest": false,
+  "volume_ocid": "ocid1.volume.REPLACE_AFTER_VERIFICATION",
+  "kms_key_ocid": "ocid1.key.REPLACE_AFTER_VERIFICATION",
+  "verified_by": "",
+  "verified_at": "",
+  "verification_reference": ""
+}

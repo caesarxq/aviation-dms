@@ -1,6 +1,6 @@
 # Production deployment and operational release
 
-Local development should use the backend and Vite commands in the README. The root Compose file is a production-shaped HTTPS deployment: it requires explicit host, SMTP, and bootstrap-secret configuration, terminates HTTPS with Caddy, keeps the API private to the Compose network, and does not start the unused Keycloak development server.
+Local development should use the backend and Vite commands in the README. The root Compose file is production-shaped; its `https_proxy` service is an optional `local-https` profile. OCI terminates HTTPS on bastion Caddy and uses private application ports on the staging/production hosts. The Compose deployment requires explicit host, SMTP, and bootstrap-secret configuration and does not start the unused Keycloak development server.
 
 ## Prerequisites
 
@@ -70,6 +70,14 @@ After initial administrator setup, remove/rotate the bootstrap-token file and re
 
 ## Backup and restore
 
+### Current production-host status
+
+The production backend uses the persistent Docker volume `kfl-aviation-dms-prod_dms_data`, mounted at `/app/data`. The production-specific helper and systemd service/timer units are now installed on `roc-app`; `systemd-analyze verify` passed. The timer remains disabled, no `/etc/kfl-aviation-dms-prod/backup.env` is configured, Restic is not installed, and the production host has no backup SSH identity or pinned key for the candidate off-host server. The staging path is still an ordinary directory, not a dedicated encrypted mount, and the encryption attestation is absent. No external failure alert is configured and no backup was run. A persistent Docker volume is not a backup, and the previous OS `dpkg-db-backup.timer` is unrelated. OCI-managed volume policies and the off-host destination have not been independently verified.
+
+The configured SMTP secret source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed; the file’s metadata was hardened to `root:10001` mode `0440`, and the backend was verified able to read it. The running backend reports `NOTIFICATION_ENABLED=true` and an empty `SMTP_PASS_FILE`; the application falls back to `SMTP_PASS` when that file variable is empty. I did not inspect or print `SMTP_PASS`, so the mounted file is not proven to be the credential currently used by the app. No matching DMS/SMTP systemd or tmpfiles provisioning entry was found, so the `/run` path may not survive reboot. A separate direct Zoho test using the new `info@kfl.ke` credential was accepted and the owner-provided screenshot confirms delivery; the production container has not been switched to that credential.
+
+The owner reports a successful off-host restore drill; `docs/OFF-HOST-RESTORE-DRILL-REPORT.md` records that supplied evidence. I could not tie that drill to the current production volume. Production deployment remains blocked until a production-specific backup and restore path is installed and verified.
+
 The persistent `/app/data` volume contains the SQLite database, KCAA evidence, audit attachments, and personnel uploads. Back up the complete directory as one set; do not copy only `dms.db`. For a consistent filesystem-level backup, pause backend writes:
 
 Audit-report evidence is stored under `/app/data/attachments/` by default; the backend image does not package controlled audit PDFs. Provision each evidence file from an authorized, verified source before setting its `evidence_file` record or enabling its download link. Before P3 evidence is referenced or served, the API enforces the explicitly configured `DMS_AUDIT_EVIDENCE_MAX_BYTES`, scans the bounded snapshot, validates PDF structure in the killable child worker, and verifies/records SHA-256 as applicable. Missing size, quota, or scanner configuration fails closed. The P2 personnel-verification and P3 provenance-verification routes currently validate retained evidence while holding SQLite write transactions; refactor them to validate before acquiring write locks and recheck the candidate state/digest under a short transaction before operational use. Normal in-app report creation rejects audit dates earlier than the current UTC date; historical source reports must use the provenance-import workflow, and responsible postholders must confirm this UTC cutoff before operational use. Existing report rows with a null digest fail closed with HTTP 409 until controlled, documented revalidation is completed; do not silently calculate a replacement digest for legacy evidence. A digest detects later byte changes but does not establish source authenticity, approval, or immutable custody. Maintain an independently controlled provenance record and do not replace files in place.
@@ -78,17 +86,13 @@ The historical audit seeder is not a deployment or recovery command. It requires
 
 On upgrade, existing personnel-upload rows with a null `file_sha256` fail closed for download and verification. Inventory and re-upload or complete an authorized, documented revalidation before relying on those legacy files; do not establish a new checksum silently for an unverified file.
 
+After the destination, Restic password file, SSH identity, pinned host key, and encrypted staging filesystem are verified, run the installed helper manually:
+
 ```bash
-cd /opt/aviation-dms
-backup_dir="/var/backups/kfl-dms/$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -m 700 "$backup_dir"
-sudo docker compose stop backend
-container_id="$(sudo docker compose ps -aq backend)"
-sudo docker cp "${container_id}:/app/data/." "$backup_dir/"
-sudo docker compose start backend
+sudo /opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ```
 
-If the copy fails, start the backend immediately with `sudo docker compose start backend`. Encrypt and transfer the backup to access-controlled off-host storage. Before relying on a backup, restore the complete directory to an isolated staging volume, verify `PRAGMA integrity_check`, confirm the KCAA evidence and upload files are present, and exercise representative reads. Record the restore result and timestamp.
+It uses SQLite's online backup API, copies the complete approved `/app/data` scope, validates the candidate, and transfers an encrypted Restic snapshot. It never stops/restarts the backend and does not prune snapshots. Before enabling the timer, restore a produced snapshot to an isolated target, verify schema/integrity/file hashes and representative reads, and record Accountable Manager/Records Custodian approvals for RPO, RTO, and retention.
 
 ### Isolated backup candidate validation
 
@@ -110,12 +114,12 @@ After restoring that backup into a new, isolated candidate directory, verify it 
 
 The verifier checks the manifest against every file, runs SQLite quick/integrity/foreign-key checks, requires all tables declared by the current application schema plus critical columns for identity, document, audit, and evidence tables, inventories referenced files, and verifies stored file hashes. A pre-migration or truncated database is blocked; the validator does not run migrations. Exit `0` means these data-integrity checks passed; exit `2` means a blocker was found. The manifest is a transfer-integrity aid, not a digital signature or proof of source authenticity. Generating a manifest only after downloading an unmanifested backup does not prove that the remote copy matches the source. The result does not establish RPO/RTO, off-host custody, service recovery, or operational/regulatory readiness.
 
-No genuine off-host drill is complete until the Accountable Manager approves the recovery objectives and acceptance criteria, infrastructure supplies an authorized destination and isolated restore target, and the owner records a successful restore. Keep staging unchanged unless separately authorized.
+The generic acceptance criteria above should be evidenced for the production source and target before claiming production recovery readiness. The owner-reported drill is not independently verified as a restore of this production volume. Keep staging unchanged unless separately authorized.
 
 ## Staging and deployment checks
 
 1. Use a separate staging host, database, SMTP sandbox and bootstrap token. Do not run E2E tests against operational data.
-2. Set a new, never-reused `DMS_RELEASE_TAG`; run `docker compose config --quiet`, `docker compose build backend frontend https_proxy`, then `docker compose up -d --no-build` so the running services use that built tag.
+2. Use the CI-built, never-reused `DMS_RELEASE_TAG`; validate Compose and the exact environment port mappings, then use the explicitly authorized workflow dispatch. OCI deployment pulls the CI images with `--no-build`; do not start the optional `https_proxy` profile on OCI.
 3. Confirm HTTPS redirect/certificate, security headers, successful login/profile/logout, CSRF rejection, failed-login throttling, reset-link delivery, and 401/403 behavior for every API prefix, including `/api/p3`.
 4. Run the complete backend and frontend suites, role-based browser checks, schema clean-install/upgrade tests and API smoke tests against staging.
 5. Verify that document rendering cannot execute stored scripts, uploads cannot cross user/path/size boundaries, and failed/partial migrations prevent startup.

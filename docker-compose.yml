@@ -5,7 +5,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "0.0.0.0:8000:8000"
+      - "0.0.0.0:${DMS_BACKEND_HOST_PORT:-8000}:8000"
     environment:
       DEV_MODE: "false"
       FLIGHT_RELEASE_ENABLED: "${FLIGHT_RELEASE_ENABLED:-false}"
@@ -162,7 +162,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "0.0.0.0:8080:80"
+      - "0.0.0.0:${DMS_FRONTEND_HOST_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -177,6 +177,9 @@ services:
       default:
 
   https_proxy:
+    # Optional for local standalone deployments. OCI uses Caddy on the bastion.
+    profiles:
+      - local-https
     image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
     environment:
       DMS_HOSTNAME: "${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
@@ -192,6 +195,9 @@ services:
     depends_on:
       frontend:
         condition: service_healthy
+    networks:
+      default:
+        ipv4_address: 172.31.254.3
     restart: unless-stopped
 
 volumes:

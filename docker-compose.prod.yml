@@ -1,7 +1,7 @@
 # ============================================================================
 # Aviation DMS — Docker Compose Production Override
 # ============================================================================
-# Use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Use with: docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d
 # Production runs on OCI with production settings and proper domain.
 # ============================================================================
 
@@ -18,9 +18,9 @@ services:
       PUBLIC_APP_URL: "https://roc.kfl.ke"
       HOST: "0.0.0.0"
       PORT: "8000"
-      DMS_TRUSTED_FRONTEND_IP: "145.241.152.126/32"
+      DMS_TRUSTED_FRONTEND_IP: "10.20.4.234"
       DMS_UPLOAD_STORAGE_QUOTA_BYTES: "30000000000"
-      NOTIFICATION_ENABLED: "true"
+      NOTIFICATION_ENABLED: "${NOTIFICATION_ENABLED:-false}"
       SESSION_TTL_SECONDS: "28800"
       SESSION_ABSOLUTE_MAX_SECONDS: "86400"
       KFL_BOOTSTRAP_TOKEN_FILE: /run/secrets/kfl_bootstrap_token

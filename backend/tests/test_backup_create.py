@@ -97,6 +97,18 @@ class TestBackupCreate:
                 )
             )
 
+    def test_refuses_unmapped_top_level_data_root(self, temp_data_root, temp_backup_root):
+        (temp_data_root / "document_files").mkdir()
+        (temp_data_root / "unmapped-records").mkdir()
+
+        with pytest.raises(BackupCreateError, match="unmapped storage root"):
+            asyncio.run(
+                create_backup_candidate(
+                    source_data_root=temp_data_root,
+                    dest_root=temp_backup_root,
+                )
+            )
+
     def test_manifest_and_verification_consistency(self, temp_data_root, temp_backup_root):
         result = asyncio.run(
             create_backup_candidate(
@@ -126,6 +138,24 @@ class TestBackupCreate:
         assert any("uploads/test-file.txt" in p for p in paths)
         assert any("kcaa-evidence/test-file.txt" in p for p in paths)
         assert any("attachments/test-file.txt" in p for p in paths)
+
+    def test_copies_document_files_and_extraction_storage(self, temp_data_root, temp_backup_root):
+        document_root = temp_data_root / "document_files"
+        extract_root = document_root / "extracts"
+        extract_root.mkdir(parents=True)
+        (document_root / "source.pdf").write_bytes(b"document source")
+        (extract_root / "section.pdf").write_bytes(b"section extract")
+
+        result = asyncio.run(
+            create_backup_candidate(
+                source_data_root=temp_data_root,
+                dest_root=temp_backup_root,
+            )
+        )
+
+        paths = {entry["path"] for entry in result["file_inventory"]}
+        assert "document_files/source.pdf" in paths
+        assert "document_files/extracts/section.pdf" in paths
 
 
 class TestBackupScheduler:
