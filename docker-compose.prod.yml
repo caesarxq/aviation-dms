@@ -18,7 +18,7 @@ services:
       PUBLIC_APP_URL: "https://roc.kfl.ke"
       HOST: "0.0.0.0"
       PORT: "8000"
-      DMS_TRUSTED_FRONTEND_IP: "10.0.0.10"
+      DMS_TRUSTED_FRONTEND_IP: "145.241.152.126/32"
       DMS_UPLOAD_STORAGE_QUOTA_BYTES: "30000000000"
       NOTIFICATION_ENABLED: "true"
       SESSION_TTL_SECONDS: "28800"
@@ -49,7 +49,7 @@ services:
   clamd:
     mem_limit: 2g
     pids_limit: 128
-    cpus: 2.0
+    cpus: 1.0
     ulimits:
       nofile:
         soft: 2048
@@ -62,18 +62,6 @@ services:
     ports:
       - "8080:80"
 
-  https_proxy:
-    environment:
-      DMS_HOSTNAME: "roc.kfl.ke"
-      ACME_EMAIL: "admin@kfl.ke"
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
 
 volumes:
   dms_data: {}
