@@ -88,7 +88,7 @@ Terraform was removed at the owner's direction. Keep OCI changes manual until th
 - `stage.kfl.ke` and `roc.kfl.ke` returned HTTP 200 at the time of this evaluation; public TCP probes for ports `111`, `8000`, `8001`, `8080`, and `8081` were closed/filtered.
 - Recent Actions runs failed at staging deployment; image builds and backend/frontend tests passed.
 - Branch protection requires strict PR checks, zero approval votes, and applies to administrators. The `pull_request` workflow is published; required checks passed on current PR head `6d49b7d`.
-- Production promotion remains blocked: the production-specific helper and systemd units are installed, but the timer is disabled. Restic, repository credentials, pinned SSH identity/host key, dedicated encrypted staging mount/attestation, retention approval, and an isolated restore are still missing; no backup was run.
+- Production promotion remains blocked: the production-specific helper and systemd units are installed, but the timer is disabled. Restic, repository credentials, pinned SSH identity/host key, dedicated encrypted staging mount/attestation, retention approval, an external failure-alert route, and an isolated restore are still missing; no backup was run.
 - PR #1 remains draft with the reviewed backup fixes pushed and required checks passing. No production application deployment or restart occurred.
 
 ---

@@ -25,11 +25,13 @@ The application validator and candidate creator now include `document_files/` an
 5. Provision a dedicated OCI block volume encrypted with an owner-approved KMS key and mount it exactly at `/var/lib/kfl-aviation-dms-prod-backups/staging`. The helper requires `findmnt` to confirm that exact mountpoint and a source distinct from `/`. Verify the OCI volume/KMS configuration out of band, then create `/etc/kfl-aviation-dms-prod/backup-secrets/staging-encryption.json` from `deploy/systemd/staging-encryption-attestation.example.json`, filling in the exact source, volume OCID, KMS key OCID, verifier, timestamp, and verification reference. Protect it as `root:root`, mode `0600`. The helper validates the mount mapping and attestation; it does not query OCI or cryptographically verify the cloud-side encryption itself.
 6. Create `/etc/kfl-aviation-dms-prod/backup.env` from `deploy/systemd/backup.env.example`; it contains non-secret paths and the Restic repository URL only. Protect it as `root:root`, mode `0640`.
 
-Do not enable the timer until the off-host repository, cloud-side encryption, staging attestation, retention, and restore access are verified.
+Do not enable the timer until the off-host repository, cloud-side encryption, staging attestation, retention, restore access, and external failure-alert route are verified.
 
 ## Schedule and retention
 
 `deploy/systemd/kfl-aviation-dms-backup.service` is a hardened oneshot service. `deploy/systemd/kfl-aviation-dms-backup.timer` schedules it daily at 02:00 UTC with persistent catch-up and a randomized delay. The installer reloads systemd but intentionally does not enable or start the timer.
+
+Failures are recorded in the systemd journal. No external failure-alert receiver is configured; choose and test an independent monitoring route before enabling the timer.
 
 There is no automatic Restic `forget` or `prune` in the helper. The Records Custodian must approve how the policy's 36-month and lifetime record classes apply to full backup snapshots and legal holds before pruning is implemented. The Accountable Manager must approve RPO/RTO. The current DR document proposes RPO 2 days and RTO 5 hours; a successful daily schedule would target at most 24 hours of data loss only if every scheduled run succeeds.
 
