@@ -226,6 +226,55 @@ graphify path "app/p0_routes.py:transition_version_state" "app/database.py:init_
 - Graphify shows structure; use `read_file` / `grep` for exact line-level inspection.
 
 
+## Proactive Graphify Method (Agent-Use Standard)
+
+Agents use Graphify **proactively and preemptively** — before every code-editing task — rather than reactively after a problem is found. This is a required step in the agent workflow, not optional.
+
+### Before every code change
+
+Run this sequence against the directory being edited:
+
+**Step 1 — Verify graph freshness**
+```bash
+git rev-parse HEAD
+# Compare to the commit recorded in GRAPH_REPORT.md
+graphify update backend/      # or frontend/src/
+```
+
+**Step 2 — Assess blast radius**
+```bash
+graphify explain "<function-or-class-being-changed>" --all
+```
+Review every caller, importer, and dependent. If a god node like `get_db()` (342 edges) is affected, the change is high-risk.
+
+**Step 3 — Check dependency paths**
+```bash
+graphify path "<source>" "<target>" --undirected
+```
+Verify no unintended coupling is introduced, and no new import cycles would be created.
+
+**Step 4 — Re-extract after the change**
+```bash
+graphify extract backend/ --code-only
+graphify cluster-only backend/
+```
+Confirm the graph still reflects reality before committing.
+
+### Integration points
+
+| Workflow stage | Graphify action |
+|---------------|-----------------|
+| Task kickoff | `graphify update <path>` + compare `git rev-parse HEAD` to `GRAPH_REPORT.md` commit |
+| Before editing any function/class | `graphify explain "<target>" --all` |
+| During refactor / module split | `graphify path` to verify no new import cycles |
+| PR / self-review | Reviewer checks blast radius output from `graphify explain` |
+| CI (automated) | `graphify-extract` job on every push to `main` (see `.github/workflows/deploy.yml`) |
+
+### Rule
+
+**Never edit a function, route, or module without first running `graphify explain` on it.** The graph is the source of truth for structural relationships; human-authored docs (ADRs, CHANGELOG, threat model) remain the source of truth for rationale and policy.
+
+
 ### Secrets
 - Never commit `.env`, `.env.staging`, `.env.prod`, or secret files
 - SMTP passwords and bootstrap tokens are mounted as Docker secrets, never in environment variables
