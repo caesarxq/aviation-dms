@@ -206,6 +206,12 @@ def test_audit_seed_requires_evidence_pdf_before_database_access(tmp_path, monke
 
 
 def test_external_seed_rejects_a_different_valid_pdf_digest(tmp_path, monkeypatch):
+    private_dir = tmp_path / "private"
+    private_dir.mkdir(mode=0o700)
+    database_path = private_dir / "seed.db"
+    sqlite3.connect(database_path).close()
+    monkeypatch.setattr(database, "DB_PATH", str(database_path))
+
     evidence_dir = tmp_path / "attachments"
     evidence_dir.mkdir()
     evidence_name = audit_seed.AUDIT_DATA["evidence_file"].split("/", 1)[-1]
@@ -229,7 +235,9 @@ def test_external_seed_rejects_a_different_valid_pdf_digest(tmp_path, monkeypatc
 
 
 def test_external_seed_uses_only_external_audit_tables(tmp_path, monkeypatch):
-    path = tmp_path / "seed.db"
+    private_dir = tmp_path / "private"
+    private_dir.mkdir(mode=0o700)
+    path = private_dir / "seed.db"
     evidence_dir = tmp_path / "attachments"
     evidence_dir.mkdir()
     evidence_name = audit_seed.AUDIT_DATA["evidence_file"].split("/", 1)[-1]
