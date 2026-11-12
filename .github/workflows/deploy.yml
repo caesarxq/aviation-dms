@@ -93,6 +93,40 @@ jobs:
           echo "Backend: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ env.IMAGE_TAG }}"
           echo "Frontend: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ env.IMAGE_TAG }}"
 
+  graphify-extract:
+    name: Extract code knowledge graph
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Graphify CLI
+        run: pip install graphifyy
+
+      - name: Extract backend graph
+        run: graphify extract backend/ --code-only
+        working-directory: ${{ github.workspace }}
+
+      - name: Extract frontend graph
+        run: graphify extract frontend/src/ --code-only
+        working-directory: ${{ github.workspace }}
+
+      - name: Cluster both graphs for reports
+        run: |
+          graphify cluster-only ${{ github.workspace }}/backend
+          graphify cluster-only ${{ github.workspace }}/frontend/src
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload graph artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphify-graphs
+          path: |
+            backend/graphify-out/
+            frontend/src/graphify-out/
+          retention-days: 7
+
   test-staging:
     name: Run tests on staging
     needs: build

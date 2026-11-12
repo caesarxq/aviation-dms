@@ -29,6 +29,10 @@ __pycache__/
 # OS
 .DS_Store
 
+# Graphify (build artifacts — never commit; go stale quickly)
+backend/graphify-out/
+frontend/src/graphify-out/
+
 # Playwright
 playwright-report/
 test-results/

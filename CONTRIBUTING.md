@@ -167,12 +167,64 @@ aviation-dms/
 ├── Caddyfile.bastion
 ├── CHANGELOG.md
 ├── DESIGN.md
-└── .gitignore
+├── .gitignore
 ```
 
 ---
 
-## Security Guidelines
+## Code Knowledge Graph (Graphify)
+
+This project uses [Graphify](https://github.com/Graphify-Labs/graphify) (PyPI: `graphifyy`) to maintain a local, queryable knowledge graph of the codebase. Graphify parses code with tree-sitter AST — fully offline, nothing leaves your machine — and maps cross-file calls, imports, SQL schema relationships, and community structure.
+
+### When to use Graphify
+
+- **Re-orienting after context compaction** — instead of re-reading 20 files, run `graphify explain "<function>" --all` to see all callers and dependents.
+- **Change impact analysis** — before editing `database.py` or `rbac.py`, check blast radius: `graphify explain "get_db()"` shows 342 edges across every route module.
+- **Refactoring prioritization** — low community cohesion scores (e.g. `p2_routes.py` at 0.05) flag weakly coupled modules that are candidates for splitting.
+- **Path tracing** — `graphify path "node-A" "node-B" --undirected` shows the shortest dependency chain between any two functions.
+
+### Procedure
+
+**1. Install (one-time)**
+```bash
+pip install graphifyy
+# or: uv tool install graphifyy
+which graphify
+```
+
+**2. Extract (code-only, free, offline)**
+```bash
+# Backend
+graphify extract backend/ --code-only
+
+# Frontend
+graphify extract frontend/src/ --code-only
+```
+Output lands in `<path>/graphify-out/`:
+- `graph.json` — full graph, queryable via `graphify explain` / `graphify path`
+- `GRAPH_REPORT.md` — human-readable summary (god nodes, cohesion, surprising connections)
+- `graph.html` — clickable interactive graph in any browser
+
+**3. Regenerate after changes**
+```bash
+graphify update backend/
+graphify update frontend/src/
+```
+Compare `git rev-parse HEAD` to the commit recorded in `GRAPH_REPORT.md` to check staleness. The CI pipeline (`graphify-extract` job) regenerates these on every push to `main`.
+
+**4. Query**
+```bash
+graphify explain "transition_version_state" --all
+graphify path "app/p0_routes.py:transition_version_state" "app/database.py:init_db" --undirected
+```
+
+### Rules
+
+- Graphify output complements — does not replace — human-authored documentation (ADRs, CHANGELOG, threat model).
+- **Never commit** `graph.json`, `graph.html`, or `GRAPH_REPORT.md` — they are build artifacts that go stale quickly. They are in `.gitignore`.
+- Code-only extraction needs no API key. Docs/PDFs/images semantic extraction requires a configured LLM key (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) — skip with `--code-only`.
+- Graphify shows structure; use `read_file` / `grep` for exact line-level inspection.
+
 
 ### Secrets
 - Never commit `.env`, `.env.staging`, `.env.prod`, or secret files
