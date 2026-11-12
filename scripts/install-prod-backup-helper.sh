@@ -19,7 +19,8 @@ for required in \
   "${SOURCE_ROOT}/backend/app/backup_validation.py" \
   "${SOURCE_ROOT}/docs/PRODUCTION-BACKUP-IMPLEMENTATION.md" \
   "${SOURCE_ROOT}/deploy/systemd/kfl-aviation-dms-backup.service" \
-  "${SOURCE_ROOT}/deploy/systemd/kfl-aviation-dms-backup.timer"; do
+  "${SOURCE_ROOT}/deploy/systemd/kfl-aviation-dms-backup.timer" \
+  "${SOURCE_ROOT}/deploy/systemd/staging-encryption-attestation.example.json"; do
   if [[ ! -f "${required}" ]]; then
     echo "ERROR: required helper file is missing" >&2
     exit 1
@@ -32,6 +33,7 @@ install -d -o root -g root -m 0700 /var/lib/kfl-aviation-dms-prod-backups/stagin
 install -m 0750 "${SOURCE_ROOT}/scripts/full-stack-backup-prod.sh" "${SCRIPT_DIR}/full-stack-backup-prod.sh"
 install -m 0644 "${SOURCE_ROOT}/scripts/full_stack_backup_prod.py" "${SCRIPT_DIR}/full_stack_backup_prod.py"
 install -m 0644 "${SOURCE_ROOT}/deploy/systemd/backup.env.example" "${PROD_ROOT}/backup-tool/backup.env.example"
+install -m 0644 "${SOURCE_ROOT}/deploy/systemd/staging-encryption-attestation.example.json" "${PROD_ROOT}/backup-tool/staging-encryption-attestation.example.json"
 install -m 0644 "${SOURCE_ROOT}/docs/PRODUCTION-BACKUP-IMPLEMENTATION.md" "${PROD_ROOT}/backup-tool/README.md"
 cp -a "${SOURCE_ROOT}/backend/app/." "${APP_DIR}/"
 chown -R root:root "${APP_DIR}"

@@ -54,7 +54,7 @@ Do not include `.env`, SMTP/bootstrap secrets, SSH keys, TLS private keys, runti
 sudo /opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ```
 
-This command is usable only after the production helper's Restic repository, encrypted staging location, password file, dedicated SSH identity, and pinned host key are configured. It uses SQLite's online backup API and candidate verification; it does not stop or restart the backend. It fails closed and does not prune remote snapshots.
+This command is usable only after the production helper's Restic repository, dedicated encrypted staging mount and root-owned OCI encryption attestation, password file, dedicated SSH identity, and pinned host key are configured. It uses SQLite's online backup API and candidate verification; it does not stop or restart the backend. It fails closed and does not prune remote snapshots.
 
 ### 4.2 Candidate Manifest and Verification
 
@@ -130,7 +130,7 @@ A genuine off-host drill requires all of the following before it is considered c
 5. **Restore drill is executed** and validated using `backup_validation.py verify`
 6. **Owner records** the successful restore result
 
-The owner-reported `OFF-HOST-RESTORE-DRILL-REPORT.md` records a prior manual drill as passed. Production-host inspection found no current DMS backup helper or scheduled job, and the report/validator inventory omitted `document_files/` reference checks. Treat the prior result as owner-reported evidence, not proof of a recurring production backup or full current data-scope validation. Repeat an isolated restore after the production helper is configured.
+The owner-reported `OFF-HOST-RESTORE-DRILL-REPORT.md` records a prior manual drill as passed. The production-specific helper and systemd units are now installed, but the timer remains disabled; Restic, the remote repository/credentials, a pinned SSH identity, the dedicated encrypted staging mount/attestation, and retention approvals are not configured. No backup was run. The prior report also predates `document_files/` reference validation. Treat it as owner-reported manual evidence, not proof of a recurring production backup or full current data-scope validation. Repeat an isolated restore after configuration.
 
 ---
 
@@ -164,7 +164,7 @@ For a migration that cannot be reversed safely:
 | **Accountable Manager** | Approves recovery objectives (RPO/RTO), accepts restore drill, gives final go/no-go |
 | **Records Custodian** | Owns retention/legal hold basis, classifies findings, approves disposition |
 | **Backend/IT Lead** | Implements backup/restore, runs validation, monitors scanner freshness |
-| **System Administrator** | Executes backup cron, manages off-host transfer, provisions restore targets |
+| **System Administrator** | Provisions the backup target and encrypted staging mount, enables the systemd timer after approval, manages off-host transfer, provisions restore targets |
 | **Responsible Postholders** | Validate source mappings and delegations for their function |
 
 ---
@@ -185,7 +185,7 @@ For a migration that cannot be reversed safely:
 
 | Activity | Frequency | Owner |
 |----------|-----------|-------|
-| Backup creation (cron) | Daily (`0 2 * * *`) | System Administrator |
+| Backup creation (systemd timer; planned, not enabled) | Daily at 02:00 UTC after approval | System Administrator |
 | Backup manifest creation | After each backup | Backend/IT Lead |
 | Restore drill | Before go/no-go, then annually | System Administrator + Accountable Manager |
 | ClamAV signature freshness check | Daily | Backend/IT Lead |

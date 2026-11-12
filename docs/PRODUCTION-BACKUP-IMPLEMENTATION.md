@@ -2,9 +2,9 @@
 
 ## Purpose and current gate
 
-The production deployment preflight requires `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`. This helper creates a validated DMS data candidate and stores it in an encrypted Restic SFTP repository. It never initializes a new remote repository automatically, never prunes snapshots, and fails closed when the production volume, password-file permissions, SSH identity, pinned host key, or Restic repository is unavailable.
+The production deployment preflight requires `/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh`. This helper creates a validated DMS data candidate and stores it in an encrypted Restic SFTP repository. It never initializes a new remote repository automatically, never prunes snapshots, and fails closed when the production volume, dedicated encrypted staging mount/attestation, password-file permissions, SSH identity, pinned host key, or Restic repository is unavailable.
 
-The helper and systemd units are installed on `roc-app`; `systemd-analyze verify` passed. The timer is disabled, `/etc/kfl-aviation-dms-prod/backup.env` is absent, Restic is not installed, and a backup SSH identity/pinned off-host key are not configured. The helper was verified to fail closed on missing configuration; no backup was run. The production host has volume `kfl-aviation-dms-prod_dms_data` mounted at `/app/data`. Keep the timer disabled until the requirements below are provisioned and verified.
+The helper and systemd units are installed on `roc-app`; `systemd-analyze verify` passed. The timer is disabled, `/etc/kfl-aviation-dms-prod/backup.env` is absent, Restic is not installed, and a backup SSH identity/pinned off-host key are not configured. The staging path is only an ordinary directory: no dedicated encrypted volume or root-owned encryption attestation is installed. The helper was verified to fail closed on missing configuration; no backup was run. The production host has volume `kfl-aviation-dms-prod_dms_data` mounted at `/app/data`. Keep the timer disabled until the requirements below are provisioned and verified.
 
 ## Backup scope
 
@@ -12,7 +12,7 @@ The helper and systemd units are installed on `roc-app`; `systemd-analyze verify
 - `uploads/`, `kcaa-evidence/`, `attachments/`, and `document_files/` including generated `extracts/`.
 - The candidate manifest records file paths, sizes, and SHA-256 hashes. Validation checks SQLite integrity/schema, existing upload/evidence references, document-file references, and generated extract references.
 - Unknown top-level entries, symlinks, special files, missing referenced files, size/hash mismatches, or an unaccepted candidate abort the run before off-host upload.
-- The helper records host/volume/image metadata only. It excludes `.env`, SMTP/bootstrap secrets, SSH keys, TLS private keys, runtime environment values, and Docker images; configuration and image digests are recoverable from Git and the registry.
+- Restic snapshot metadata records the host plus tags for the production volume and running backend image ID. The candidate manifest inventories data files only. The helper excludes `.env`, SMTP/bootstrap secrets, SSH keys, TLS private keys, runtime environment values, and Docker images; configuration and image digests are recoverable from Git and the registry.
 
 The application validator and candidate creator now include `document_files/` and verify `document_files` and `section_extractions` references. Keep these checks in sync when new file roots or file-reference tables are added.
 
@@ -22,10 +22,10 @@ The application validator and candidate creator now include `document_files/` an
 2. Install Restic on production. Configure a dedicated SFTP identity at `/etc/kfl-aviation-dms-prod/backup-secrets/backup_ssh_key`, owner `root:root`, mode `0600`.
 3. Obtain the destination's SSH host-key fingerprint through a trusted channel and install a pinned `known_hosts` file at `/etc/kfl-aviation-dms-prod/backup-secrets/backup_known_hosts`. The helper requires `StrictHostKeyChecking=yes`; do not use `ssh-keyscan` output as trust by itself.
 4. Initialize the Restic repository once, manually, only after verifying the destination. Store the repository password in `/etc/kfl-aviation-dms-prod/backup-secrets/restic_password`, owner `root:root`, mode `0600`. Never put it in an environment value, command argument, log, or Git.
-5. Verify the host staging filesystem is encrypted at rest and has capacity for a full candidate. Staging is created with restrictive permissions; it is removed after each run.
+5. Provision a dedicated OCI block volume encrypted with an owner-approved KMS key and mount it exactly at `/var/lib/kfl-aviation-dms-prod-backups/staging`. The helper requires `findmnt` to confirm that exact mountpoint and a source distinct from `/`. Verify the OCI volume/KMS configuration out of band, then create `/etc/kfl-aviation-dms-prod/backup-secrets/staging-encryption.json` from `deploy/systemd/staging-encryption-attestation.example.json`, filling in the exact source, volume OCID, KMS key OCID, verifier, timestamp, and verification reference. Protect it as `root:root`, mode `0600`. The helper validates the mount mapping and attestation; it does not query OCI or cryptographically verify the cloud-side encryption itself.
 6. Create `/etc/kfl-aviation-dms-prod/backup.env` from `deploy/systemd/backup.env.example`; it contains non-secret paths and the Restic repository URL only. Protect it as `root:root`, mode `0640`.
 
-No helper or timer should be enabled until the off-host repository, encryption, staging protection, and restore access are verified.
+Do not enable the timer until the off-host repository, cloud-side encryption, staging attestation, retention, and restore access are verified.
 
 ## Schedule and retention
 

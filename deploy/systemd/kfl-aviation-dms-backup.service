@@ -6,6 +6,8 @@ After=docker.service network-online.target
 Wants=network-online.target
 ConditionFileIsExecutable=/opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ConditionPathExists=/etc/kfl-aviation-dms-prod/backup.env
+ConditionPathIsMountPoint=/var/lib/kfl-aviation-dms-prod-backups/staging
+ConditionPathExists=/etc/kfl-aviation-dms-prod/backup-secrets/staging-encryption.json
 
 [Service]
 Type=oneshot

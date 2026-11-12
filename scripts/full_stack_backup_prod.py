@@ -23,13 +23,14 @@ from typing import Mapping
 PRODUCTION_VOLUME = "kfl-aviation-dms-prod_dms_data"
 PRODUCTION_BACKEND_CONTAINER = "kfl-aviation-dms-prod-backend-1"
 _CANDIDATE_RE = re.compile(r"^dms-backup-\d{8}T\d{6}Z$")
+_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _BACKUP_ENV_KEYS = frozenset(
     {
         "DMS_BACKUP_VOLUME_NAME",
         "DMS_BACKUP_BACKEND_CONTAINER",
         "DMS_BACKUP_APP_SOURCE",
         "DMS_BACKUP_STAGING_ROOT",
-        "DMS_BACKUP_STAGING_ENCRYPTED",
+        "DMS_BACKUP_STAGING_ATTESTATION_FILE",
         "DMS_BACKUP_RESTIC_REPOSITORY",
         "DMS_BACKUP_RESTIC_PASSWORD_FILE",
         "DMS_BACKUP_SSH_HOST",
@@ -47,12 +48,16 @@ def read_backup_environment(
     path: Path, inherited: Mapping[str, str]
 ) -> dict[str, str]:
     """Read only allow-listed literal backup settings; never source shell code."""
-    environment = dict(inherited)
+    environment = {
+        name: inherited[name]
+        for name in ("PATH", "HOME", "LANG", "LC_ALL")
+        if name in inherited
+    }
     path = Path(path)
     try:
         info = path.lstat()
     except FileNotFoundError:
-        return environment
+        raise BackupConfigurationError("Production backup configuration file is unavailable")
     except OSError as exc:
         raise BackupConfigurationError("Backup configuration file is inaccessible") from exc
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
@@ -75,7 +80,7 @@ def read_backup_environment(
         key = key.strip()
         if key not in _BACKUP_ENV_KEYS or "\x00" in value:
             raise BackupConfigurationError("Backup configuration contains an unsupported setting")
-        environment.setdefault(key, value.strip())
+        environment[key] = value.strip()
     return environment
 
 
@@ -83,11 +88,12 @@ def read_backup_environment(
 class BackupConfig:
     volume_name: str
     backend_container: str
-    staging_encrypted: bool
     app_source: Path
     staging_root: Path
+    staging_attestation_file: Path
     restic_repository: str
     restic_password_file: Path
+    ssh_user: str
     ssh_host: str
     ssh_identity_file: Path
     ssh_known_hosts_file: Path
@@ -121,9 +127,20 @@ def load_config(env: Mapping[str, str]) -> BackupConfig:
 
     restic_repository = env["DMS_BACKUP_RESTIC_REPOSITORY"].strip()
     ssh_host = env["DMS_BACKUP_SSH_HOST"].strip()
-    if not restic_repository.startswith("sftp:") or f"@{ssh_host}:" not in restic_repository:
+    if not restic_repository.startswith("sftp:"):
         raise BackupConfigurationError(
             "RESTIC repository must use the configured pinned SFTP backup host"
+        )
+    target_and_path = restic_repository[len("sftp:"):]
+    if ":" not in target_and_path:
+        raise BackupConfigurationError("RESTIC SFTP repository must include user, host, and absolute path")
+    target, repository_path = target_and_path.split(":", 1)
+    if "@" not in target:
+        raise BackupConfigurationError("RESTIC SFTP repository must specify its remote user")
+    ssh_user, repository_host = target.rsplit("@", 1)
+    if not ssh_user or repository_host != ssh_host or not repository_path.startswith("/"):
+        raise BackupConfigurationError(
+            "RESTIC repository must use the configured pinned SFTP backup host and an absolute path"
         )
 
     paths = {
@@ -139,30 +156,34 @@ def load_config(env: Mapping[str, str]) -> BackupConfig:
     if any(not path.is_absolute() for path in paths.values()):
         raise BackupConfigurationError("Backup paths must be absolute")
 
+    staging_attestation_value = env.get(
+        "DMS_BACKUP_STAGING_ATTESTATION_FILE",
+        "/etc/kfl-aviation-dms-prod/backup-secrets/staging-encryption.json",
+    ).strip()
+    if not staging_attestation_value:
+        raise BackupConfigurationError("Staging encryption attestation path is required")
+    staging_attestation_file = Path(staging_attestation_value)
+    if not staging_attestation_file.is_absolute():
+        raise BackupConfigurationError("Backup paths must be absolute")
+
     return BackupConfig(
         volume_name=volume_name,
         backend_container=backend_container,
-        staging_encrypted=env.get("DMS_BACKUP_STAGING_ENCRYPTED", "").strip().lower() == "true",
         app_source=paths["DMS_BACKUP_APP_SOURCE"],
         staging_root=paths["DMS_BACKUP_STAGING_ROOT"],
+        staging_attestation_file=staging_attestation_file,
         restic_repository=restic_repository,
         restic_password_file=paths["DMS_BACKUP_RESTIC_PASSWORD_FILE"],
+        ssh_user=ssh_user,
         ssh_host=ssh_host,
         ssh_identity_file=paths["DMS_BACKUP_SSH_IDENTITY_FILE"],
         ssh_known_hosts_file=paths["DMS_BACKUP_SSH_KNOWN_HOSTS_FILE"],
     )
 
 
-def restic_environment(
-    config: BackupConfig, base_env: Mapping[str, str]
-) -> dict[str, str]:
-    """Build a Restic environment with a pinned SSH host key and file credentials."""
-    environment = {
-        name: base_env[name]
-        for name in ("PATH", "HOME", "LANG", "LC_ALL")
-        if name in base_env
-    }
-    ssh_command = shell_join(
+def restic_sftp_command(config: BackupConfig) -> str:
+    """Return the SSH SFTP command passed through Restic's supported option."""
+    return shell_join(
         (
             "ssh",
             "-i",
@@ -173,16 +194,33 @@ def restic_environment(
             f"UserKnownHostsFile={config.ssh_known_hosts_file}",
             "-o",
             "StrictHostKeyChecking=yes",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+            f"{config.ssh_user}@{config.ssh_host}",
             "-s",
             "sftp",
         )
     )
+
+
+def restic_environment(
+    config: BackupConfig, base_env: Mapping[str, str]
+) -> dict[str, str]:
+    """Build a minimal Restic environment containing paths, not secrets."""
+    environment = {
+        name: base_env[name]
+        for name in ("PATH", "HOME", "LANG", "LC_ALL")
+        if name in base_env
+    }
     environment.update(
         {
             "RESTIC_REPOSITORY": config.restic_repository,
             "RESTIC_PASSWORD_FILE": str(config.restic_password_file),
             "RESTIC_CACHE_DIR": str(config.staging_root / "restic-cache"),
-            "RESTIC_SFTP_COMMAND": ssh_command,
         }
     )
     return environment
@@ -246,6 +284,7 @@ def run_restic_backup(
     candidate: Path,
     *,
     source_host: str,
+    source_image_id: str,
     run_tag: str,
     runner=subprocess.run,
 ) -> str:
@@ -257,8 +296,8 @@ def run_restic_backup(
     candidate = Path(candidate)
     if not candidate.is_absolute() or not candidate.is_dir() or candidate.is_symlink():
         raise BackupConfigurationError("Backup candidate must be an isolated regular directory")
-    if not source_host or not run_tag:
-        raise BackupConfigurationError("Backup host and run tag are required")
+    if not source_host or not run_tag or not _IMAGE_ID_RE.fullmatch(source_image_id):
+        raise BackupConfigurationError("Backup host, image id, and run tag are required")
 
     environment = restic_environment(
         config,
@@ -273,6 +312,8 @@ def run_restic_backup(
         config.restic_repository,
         "--password-file",
         str(config.restic_password_file),
+        "-o",
+        f"sftp.command={restic_sftp_command(config)}",
     ]
     backup_result = runner(
         base_command
@@ -286,6 +327,10 @@ def run_restic_backup(
             "production",
             "--tag",
             run_tag,
+            "--tag",
+            f"volume-{config.volume_name}",
+            "--tag",
+            f"image-{source_image_id.replace(':', '-')}",
             "--quiet",
             str(candidate),
         ],
@@ -310,11 +355,16 @@ def run_restic_backup(
         snapshots = json.loads(verify_result.stdout)
     except (TypeError, json.JSONDecodeError) as exc:
         raise BackupConfigurationError("Restic returned invalid snapshot metadata") from exc
+    expected_tags = {
+        run_tag,
+        f"volume-{config.volume_name}",
+        f"image-{source_image_id.replace(':', '-')}",
+    }
     matching = [
         item for item in snapshots
         if isinstance(item, dict)
         and isinstance(item.get("id"), str)
-        and run_tag in (item.get("tags") or [])
+        and expected_tags.issubset(set(item.get("tags") or []))
     ]
     if not matching:
         raise BackupConfigurationError("Restic did not confirm the new backup snapshot")
@@ -328,13 +378,11 @@ def validate_runtime_prerequisites(
     runner=subprocess.run,
 ) -> None:
     """Fail closed unless dependencies, secret-file modes, and host pin exist."""
-    if not config.staging_encrypted:
-        raise BackupConfigurationError(
-            "Backup staging encryption must be verified and explicitly set to true"
-        )
-    for command in ("docker", "restic", "ssh", "ssh-keygen"):
+    for command in ("docker", "restic", "ssh", "ssh-keygen", "findmnt"):
         if not command_exists(command):
             raise BackupConfigurationError(f"Required backup command is missing: {command}")
+
+    validate_staging_mount(config, runner=runner)
 
     if config.app_source.is_symlink() or not config.app_source.is_dir():
         raise BackupConfigurationError("Backup application source directory is unavailable")
@@ -384,6 +432,82 @@ def validate_runtime_prerequisites(
         raise BackupConfigurationError("Backup host key is not pinned in known_hosts")
 
 
+def validate_staging_mount(config: BackupConfig, *, runner=subprocess.run) -> None:
+    """Require a separate mounted staging volume and root-owned OCI encryption attestation."""
+    staging_root = config.staging_root
+    if staging_root.is_symlink() or not staging_root.is_dir():
+        raise BackupConfigurationError("Backup staging root must be a mounted directory")
+
+    mount_result = runner(
+        [
+            "findmnt",
+            "--noheadings",
+            "--raw",
+            "--output",
+            "TARGET,MAJ:MIN,SOURCE",
+            "--mountpoint",
+            str(staging_root),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    mount_fields = mount_result.stdout.strip().split(maxsplit=2)
+    if mount_result.returncode != 0 or len(mount_fields) != 3:
+        raise BackupConfigurationError(
+            "Backup staging root must be a dedicated encrypted staging mountpoint"
+        )
+    mounted_target, staging_device_id, mounted_source = mount_fields
+    if Path(mounted_target).resolve() != staging_root.resolve():
+        raise BackupConfigurationError("Backup staging path is not the exact mounted volume root")
+
+    root_result = runner(
+        ["findmnt", "--noheadings", "--raw", "--output", "MAJ:MIN,SOURCE", "--target", "/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    root_fields = root_result.stdout.strip().split(maxsplit=1)
+    if root_result.returncode != 0 or len(root_fields) != 2:
+        raise BackupConfigurationError("Could not verify the system-root filesystem")
+    root_device_id, root_source = root_fields
+    if (
+        root_device_id == staging_device_id
+        or root_source == mounted_source
+        or mounted_source.startswith(root_source + "[")
+    ):
+        raise BackupConfigurationError("Backup staging must use a different filesystem from the system root")
+
+    try:
+        attestation_info = config.staging_attestation_file.lstat()
+    except OSError as exc:
+        raise BackupConfigurationError("Verified staging encryption attestation is unavailable") from exc
+    if stat.S_ISLNK(attestation_info.st_mode) or not stat.S_ISREG(attestation_info.st_mode):
+        raise BackupConfigurationError("Staging encryption attestation must be a regular file")
+    if stat.S_IMODE(attestation_info.st_mode) & 0o077:
+        raise BackupConfigurationError("Staging encryption attestation permissions must be 0600 or stricter")
+    if hasattr(os, "geteuid") and os.geteuid() == 0 and attestation_info.st_uid != 0:
+        raise BackupConfigurationError("Staging encryption attestation must be root-owned")
+    try:
+        attestation = json.loads(config.staging_attestation_file.read_text(encoding="utf-8"))
+        verified_at = datetime.fromisoformat(attestation.get("verified_at", "").replace("Z", "+00:00"))
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, ValueError) as exc:
+        raise BackupConfigurationError("Staging encryption attestation is invalid") from exc
+    if (
+        not isinstance(attestation, dict)
+        or attestation.get("provider") != "OCI"
+        or attestation.get("mountpoint") != str(staging_root.resolve())
+        or attestation.get("source") != mounted_source
+        or attestation.get("encrypted_at_rest") is not True
+        or not str(attestation.get("volume_ocid", "")).startswith("ocid1.volume.")
+        or not str(attestation.get("kms_key_ocid", "")).startswith("ocid1.key.")
+        or not str(attestation.get("verified_by", "")).strip()
+        or not str(attestation.get("verification_reference", "")).strip()
+        or verified_at.tzinfo is None
+    ):
+        raise BackupConfigurationError("Staging encryption attestation does not match the mounted volume")
+
+
 def discover_production_source(config: BackupConfig, runner=subprocess.run) -> tuple[Path, str]:
     """Verify the named production volume is mounted at /app/data and get image id."""
     template = '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Name}}|{{.Source}}{{end}}{{end}}'
@@ -424,7 +548,7 @@ def discover_production_source(config: BackupConfig, runner=subprocess.run) -> t
         check=False,
     )
     image_id = image_result.stdout.strip()
-    if image_result.returncode != 0 or not image_id:
+    if image_result.returncode != 0 or not _IMAGE_ID_RE.fullmatch(image_id):
         raise BackupConfigurationError("Could not identify the running production backend image")
     return source_root, image_id
 
@@ -538,6 +662,7 @@ def _run_backup_unlocked(
             config,
             candidate,
             source_host=socket.gethostname(),
+            source_image_id=image_id,
             run_tag=run_tag,
             runner=runner,
         )

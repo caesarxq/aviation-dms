@@ -40,14 +40,14 @@ Run `43227041924` completed with backend tests, frontend tests, and image build 
 - Corrected Compose port merging: staging config now renders only `8001`/`8081`, not both those ports and base `8000`/`8080`. Production renders `8000`/`8080`. Caddy is profile-gated for local standalone use; OCI uses bastion Caddy.
 - Corrected trusted proxy IPs to the exact bastion private peer address and changed Caddy forwarding to `{remote_host}`, which supplies a parseable IP to the rate limiter.
 - Production deployment now fails closed unless a production-specific backup helper exists and succeeds; it no longer tears down the running stack on health failure.
-- The production-specific helper and systemd service/timer are now installed at the expected paths on `roc-app`; `systemd-analyze verify` passed. The timer is disabled. The host lacks Restic, the backup SSH identity, pinned off-host host key, and `/etc/kfl-aviation-dms-prod/backup.env`; no backup was run. The candidate off-host target and OCI-managed volume policies were not independently verified.
+- The production-specific helper and systemd service/timer are now installed at the expected paths on `roc-app`; `systemd-analyze verify` passed. The timer is disabled. The host lacks Restic, the backup SSH identity, pinned off-host host key, `/etc/kfl-aviation-dms-prod/backup.env`, a dedicated encrypted staging mount, and the staging encryption attestation; no backup was run. The candidate off-host target and OCI-managed volume policies were not independently verified.
 - Production SMTP source is `/run/secrets/smtp_pass` on host `/run` tmpfs. Its contents were not read or changed. After approval, permissions were hardened to `root:10001` `0440`; the backend can read it. The running container has `NOTIFICATION_ENABLED=true` but no `SMTP_PASS_FILE` value; the app then falls back to `SMTP_PASS`, which I did not inspect. A direct test of the new Zoho credential for `info@kfl.ke` was accepted and the owner-provided screenshot confirms receipt, but production is not switched to it. The `/run` path may not survive reboot.
 - Prepared Zoho SMTP examples using `SMTP_PASS_SECRET_FILE` and no password value; those files are excluded from this PR until the public secret-bearing diff can be handled safely.
 - Fixed the isolated-database harness for `test_seed_audit_findings.py` and removed that file from CI exclusions.
 
 ### Verification run
 
-- Backend suite: `567 passed, 1 skipped` (Python 3.11; one existing warning).
+- Backend suite: `571 passed, 1 skipped` (Python 3.11; one existing warning).
 - Staging and production Compose render/validation passed; rendered host ports match their intended values and Caddy is absent from default OCI service sets.
 - Deployment shell scripts pass `bash -n`; workflow YAML parses; `git diff --check` passes.
 - Staging and production application containers were not deployed or restarted. The production helper files and disabled units were installed; no backup was run.
@@ -87,16 +87,16 @@ Terraform was removed at the owner's direction. Keep OCI changes manual until th
 
 - `stage.kfl.ke` and `roc.kfl.ke` returned HTTP 200 at the time of this evaluation; public TCP probes for ports `111`, `8000`, `8001`, `8080`, and `8081` were closed/filtered.
 - Recent Actions runs failed at staging deployment; image builds and backend/frontend tests passed.
-- Branch protection now requires strict PR checks, zero approval votes, and applies to administrators. Confirm the local `pull_request` workflow update is published and all three required checks run on a PR before attempting merge.
-- Production promotion remains blocked: the production-specific backup helper is absent and no DMS-specific scheduled job was found on the host.
-- The local remediation is uncommitted and has not been deployed.
+- Branch protection requires strict PR checks, zero approval votes, and applies to administrators. The `pull_request` workflow is published; required checks passed on committed head `3643168`. The current local backup fixes still need their own CI run before merge.
+- Production promotion remains blocked: the production-specific helper and systemd units are installed, but the timer is disabled. Restic, repository credentials, pinned SSH identity/host key, dedicated encrypted staging mount/attestation, retention approval, and an isolated restore are still missing; no backup was run.
+- PR #1 remains draft. The final security-review fixes are local and must pass CI before they are pushed; no production application deploy or restart occurred.
 
 ---
 
 ## Next Steps (Priority Order)
 
-1. Rotate the SMTP credential referenced by the public repository history; decide separately whether to rewrite public history.
-2. Publish the local workflow changes through the authorized PR path; verify the three required checks report before merge. The new workflow is not yet on `main`.
+1. Complete production SMTP rotation after the backup gate; decide separately whether to remediate public repository history.
+2. Push the final reviewed backup changes to draft PR #1, verify the required checks, and merge only after the production gates and owner approvals are satisfied.
 3. Do not deploy staging until the explicit workflow input is authorized; then validate the four service health checks and HTTPS endpoint.
-4. Provision and validate the production-specific backup helper against the production volume and off-host target before enabling production promotion.
+4. Provision the dedicated encrypted staging volume, verify the off-host target and host key, approve recovery/retention targets, then run and restore a manual backup before enabling the timer or production promotion.
 5. Public TCP probes show ports `111`, `8000`, `8001`, `8080`, and `8081` closed/filtered. Confirm the OCI NSG/security-list rules match that intent; UDP/111 was not tested.
