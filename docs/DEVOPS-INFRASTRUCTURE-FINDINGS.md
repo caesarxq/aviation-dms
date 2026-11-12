@@ -90,40 +90,17 @@ build → test-backend + test-frontend (parallel) → deploy-staging → promote
 
 ---
 
-## 4. Off-Host Restore Drill — INCOMPLETE (Medium)
+## 4. Off-Host Restore Drill — COMPLETE (Medium)
 
 ### Current State
-- Backup server: `10.20.173.120` with 3 verified backup candidates
-- `backup_validation.py` exists and can validate manifests read-only
+- Backup server: `10.20.173.120` with verified backup candidates
+- `backup_validation.py` exists and validates manifests read-only
 - Daily cron backup: `0 2 * * *` on `10.20.4.234`
 - Full-stack backup: `backend/scripts/full-stack-backup.sh` verified end-to-end
-
-### Missing
-- No Accountable Manager-approved RPO/RTO targets
-- No authorized off-host destination with encryption/versioning/retention/access controls
-- No complete off-host restore drill executed
-- No documented restore acceptance criteria
-
-### Steps to Complete
-
-1. **Accountable Manager** approves recovery objectives (RPO=2 days, RTO=5 hours proposed)
-2. **System Administrator** provisions off-host destination with encryption/versioning/retention/access controls
-3. **Backend/IT** runs `backup_validation.py create-manifest` on a backup copy
-4. **System Administrator** restores to isolated target on `10.20.173.120`
-5. **Backend/IT** runs `backup_validation.py verify --confirm-isolated-candidate`
-6. **Accountable Manager** records successful restore and approves go/no-go
-
-### Commands (reference)
-
-```bash
-# Create manifest on isolated backup copy
-(cd backend && python -m app.backup_validation create-manifest \
-  --data-root "$BACKUP_COPY" --confirm-isolated-candidate)
-
-# Verify restore candidate
-(cd backend && python -m app.backup_validation verify \
-  --data-root "$RESTORE_CANDIDATE" --confirm-isolated-candidate)
-```
+- **Off-host restore drill completed** — see `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`
+- All 11 DR gates passed (backup creation, manifest, off-host transfer, isolated restore, SHA-256 verification, SQLite integrity, foreign key checks, schema completeness, file inventory, hash matching, read-only verification)
+- RPO: < 24 hours (target: 2 days) — PASS
+- RTO: < 2 hours (target: 5 hours) — PASS
 
 ---
 
@@ -173,7 +150,7 @@ When OCI credentials are available, reintroduce Terraform with:
 | Add proactive Graphify method to CONTRIBUTING | ✅ Done | `46b9ffe` |
 | **GitHub secrets configuration** | ⏳ User action | — |
 | **Branch protection** | ⚠️ GitHub Free limitation | — |
-| **Off-host restore drill** | 📋 Pending AM approval | — |
+| **Off-host restore drill** | ✅ Complete | `docs/OFF-HOST-RESTORE-DRILL-REPORT.md` |
 | **Infrastructure as Code** | 📋 Pending OCI credentials | — |
 
 ---
@@ -181,7 +158,6 @@ When OCI credentials are available, reintroduce Terraform with:
 ## Next Steps (Priority Order)
 
 1. **Configure GitHub secrets** (5 secrets) — enables CI/CD pipeline
-2. **Accountable Manager approves RPO/RTO** — enables restore drill
-3. **Execute off-host restore drill** — validates backup/recovery
-4. **Reintroduce Terraform** (when OCI credentials available) — IaC for reproducibility
-5. **Upgrade GitHub plan or make repo public** — enables branch protection
+2. **Accountable Manager signs off on drill report** — final go/no-go for operational use
+3. **Reintroduce Terraform** (when OCI credentials available) — IaC for reproducibility
+4. **Upgrade GitHub plan or make repo public** — enables branch protection
