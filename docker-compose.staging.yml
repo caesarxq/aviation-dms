@@ -8,14 +8,14 @@
 services:
   backend:
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8001:8000"
     environment:
       DEV_MODE: "true"
       FLIGHT_RELEASE_ENABLED: "false"
       SESSION_COOKIE_SECURE: "false"
-      AUTH_ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:8080"
-      CORS_ORIGINS: "http://localhost:5173,http://localhost:8080"
-      PUBLIC_APP_URL: "http://localhost:8080"
+      AUTH_ALLOWED_ORIGINS: "http://localhost:5173,https://stage.kfl.ke"
+      CORS_ORIGINS: "http://localhost:5173,https://stage.kfl.ke"
+      PUBLIC_APP_URL: "https://stage.kfl.ke"
       HOST: "0.0.0.0"
       PORT: "8000"
       DMS_TRUSTED_FRONTEND_IP: "172.31.254.3"
@@ -35,16 +35,15 @@ services:
 
   frontend:
     ports:
-      - "127.0.0.1:8080:80"
+      - "0.0.0.0:8081:80"
 
   https_proxy:
     # Staging uses Caddy with self-signed certs for local HTTPS testing
     environment:
-      DMS_HOSTNAME: "localhost"
+      DMS_HOSTNAME: "stage.kfl.ke"
       ACME_EMAIL: "admin@localhost.local"
     ports:
-      - "127.0.0.1:8443:443"
-      - "127.0.0.1:8081:80"
+      - "0.0.0.0:8081:80"
     volumes:
       - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
