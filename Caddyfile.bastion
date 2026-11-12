@@ -31,7 +31,7 @@ roc.kfl.ke {
     }
 
     # API routes -> production backend (port 8000) with 10 MiB body limit
-    reverse_proxy /api/* <PROD_PRIVATE_IP>:8000 {
+    reverse_proxy /api/* 10.20.1.69:8000 {
         header_up Host {upstream_hostport}
         header_up X-Real-IP {remote}
         header_up X-Forwarded-For {remote}
@@ -39,7 +39,7 @@ roc.kfl.ke {
     }
 
     # All other routes -> production frontend (port 8080) with 1 MiB body limit
-    reverse_proxy <PROD_PRIVATE_IP>:8080 {
+    reverse_proxy 10.20.1.69:8080 {
         header_up Host {upstream_hostport}
         header_up X-Real-IP {remote}
         header_up X-Forwarded-For {remote}
@@ -63,16 +63,16 @@ staging.roc.kfl.ke {
         Referrer-Policy "no-referrer"
     }
 
-    # API routes -> staging backend (port 8000) with 10 MiB body limit
-    reverse_proxy /api/* 10.20.4.234:8000 {
+    # API routes -> staging backend (port 8001) with 10 MiB body limit
+    reverse_proxy /api/* 10.20.4.234:8001 {
         header_up Host {upstream_hostport}
         header_up X-Real-IP {remote}
         header_up X-Forwarded-For {remote}
         header_up X-Forwarded-Proto {scheme}
     }
 
-    # All other routes -> staging frontend (port 8080) with 1 MiB body limit
-    reverse_proxy 10.20.4.234:8080 {
+    # All other routes -> staging frontend (port 8081) with 1 MiB body limit
+    reverse_proxy 10.20.4.234:8081 {
         header_up Host {upstream_hostport}
         header_up X-Real-IP {remote}
         header_up X-Forwarded-For {remote}

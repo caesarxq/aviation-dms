@@ -2597,18 +2597,18 @@ async def seed_db():
                 d,
             )
 
-        # Document classifications (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED)
-        classifications = [
-            ("PUBLIC", "Public Document", 1, 1, 0),
-            ("TEMPLATE", "Template Document", 1, 1, 0),
-            ("CONTROLLED", "Controlled Document", 1, 0, 0),
-            ("KCAA_APPROVED", "KCAA-Approved Manual", 1, 0, 1),
-        ]
-        for c in classifications:
-            await db.execute(
-                "INSERT OR IGNORE INTO document_classifications (code, name, requires_watermark, allow_full_download, requires_approval, created_at) VALUES (?,?,?,?,?,?)",
-                (c[0], c[1], c[2], c[3], c[4], now),
-            )
+            # Document classifications (PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED)
+            classifications = [
+                ("PUBLIC", "Public Document", 1, 1, 0),
+                ("TEMPLATE", "Template Document", 1, 1, 0),
+                ("CONTROLLED", "Controlled Document", 1, 0, 0),
+                ("KCAA_APPROVED", "KCAA-Approved Manual", 1, 0, 1),
+            ]
+            for c in classifications:
+                await db.execute(
+                    "INSERT OR IGNORE INTO document_classifications (code, name, requires_watermark, allow_full_download, requires_approval, created_at) VALUES (?,?,?,?,?,?)",
+                    (c[0], c[1], c[2], c[3], c[4], now),
+                )
             ver_id = f"VER-{d[0]}"
             # Proper content per document instead of minimal placeholder
             doc_content_map = {
@@ -2628,7 +2628,7 @@ async def seed_db():
                 "DOC-014": "# KCAA Form ROC-001 - ROC Application\n\n## 1. Applicant Details\nOrganization name, address, contact person.\n\n## 2. Operation Details\nOperation type, area, altitude, aircraft models.\n\n## 3. Supporting Documents\nOperations Manual, Safety Management Manual, Maintenance Manual.\n\n---\nVersion 01.01.00",
                 "DOC-015": "# KFL Dangerous Goods Acceptance Inspection Checklist\n\n## 1. Shipment Details\nShipment ID, DG class, UN number, shipper, consignee.\n\n## 2. Acceptance Checks\n- Packaging inspected\n- Marking and labeling verified\n- Documentation complete\n- State of charge verified (for batteries)\n\n## 3. Result\nAccepted / Rejected - Inspector signature: __________\n\n---\nVersion 01.01.00",
             }
-            content_text = doc_content_map.get(d[0], f"# {d[1]}\\n\\nVersion 01.01.00")
+            content_text = doc_content_map.get(d[0], f"# {d[1]}\n\nVersion 01.01.00")
             await db.execute(
                 "INSERT INTO document_versions (version_id, document_id, version_number, state, content, kcaa_approved, kcaa_approved_by, kcaa_approved_at, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (ver_id, d[0], "01.01.00", "published", content_text, 0, None, None, now, now, "u-lib", "u-lib"),
