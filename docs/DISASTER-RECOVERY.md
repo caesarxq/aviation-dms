@@ -22,9 +22,9 @@ A successful backup or restore test does **not** constitute operational or regul
 |--------|--------|--------|
 | RPO (Recovery Point Objective) | 2 days | Proposed — pending Accountable Manager approval |
 | RTO (Recovery Time Objective) | 5 hours | Proposed — pending Accountable Manager approval |
-| Backup frequency | Daily | Implemented (cron `0 2 * * *`) |
-| Backup location | `10.20.173.120:~/dms-backups/` | Verified |
-| Off-host encryption | Required | Pending implementation |
+| Backup frequency | Daily at 02:00 UTC | Planned systemd timer; not active |
+| Backup location | Dedicated encrypted Restic repository on an approved off-host target | Destination/key/host identity not configured |
+| Off-host encryption | Required | Restic design prepared; no production Restic installation/configuration |
 
 These targets are **proposed values** and must be approved by the Accountable Manager before operational go/no-go.
 
@@ -34,12 +34,13 @@ These targets are **proposed values** and must be approved by the Accountable Ma
 
 A complete backup includes the entire `/app/data` directory as one set:
 
-- `dms.db` — SQLite database
-- `dms.db-*` — SQLite WAL/SHM files
+- `dms.db` — consistent SQLite online backup (do not raw-copy the live DB)
 - `uploads/` — personnel credential files
 - `kcaa-evidence/` — KCAA approval evidence PDFs
 - `attachments/` — P3 audit evidence attachments
-- Configuration files and security artifacts
+- `document_files/` — source document files and generated extracts
+
+Do not include `.env`, SMTP/bootstrap secrets, SSH keys, TLS private keys, runtime environment values, or Docker images. Versioned configuration and image identifiers are recoverable from Git and the container registry.
 
 **Never copy only `dms.db`.** A consistent backup requires the complete directory.
 
@@ -50,31 +51,25 @@ A complete backup includes the entire `/app/data` directory as one set:
 ### 4.1 Create Backup (Production Instance)
 
 ```bash
-cd /opt/kfl-aviation-dms-prod
-backup_dir="/var/backups/kfl-dms/$(date -u +%Y%m%dT%H%M%SZ)"
-sudo install -d -m 700 "$backup_dir"
-sudo docker compose stop backend
-container_id="$(sudo docker compose ps -aq backend)"
-sudo docker cp "${container_id}:/app/data/." "$backup_dir/"
-sudo docker compose start backend
+sudo /opt/kfl-aviation-dms-prod/scripts/full-stack-backup-prod.sh
 ```
 
-If the copy fails, start the backend immediately with `sudo docker compose start backend`.
+This command is usable only after the production helper's Restic repository, encrypted staging location, password file, dedicated SSH identity, and pinned host key are configured. It uses SQLite's online backup API and candidate verification; it does not stop or restart the backend. It fails closed and does not prune remote snapshots.
 
-### 4.2 Create SHA-256 Manifest
+### 4.2 Candidate Manifest and Verification
 
-Before off-host transfer, create a manifest on the backup copy:
+`full-stack-backup-prod.sh` creates the SHA-256 manifest and validates the isolated candidate before Restic transfer. Do not manually edit the candidate or manifest. For a separately restored candidate, run the read-only verifier:
 
 ```bash
-(cd backend && python -m app.backup_validation create-manifest \
-  --data-root "$BACKUP_COPY" --confirm-isolated-candidate)
+(cd backend && python -m app.backup_validation verify \
+  --data-root "$RESTORE_CANDIDATE" --confirm-isolated-candidate)
 ```
 
 The manifest verifies transfer integrity but is **not** a digital signature or proof of source authenticity.
 
 ### 4.3 Transfer to Off-Host Storage
 
-Encrypt and transfer the backup to access-controlled off-host storage at `10.20.173.120:~/dms-backups/` via bastion `ubuntu@145.241.152.126`.
+The configured Restic SFTP repository must be encrypted, access-controlled, and verified against a pinned SSH host key before any scheduled backup is enabled. The previously reported `10.20.173.120` destination remains a candidate until its host identity, access controls, capacity, encryption, and isolated restore path are re-verified.
 
 ---
 
@@ -135,7 +130,7 @@ A genuine off-host drill requires all of the following before it is considered c
 5. **Restore drill is executed** and validated using `backup_validation.py verify`
 6. **Owner records** the successful restore result
 
-No off-host drill has been completed to date. This remains a blocker for operational go/no-go.
+The owner-reported `OFF-HOST-RESTORE-DRILL-REPORT.md` records a prior manual drill as passed. Production-host inspection found no current DMS backup helper or scheduled job, and the report/validator inventory omitted `document_files/` reference checks. Treat the prior result as owner-reported evidence, not proof of a recurring production backup or full current data-scope validation. Repeat an isolated restore after the production helper is configured.
 
 ---
 

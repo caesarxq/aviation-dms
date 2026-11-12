@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-This policy establishes retention periods, legal hold procedures, and disposition rules for records managed by the KFL Aviation DMS. It applies to all data stored in the DMS database (`/app/data/dms.db`) and associated file roots (`/app/data/uploads/`, `/app/data/kcaa-evidence/`, `/app/data/attachments/`).
+This policy establishes retention periods, legal hold procedures, and disposition rules for records managed by the KFL Aviation DMS. It applies to all data stored in the DMS database (`/app/data/dms.db`) and associated file roots (`/app/data/uploads/`, `/app/data/kcaa-evidence/`, `/app/data/attachments/`, `/app/data/document_files/`).
 
 This policy does **not** constitute operational or regulatory approval. Retention periods are application defaults pending Records Custodian approval and accountable-postholder sign-off.
 
@@ -101,6 +101,7 @@ Disposition (secure destruction) of records past their retention period follows 
 | `/app/data/uploads/` | Personnel credential uploads | RR-023 (36 months) | Records Custodian + legal hold check |
 | `/app/data/kcaa-evidence/` | KCAA approval evidence PDFs | RR-025 (lifetime) | No automatic disposition |
 | `/app/data/attachments/` | P3 audit evidence attachments | RR-025 (lifetime) | No automatic disposition |
+| `/app/data/document_files/` | Source document files and generated extracts | Classification/record schedule pending Records Custodian mapping | No automatic disposition |
 
 Files are never deleted in place. Disposition creates an immutable audit record before deletion.
 

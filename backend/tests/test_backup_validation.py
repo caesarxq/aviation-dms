@@ -14,7 +14,7 @@ def _validation_module():
 
 
 def _candidate(root):
-    for folder in ("uploads", "kcaa-evidence", "attachments"):
+    for folder in ("uploads", "kcaa-evidence", "attachments", "document_files"):
         (root / folder).mkdir(parents=True, exist_ok=True)
     database = root / "dms.db"
     with sqlite3.connect(database) as connection:
@@ -100,6 +100,110 @@ def test_missing_referenced_evidence_blocks_backup_candidate(tmp_path):
 
     assert report["accepted"] is False
     assert report["storage"]["tables"]["personnel_uploads"]["missing_files"] == 1
+
+
+def test_missing_document_file_reference_blocks_backup_candidate(tmp_path):
+    validation = _validation_module()
+    root = tmp_path / "restore-candidate"
+    root.mkdir()
+    database = _candidate(root)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO documents "
+            "(document_id,title,doc_class,owner_id,created_at,updated_at,created_by,updated_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("DOC-1", "Test source", "CONTROLLED", "person-a", "2026-11-12", "2026-11-12", "person-a", "person-a"),
+        )
+        connection.execute(
+            "INSERT INTO document_files "
+            "(file_id,document_id,stored_filename,original_filename,content_type,file_path,file_sha256,file_size,uploaded_by,uploaded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            ("FILE-1", "DOC-1", "source.pdf", "source.pdf", "application/pdf", "/app/data/document_files/source.pdf", "a" * 64, 10, "person-a", "2026-11-12"),
+        )
+    validation.write_backup_manifest(root)
+
+    report = validation.verify_backup_candidate(root)
+
+    assert report["accepted"] is False
+    assert "document_storage_references_require_review" in report["blockers"]
+
+
+def test_missing_section_extract_reference_blocks_backup_candidate(tmp_path):
+    validation = _validation_module()
+    root = tmp_path / "restore-candidate"
+    root.mkdir()
+    database = _candidate(root)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO documents "
+            "(document_id,title,doc_class,owner_id,created_at,updated_at,created_by,updated_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("DOC-1", "Test source", "CONTROLLED", "person-a", "2026-11-12", "2026-11-12", "person-a", "person-a"),
+        )
+        connection.execute(
+            "INSERT INTO document_versions "
+            "(version_id,document_id,version_number,state,created_at,updated_at,created_by,updated_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("VER-1", "DOC-1", "1", "published", "2026-11-12", "2026-11-12", "person-a", "person-a"),
+        )
+        connection.execute(
+            "INSERT INTO section_extractions "
+            "(id,document_version_id,generated_by,storage_key,file_hash,page_count,watermark_applied,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("EXT-1", "VER-1", "person-a", "extracts/section.pdf", "b" * 64, 1, 1, "2026-11-12"),
+        )
+    validation.write_backup_manifest(root)
+
+    report = validation.verify_backup_candidate(root)
+
+    assert report["accepted"] is False
+    assert "document_storage_references_require_review" in report["blockers"]
+
+
+def test_document_files_and_extracts_are_verified_and_accepted(tmp_path):
+    validation = _validation_module()
+    root = tmp_path / "restore-candidate"
+    root.mkdir()
+    database = _candidate(root)
+    document_root = root / "document_files"
+    extract_root = document_root / "extracts"
+    extract_root.mkdir(parents=True)
+    document_bytes = b"controlled source document"
+    extract_bytes = b"watermarked section extract"
+    (document_root / "source.pdf").write_bytes(document_bytes)
+    (extract_root / "section.pdf").write_bytes(extract_bytes)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO documents "
+            "(document_id,title,doc_class,owner_id,created_at,updated_at,created_by,updated_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("DOC-1", "Test source", "CONTROLLED", "person-a", "2026-11-12", "2026-11-12", "person-a", "person-a"),
+        )
+        connection.execute(
+            "INSERT INTO document_versions "
+            "(version_id,document_id,version_number,state,created_at,updated_at,created_by,updated_by) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("VER-1", "DOC-1", "1", "published", "2026-11-12", "2026-11-12", "person-a", "person-a"),
+        )
+        connection.execute(
+            "INSERT INTO document_files "
+            "(file_id,document_id,stored_filename,original_filename,content_type,file_path,file_sha256,file_size,uploaded_by,uploaded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            ("FILE-1", "DOC-1", "source.pdf", "source.pdf", "application/pdf", "/app/data/document_files/source.pdf", hashlib.sha256(document_bytes).hexdigest(), len(document_bytes), "person-a", "2026-11-12"),
+        )
+        connection.execute(
+            "INSERT INTO section_extractions "
+            "(id,document_version_id,generated_by,storage_key,file_hash,page_count,watermark_applied,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("EXT-1", "VER-1", "person-a", "extracts/section.pdf", hashlib.sha256(extract_bytes).hexdigest(), 1, 1, "2026-11-12"),
+        )
+    validation.write_backup_manifest(root)
+
+    report = validation.verify_backup_candidate(root)
+
+    assert report["accepted"] is True
+    assert report["document_storage"]["document_files"]["records"] == 1
+    assert report["document_storage"]["section_extractions"]["records"] == 1
 
 
 def test_backup_candidate_rejects_sqlite_file_without_core_dms_schema(tmp_path):
