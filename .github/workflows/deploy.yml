@@ -35,7 +35,7 @@ env:
   BASTION_HOST: 145.241.152.126
   BASTION_USER: ubuntu
   # Production instance private IP — set via GitHub secret or environment
-  # Obtain from: terraform -chdir=terraform/oci-prod output instance_private_ip
+  # Obtain from: OCI console instance details
   PROD_HOST: ${{ secrets.PROD_HOST || 'prod.kfl.ke' }}
 
 jobs:

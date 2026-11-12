@@ -76,14 +76,13 @@ echo "$IMAGE_OCID" | jq '.'
 
 echo ""
 echo "============================================================"
-echo "USE THIS OCID IN terraform.tfvars:"
+echo "USE THIS OCID IN your OCI configuration:"
 echo "============================================================"
 PRIMARY_OCID=$(echo "$IMAGE_OCID" | jq -r '.[0].id // empty')
 if [ -n "$PRIMARY_OCID" ] && [ "$PRIMARY_OCID" != "null" ]; then
     echo "boot_image_id = \"$PRIMARY_OCID\""
     echo ""
-    echo "To update terraform.tfvars automatically:"
-    echo "  sed -i 's|boot_image_id = .*|boot_image_id = \"$PRIMARY_OCID\"|' terraform/oci-prod/terraform.tfvars"
+    echo "To use this OCID, set it in your OCI instance configuration."
 else
     echo "Could not extract primary OCID. Please copy manually from the output above."
 fi

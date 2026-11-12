@@ -14,8 +14,8 @@
 # ============================================================================
 # PRODUCTION — roc.kfl.ke
 # ============================================================================
-# Proxies to the production OCI instance (private IP from Terraform output).
-# Replace <PROD_PRIVATE_IP> with the actual value from `terraform output instance_private_ip`.
+# Proxies to the production OCI instance (private IP from OCI console).
+# Replace <PROD_PRIVATE_IP> with the actual value from your OCI instance details.
 # ============================================================================
 
 roc.kfl.ke {

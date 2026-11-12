@@ -26,9 +26,6 @@ __pycache__/
 .vscode/
 .idea/
 
-# Terraform (contains OCIDs and secrets)
-terraform/oci-prod/terraform.tfvars
-
 # OS
 .DS_Store
 
