@@ -205,7 +205,8 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "mkdir -p ${{ env.STAGING_DIR }}/scripts"
+            "echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
+             mkdir -p ${{ env.STAGING_DIR }}/scripts"
 
           scp -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
