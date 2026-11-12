@@ -191,13 +191,14 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_staging
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_staging
           ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to staging
         run: |
-          ssh -i ~/.ssh/id_ed25519 \
+          ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
@@ -236,15 +237,16 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_prod
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_prod
           ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
 
       - name: Promote image to production
         run: |
-          ssh -i ~/.ssh/id_ed25519 \
+          ssh -i ~/.ssh/id_prod \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
-            ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }} \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
             "./scripts/promote-to-production.sh ${{ env.IMAGE_TAG }}"
