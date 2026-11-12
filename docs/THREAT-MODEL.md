@@ -15,7 +15,7 @@ The Aviation DMS is a FastAPI + React document management system for KCAA-regula
 - **Frontend** (React 18, TypeScript, Vite) — browser UI
 - **Upload-validator** — isolated container for malware scanning and file validation (UID 10002, read-only root, no DB access)
 - **Clamd** — ClamAV antivirus daemon (internal network, no host port)
-- **Caddy (bastion)** — TLS termination and reverse proxy for `roc.kfl.ke` and `staging.roc.kfl.ke`
+- **Caddy (bastion)** — TLS termination and reverse proxy for `roc.kfl.ke` and `stage.kfl.ke`
 - **SQLite database** — single file at `/app/data/dms.db`, plus `/app/data/uploads/`, `/app/data/kcaa-evidence/`, `/app/data/attachments/`
 - **Backup server** — `10.20.173.120` for off-host backups
 

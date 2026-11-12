@@ -4,7 +4,7 @@
 # Runs on bastion host (145.241.152.126) as the TLS entry point.
 # Proxies:
 #   - roc.kfl.ke     → production backend (new OCI instance)
-#   - staging.roc.kfl.ke → staging backend (10.20.4.234)
+#   - stage.kfl.ke → staging backend (10.20.4.234)
 # ============================================================================
 
 {
@@ -48,12 +48,12 @@ roc.kfl.ke {
 }
 
 # ============================================================================
-# STAGING — staging.roc.kfl.ke
+# STAGING — stage.kfl.ke
 # ============================================================================
 # Proxies to the staging cloud instance (10.20.4.234).
 # ============================================================================
 
-staging.roc.kfl.ke {
+stage.kfl.ke {
     encode gzip zstd
 
     header {
@@ -88,6 +88,6 @@ www.roc.kfl.ke {
     redir https://roc.kfl.ke{uri} permanent
 }
 
-www.staging.roc.kfl.ke {
-    redir https://staging.roc.kfl.ke{uri} permanent
+www.stage.kfl.ke {
+    redir https://stage.kfl.ke{uri} permanent
 }

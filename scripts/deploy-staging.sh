@@ -26,7 +26,7 @@ echo "============================================================"
 
 # --- Export environment variables for compose ---
 export DMS_RELEASE_TAG="${IMAGE_TAG}"
-export DMS_HOSTNAME="staging.roc.kfl.ke"
+export DMS_HOSTNAME="stage.kfl.ke"
 export DMS_CLAMD_HOST="clamd"
 export DMS_CLAMD_PORT="3310"
 export DMS_CLAMD_TIMEOUT_SECONDS="60"
