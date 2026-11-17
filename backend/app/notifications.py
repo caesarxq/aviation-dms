@@ -95,7 +95,7 @@ def send_email(to: str, subject: str, body: str, entity_type: str = None, entity
         if html:
             msg.attach(MIMEText(html, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
             server.starttls(context=ssl.create_default_context())
             if SMTP_USER and SMTP_PASS:
                 server.login(SMTP_USER, SMTP_PASS)

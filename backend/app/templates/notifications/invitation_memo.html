@@ -1,0 +1,202 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title | default("KFL Aviation DMS — Account Invitation Memo") }}</title>
+  <!--[if mso]>
+  <style>
+    .fallback-text { mso-hide: all; }
+  </style>
+  <![endif]-->
+  <style>
+    /* Reset & base */
+    body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      background-color: #f5f7fa;
+      font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: #172b3a;
+      line-height: 1.5;
+      -webkit-text-size-adjust: none;
+    }
+    table { border-collapse: collapse !important; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    td, th { padding: 0; margin: 0; }
+    img { border: 0; display: block; line-height: 100%; outline: none; text-decoration: none; }
+    .external-class { width: 100%; }
+
+    /* Container wrapper */
+    .wrapper { width: 100%; background-color: #f5f7fa; padding: 24px 0; }
+    .content { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #d9e2ec; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(16, 42, 67, 0.04), 0 8px 24px rgba(16, 42, 67, 0.06); }
+
+    /* Header */
+    .header { background-color: #0d2235; padding: 20px 24px; text-align: left; }
+    .logo-cell { vertical-align: middle; }
+    .brand-cell { vertical-align: middle; padding-left: 16px; }
+    .brand-name { font-size: 16px; font-weight: 700; color: #ffffff; line-height: 1.2; margin: 0; }
+    .brand-tagline { font-size: 9px; color: #b7c8d7; line-height: 1.2; margin: 2px 0 0; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    /* Body */
+    .body-cell { padding: 24px; }
+    .greeting { font-size: 14px; color: #172b3a; margin: 0 0 12px; font-weight: 400; }
+    .intro { font-size: 14px; color: #172b3a; margin: 0 0 20px; line-height: 1.6; }
+
+    /* Meta table */
+    .meta-table { width: 100%; margin: 20px 0; border-collapse: collapse; }
+    .meta-table td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; font-size: 13px; }
+    .meta-table td.label { width: 120px; font-weight: 700; color: #526579; background: #f8fafc; text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+    .meta-table td.value { color: #172b3a; font-weight: 600; }
+
+    /* Invite box */
+    .invite-box { background: #e5f1f9; border: 1px dashed #1b7abf; border-radius: 10px; padding: 20px; margin: 24px 0; }
+    .invite-box h3 { margin: 0 0 12px; font-size: 13px; color: #125b91; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    .invite-box p { margin: 0 0 14px; color: #172b3a; font-size: 13px; }
+    .invite-code { display: inline-block; font-family: "IBM Plex Mono", SFMono-Regular, Consolas, monospace; font-size: 16px; font-weight: 700; letter-spacing: 3px; color: #125b91; background: #ffffff; border: 1px solid #1b7abf; padding: 12px 16px; border-radius: 6px; margin-bottom: 14px; }
+    .invite-url { color: #1b7abf; text-decoration: underline; font-size: 12px; word-break: break-all; }
+
+    /* Divider */
+    .divider { height: 1px; background: #d9e2ec; margin: 24px 0; }
+
+    /* Footer */
+    .footer { background-color: #f1f4f7; padding: 16px 24px; border-top: 1px solid #cbd5e1; }
+    .footer-org { font-size: 9px; font-weight: 700; color: #0d2235; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 4px; }
+    .footer-address { font-size: 8px; color: #718096; line-height: 1.4; margin: 0 0 12px; }
+    .footer-disclaimer { font-size: 8px; color: #a0aec0; line-height: 1.4; margin: 0; }
+
+    /* Preheader (hidden) */
+    .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; font-size: 1px; line-height: 1px; max-height: 0; max-width: 0; overflow: hidden; mso-hide: all; }
+
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+      .wrapper { background-color: #0d2235 !important; }
+      .content { background-color: #183b56 !important; border-color: #31546b !important; }
+      .header { background-color: #0d2235 !important; }
+      .body-cell { color: #f2f6fa !important; }
+      .greeting, .intro, .meta-table td.value { color: #f2f6fa !important; }
+      .meta-table td.label { color: #b7c8d7 !important; background: #123653 !important; }
+      .meta-table td { border-bottom-color: #31546b !important; }
+      .invite-box { background: #123653 !important; border-color: #3b82f6 !important; }
+      .invite-box h3, .invite-box p { color: #f2f6fa !important; }
+      .invite-code { background: #0d2235 !important; border-color: #3b82f6 !important; color: #63b3ed !important; }
+      .invite-url { color: #63b3ed !important; }
+      .divider { background-color: #31546b !important; }
+      .footer { background-color: #123653 !important; border-top-color: #31546b !important; }
+      .footer-org { color: #ffffff !important; }
+      .footer-address, .footer-disclaimer { color: #8ca3b5 !important; }
+    }
+
+    /* Mobile */
+    @media only screen and (max-width: 480px) {
+      .wrapper { padding: 12px 0 !important; }
+      .content { border-radius: 0 !important; }
+      .body-cell { padding: 16px !important; }
+      .meta-table td { display: block !important; width: 100% !important; box-sizing: border-box !important; }
+      .meta-table td.label { background: transparent !important; border-bottom: none !important; padding-top: 4px !important; }
+      .meta-table td.value { border-bottom: 1px solid #e2e8f0 !important; padding-bottom: 4px !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Preheader text for inbox preview -->
+  <span class="preheader">KFL Aviation DMS account invitation for {{ recipient_name | default("Recipient") }} — role: {{ role | default("User") }}. Use invite code to complete onboarding.</span>
+
+  <table class="wrapper" role="presentation" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center">
+        <table class="content" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600">
+          <!-- Header -->
+          <tr>
+            <td class="header">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td class="logo-cell" width="60">
+                    <!--[if mso]>
+                    <v:rect xmlns:v="urn:schemas-microsoft-com:vml:v" fill="true" stroke="false" style="width:48px;height:48px;">
+                      <v:fill src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNTAiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCAxNTAgNDgiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0ia2ZsLXdpbmctZ3JhZGllbnQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWI3YWJmIiBzdG9wLW9wYWNpdHk9IjEiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTY2YWE4IiBzdG9wLW9wYWNpdHk9IjEiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBhdGggZD0iTSAxMiA2IEwgMTIgMzggTCA0NiAzOCBMIDQ2IDE0IEwgODAgMTQgTCA4MCA2IFIiIGZpbGw9IiAwZDIyMzUiIC8+PHBhdGggZD0iTSAxMiAzOCBMIDQ2IDM4IEwgNDYgMTQgTCAxMiAxNCBaIiBmaWxsPSIjMWI3YWJmIiAvPjxwYXRoIGQ9Ik0gNDYgMTQgTCA4MCAxNCBMIDgwIDYgTCA0NiA2IFYiIGZpbGw9IiAxNjZhYTgiIC8+PGNpcmNsZSBjeD0iMjkiIGN5PSIyMiIgcj0iMyIgZmlsbD0iI2ZmZmZmIiAvPjxjaXJjbGUgY3g9IjM1IiBjeT0iMjIiIHI9IjMiIGZpbGw9IiNmZmZmZiIgLz48Y2lyY2xlIGN4PSI0MSIgY3k9IjIyIiByPSIzIiBmaWxsPSIjZmZmZmYiIC8+PHRleHQgeD0iOTAiIHk9IjMxIiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMGQyMjM1IiBsZXR0ZXItc3BhY2luZz0iMC41Ij5LRkw8L3RleHQ+PHRleHQgeD0iOTAiIHk9IjQ0IiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjciIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM0NjY3N2YiIGxldHRlci1zcGFjaW5nPSIwLjMiPkFWSUFOQVRJT04gRE1TPC90ZXh0Pjwvc3ZnPg==" type="frame" />
+                    </v:rect>
+                    <![endif]-->
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNTAiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCAxNTAgNDgiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0ia2ZsLXdpbmctZ3JhZGllbnQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWI3YWJmIiBzdG9wLW9wYWNpdHk9IjEiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTY2YWE4IiBzdG9wLW9wYWNpdHk9IjEiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBhdGggZD0iTSAxMiA2IEwgMTIgMzggTCA0NiAzOCBMIDQ2IDE0IEwgODAgMTQgTCA4MCA2IFYiIGZpbGw9IiAwZDIyMzUiIC8+PHBhdGggZD0iTSAxMiAzOCBMIDQ2IDM4IEwgNDYgMTQgTCAxMiAxNCBaIiBmaWxsPSIjMWI3YWJmIiAvPjxwYXRoIGQ9Ik0gNDYgMTQgTCA4MCAxNCBMIDgwIDYgTCA0NiA2IFYiIGZpbGw9IiAxNjZhYTgiIC8+PGNpcmNsZSBjeD0iMjkiIGN5PSIyMiIgcj0iMyIgZmlsbD0iI2ZmZmZmIiAvPjxjaXJjbGUgY3g9IjM1IiBjeT0iMjIiIHI9IjMiIGZpbGw9IiNmZmZmZiIgLz48Y2lyY2xlIGN4PSI0MSIgY3k9IjIyIiByPSIzIiBmaWxsPSIjZmZmZmYiIC8+PHRleHQgeD0iOTAiIHk9IjMxIiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMGQyMjM1IiBsZXR0ZXItc3BhY2luZz0iMC41Ij5LRkw8L3RleHQ+PHRleHQgeD0iOTAiIHk9IjQ0IiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjciIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM0NjY3N2YiIGxldHRlci1zcGFjaW5nPSIwLjMiPkFWSUFOQVRJT04gRE1TPC90ZXh0Pjwvc3ZnPg==" alt="KFL Aviation DMS logo" width="48" height="15" style="display: block; width: 48px; height: 15px;" />
+                  </td>
+                  <td class="brand-cell">
+                    <h1 class="brand-name">KFL Aviation DMS</h1>
+                    <p class="brand-tagline">Document Management System &bull; Nairobi, Kenya</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="body-cell">
+              <p class="greeting">Dear {{ recipient_name | default("Recipient") }},</p>
+
+              <p class="intro">You have been invited to join the KFL Aviation DMS as a <strong>{{ role | default("User") }}</strong>. This memo confirms your account details and provides instructions to complete onboarding.</p>
+
+              <table class="meta-table" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td class="label">Recipient</td>
+                  <td class="value">{{ recipient_name | default("—") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Email</td>
+                  <td class="value">{{ recipient_email | default("—") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Role</td>
+                  <td class="value">{{ role | default("—") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Department</td>
+                  <td class="value">{{ department | default("—") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Issued By</td>
+                  <td class="value">{{ issued_by | default("System Administrator") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Date Issued</td>
+                  <td class="value">{{ issued_at | default("—") }}</td>
+                </tr>
+                <tr>
+                  <td class="label">Expires At</td>
+                  <td class="value">{{ expires_at | default("—") }}</td>
+                </tr>
+              </table>
+
+              <div class="invite-box">
+                <h3>Complete Your Onboarding</h3>
+                <p>Use the invitation code below to set your password and activate your account:</p>
+                <div class="invite-code">{{ invite_code | default("—") }}</div>
+                <p class="invite-url">Login: {{ login_url | default("https://stage.kfl.ke/auth/setup") }}</p>
+                <p style="font-size: 11px; color: #526579; margin: 0;">This invitation code expires on {{ expires_at | default("—") }}. If you did not request this invitation, please contact your system administrator.</p>
+              </div>
+
+              <div class="divider"></div>
+
+              <p style="font-size: 11px; color: #718096; line-height: 1.4; margin: 0;">
+                This is an automated notification from the KFL Aviation DMS. Do not reply to this email.<br />
+                For support, contact your accountable manager or system administrator.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="footer">
+              <p class="footer-org">KFL Aviation DMS</p>
+              <p class="footer-address">KFL Aviation &bull; Nairobi, Kenya &bull; Document Management System</p>
+              <p class="footer-disclaimer">
+                You received this email because you were invited to the KFL Aviation Document Management System.<br />
+                If you have questions, contact your accountable manager or system administrator.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
