@@ -16,6 +16,9 @@ import {
 import { Modal } from "../components/ui/Modal";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/ui/Toast";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 const CLASSIFICATIONS: DocumentClassification[] = [
   {
@@ -75,6 +78,13 @@ const ROLES = [
   "independent_auditor",
   "as_contracted",
 ];
+
+function classificationBadge(code: string) {
+  const variant = code === "KCAA_APPROVED" ? "destructive" : code === "CONTROLLED" ? "secondary" : "default";
+  const bg = code === "KCAA_APPROVED" ? "bg-kfl-status-danger-bg" : code === "CONTROLLED" ? "bg-kfl-status-warning-bg" : "bg-kfl-status-info-bg";
+  const fg = code === "KCAA_APPROVED" ? "text-kfl-status-danger" : code === "CONTROLLED" ? "text-kfl-status-warning" : "text-kfl-status-info";
+  return <Badge variant={variant} className={`badge ${bg} ${fg}`}>{code}</Badge>;
+}
 
 export function DocumentControllerDashboard() {
   const { toast } = useToast();
@@ -167,9 +177,9 @@ export function DocumentControllerDashboard() {
   if (!canManage) {
     return (
       <div className="p-6">
-        <ShieldAlert className="w-12 h-12 text-orange-500" />
-        <h2 className="text-xl font-semibold mt-2">Access Restricted</h2>
-        <p className="text-muted-foreground">
+        <ShieldAlert className="w-12 h-12 text-kfl-status-warning" />
+        <h2 className="text-xl font-semibold mt-2 text-kfl-text">Access Restricted</h2>
+        <p className="text-kfl-muted">
           You do not have permission to manage document classifications and permissions.
           Contact your document controller or system administrator.
         </p>
@@ -181,111 +191,104 @@ export function DocumentControllerDashboard() {
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Document Controller</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-bold text-kfl-text">Document Controller</h1>
+          <p className="text-kfl-muted">
             Manage document classifications, section boundaries, and role-based permissions.
           </p>
         </div>
         {docsLoading ? (
-          <Loader2 className="w-6 h-6 animate-spin" />
+          <Loader2 className="w-6 h-6 animate-spin text-kfl-muted" />
         ) : null}
       </div>
 
       {/* Extraction Requests Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-card p-4 rounded-xl border">
+        <div className="app-surface p-4 rounded-xl border">
           <div className="flex items-center gap-3">
-            <Clock className="w-5 h-5 text-amber-500" />
+            <Clock className="w-5 h-5 text-kfl-status-warning" />
             <div>
-              <div className="text-2xl font-bold">{pendingRequests.length}</div>
-              <div className="text-xs text-muted-foreground">Pending Extraction Requests</div>
+              <div className="text-2xl font-bold text-kfl-text">{pendingRequests.length}</div>
+              <div className="text-xs text-kfl-muted">Pending Extraction Requests</div>
             </div>
           </div>
         </div>
-        <div className="bg-card p-4 rounded-xl border">
+        <div className="app-surface p-4 rounded-xl border">
           <div className="flex items-center gap-3">
-            <CheckCircle className="w-5 h-5 text-green-500" />
+            <CheckCircle className="w-5 h-5 text-kfl-status-info" />
             <div>
-              <div className="text-2xl font-bold">{approvedRequests.length}</div>
-              <div className="text-xs text-muted-foreground">Approved Extractions</div>
+              <div className="text-2xl font-bold text-kfl-text">{approvedRequests.length}</div>
+              <div className="text-xs text-kfl-muted">Approved Extractions</div>
             </div>
           </div>
         </div>
-        <div className="bg-card p-4 rounded-xl border">
+        <div className="app-surface p-4 rounded-xl border">
           <div className="flex items-center gap-3">
-            <XCircle className="w-5 h-5 text-red-500" />
+            <XCircle className="w-5 h-5 text-kfl-status-danger" />
             <div>
-              <div className="text-2xl font-bold">{rejectedRequests.length}</div>
-              <div className="text-xs text-muted-foreground">Rejected Requests</div>
+              <div className="text-2xl font-bold text-kfl-text">{rejectedRequests.length}</div>
+              <div className="text-xs text-kfl-muted">Rejected Requests</div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Documents Table */}
-      <div className="bg-card p-6 rounded-xl border">
-        <h3 className="font-semibold mb-4">Documents</h3>
+      <div className="app-surface p-6 rounded-xl border">
+        <h3 className="font-semibold mb-4 text-kfl-text">Documents</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b">
-                <th className="py-2 font-medium">Document ID</th>
-                <th className="py-2 font-medium">Title</th>
-                <th className="py-2 font-medium">Classification</th>
-                <th className="py-2 font-medium">KCAA Required</th>
-                <th className="py-2 font-medium">Actions</th>
+              <tr className="border-b border-kfl-border">
+                <th className="py-2 font-medium text-kfl-text">Document ID</th>
+                <th className="py-2 font-medium text-kfl-text">Title</th>
+                <th className="py-2 font-medium text-kfl-text">Classification</th>
+                <th className="py-2 font-medium text-kfl-text">KCAA Required</th>
+                <th className="py-2 font-medium text-kfl-text">Actions</th>
               </tr>
             </thead>
             <tbody>
               {docs.map((doc: any) => (
-                <tr key={doc.document_id} className="border-b hover:bg-muted/50">
-                  <td className="py-3 font-mono text-sm">{doc.document_id}</td>
-                  <td className="py-3">{doc.title}</td>
-                  <td className="py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      doc.classification === "KCAA_APPROVED"
-                        ? "bg-amber-100 text-amber-800"
-                        : doc.classification === "CONTROLLED"
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-green-100 text-green-800"
-                    }`}>
-                      {doc.classification}
-                    </span>
-                  </td>
+                <tr key={doc.document_id} className="border-b border-kfl-border hover:bg-kfl-surface-subtle">
+                  <td className="py-3 font-mono text-sm text-kfl-text">{doc.document_id}</td>
+                  <td className="py-3 text-kfl-text">{doc.title}</td>
+                  <td className="py-3">{classificationBadge(doc.classification)}</td>
                   <td className="py-3">
                     {doc.kcaa_approval_required ? (
-                      <span className="text-xs font-medium text-amber-600">Yes</span>
+                      <Badge variant="destructive" className="badge text-xs">Yes</Badge>
                     ) : (
-                      <span className="text-xs text-muted-foreground">No</span>
+                      <Badge variant="outline" className="badge text-xs">No</Badge>
                     )}
                   </td>
                   <td className="py-3">
-                    <button
+                    <Button
                       onClick={() => {
                         setClassifyDocId(doc.document_id);
                         setClassifyCode(doc.classification || "");
                         setShowClassifyModal(true);
                       }}
-                      className="text-sm text-primary hover:underline"
+                      variant="link"
+                      size="sm"
                     >
                       Classify
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => {
                         setPermDocId(doc.document_id);
                         setPermGrants([]);
                         setShowPermModal(true);
                       }}
-                      className="ml-2 text-sm text-primary hover:underline"
+                      variant="link"
+                      size="sm"
+                      className="ml-2"
                     >
                       Permissions
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
               {docs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-4 text-muted-foreground text-center">
+                  <td colSpan={5} className="py-4 text-center text-kfl-muted">
                     No documents found.
                   </td>
                 </tr>
@@ -297,43 +300,44 @@ export function DocumentControllerDashboard() {
 
       {/* Pending Extraction Requests */}
       {pendingRequests.length > 0 && (
-        <div className="bg-card p-6 rounded-xl border">
+        <div className="app-surface p-6 rounded-xl border">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Pending Extraction Approvals</h3>
-            <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded">
+            <h3 className="font-semibold text-kfl-text">Pending Extraction Approvals</h3>
+            <Badge variant="destructive" className="badge text-xs">
               Requires review
-            </span>
+            </Badge>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="border-b">
-                  <th className="py-2 font-medium">Request ID</th>
-                  <th className="py-2 font-medium">Document</th>
-                  <th className="py-2 font-medium">Section</th>
-                  <th className="py-2 font-medium">Requested By</th>
-                  <th className="py-2 font-medium">Reason</th>
-                  <th className="py-2 font-medium">Actions</th>
+                <tr className="border-b border-kfl-border">
+                  <th className="py-2 font-medium text-kfl-text">Request ID</th>
+                  <th className="py-2 font-medium text-kfl-text">Document</th>
+                  <th className="py-2 font-medium text-kfl-text">Section</th>
+                  <th className="py-2 font-medium text-kfl-text">Requested By</th>
+                  <th className="py-2 font-medium text-kfl-text">Reason</th>
+                  <th className="py-2 font-medium text-kfl-text">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingRequests.map((req) => (
-                  <tr key={req.id} className="border-b hover:bg-muted/50">
-                    <td className="py-3 font-mono text-sm">{req.id}</td>
-                    <td className="py-3">{req.document_id}</td>
-                    <td className="py-3">{req.section_id || "—"}</td>
-                    <td className="py-3">{req.requested_by}</td>
-                    <td className="py-3">{req.reason}</td>
+                  <tr key={req.id} className="border-b border-kfl-border hover:bg-kfl-surface-subtle">
+                    <td className="py-3 font-mono text-sm text-kfl-text">{req.id}</td>
+                    <td className="py-3 text-kfl-text">{req.document_id}</td>
+                    <td className="py-3 text-kfl-text">{req.section_id || "—"}</td>
+                    <td className="py-3 text-kfl-text">{req.requested_by}</td>
+                    <td className="py-3 text-kfl-text">{req.reason}</td>
                     <td className="py-3">
-                      <button
+                      <Button
                         onClick={() => {
                           toast({ title: "Approval requires document.extract.approve permission", type: "warning" });
                         }}
-                        className="text-xs bg-amber-500 text-white px-2 py-1 rounded hover:bg-amber-600 disabled:opacity-50"
+                        variant="outline"
+                        size="sm"
                         disabled={!hasPermission("document.extract.approve")}
                       >
                         Approve/Reject
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -352,37 +356,36 @@ export function DocumentControllerDashboard() {
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Document</label>
-            <p className="text-muted-foreground text-sm">{classifyDocId}</p>
+            <label className="block text-sm font-medium mb-2 text-kfl-text">Document</label>
+            <p className="text-kfl-muted text-sm">{classifyDocId}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-2">Classification</label>
-            <select
-              value={classifyCode}
-              onChange={(e) => setClassifyCode(e.target.value)}
-              className="w-full px-3 py-2 border rounded"
-            >
-              {classifications.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.code} - {c.name}
-                </option>
-              ))}
-            </select>
+            <label className="block text-sm font-medium mb-2 text-kfl-text">Classification</label>
+            <Select onValueChange={(e) => setClassifyCode(e)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={classifyCode} />
+              </SelectTrigger>
+              <SelectContent>
+                {classifications.map((c) => (
+                  <SelectItem key={c.code} value={c.code}>
+                    {c.code} - {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setShowClassifyModal(false)}
-              className="px-4 py-2 text-muted-foreground hover:bg-muted"
-            >
+            <Button variant="outline" size="sm" onClick={() => setShowClassifyModal(false)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleClassify}
               disabled={classifyMutation.isPending}
-              className="px-4 py-2 bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
+              variant="default"
+              size="sm"
             >
-              {classifyMutation.isPending ? "Classifying..." : "Save Classification"}
-            </button>
+              {classifyMutation.isPending ? "Classifying…" : "Save Classification"}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -398,10 +401,10 @@ export function DocumentControllerDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="border-b">
-                  <th className="py-2 font-medium">Role</th>
+                <tr className="border-b border-kfl-border">
+                  <th className="py-2 font-medium text-kfl-text">Role</th>
                   {PERMISSIONS.map((p) => (
-                    <th key={p.code} className="py-2 font-medium text-center w-12">
+                    <th key={p.code} className="py-2 font-medium text-center w-12 text-kfl-muted">
                       <span className="text-xs opacity-60">{p.code.replace("document:", "").replace("document.section.", "s.")}</span>
                     </th>
                   ))}
@@ -409,22 +412,18 @@ export function DocumentControllerDashboard() {
               </thead>
               <tbody>
                 {ROLES.map((role) => (
-                  <tr key={role} className="border-b hover:bg-muted/50">
-                    <td className="py-3 font-mono text-sm">{role}</td>
+                  <tr key={role} className="border-b border-kfl-border hover:bg-kfl-surface-subtle">
+                    <td className="py-3 font-mono text-sm text-kfl-text">{role}</td>
                     {PERMISSIONS.map((perm) => (
                       <td key={perm.code} className="py-3 text-center">
-                        <button
+                        <Button
+                          variant={isPermGranted(role, perm.code) ? "default" : "outline"}
+                          size="sm"
+                          className="h-8 w-8 rounded-full p-0"
                           onClick={() => togglePermission(role, perm.code)}
-                          className={`w-8 h-8 rounded-full ${
-                            isPermGranted(role, perm.code)
-                              ? "bg-primary text-white"
-                              : "bg-muted border border-border"
-                          }`}
                         >
-                          {isPermGranted(role, perm.code) && (
-                            <CheckCircle className="w-4 h-4" />
-                          )}
-                        </button>
+                          {isPermGranted(role, perm.code) && <CheckCircle className="w-4 h-4" />}
+                        </Button>
                       </td>
                     ))}
                   </tr>
@@ -432,23 +431,21 @@ export function DocumentControllerDashboard() {
               </tbody>
             </table>
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-kfl-muted">
             Click cells to toggle permissions. Changes apply immediately on save.
           </div>
           <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setShowPermModal(false)}
-              className="px-4 py-2 text-muted-foreground hover:bg-muted"
-            >
+            <Button variant="outline" size="sm" onClick={() => setShowPermModal(false)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleSavePermissions}
               disabled={permMutation.isPending}
-              className="px-4 py-2 bg-primary text-white hover:bg-primary/90 disabled:opacity-50"
+              variant="default"
+              size="sm"
             >
-              {permMutation.isPending ? "Saving..." : "Save Permissions"}
-            </button>
+              {permMutation.isPending ? "Saving…" : "Save Permissions"}
+            </Button>
           </div>
         </div>
       </Modal>

@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import api from "../api/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function ForgotPasswordPage() {
   const [username, setUsername] = useState("");
@@ -34,16 +36,16 @@ export function ForgotPasswordPage() {
         <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="mx-auto mb-5 h-12 w-auto object-contain" />
         <h1 id="forgot-title" className="text-center text-2xl font-bold text-kfl-text">Forgot password</h1>
         <p className="mb-5 mt-2 text-center text-sm text-kfl-muted">Enter your assigned KFL Aviation DMS username to request a password reset.</p>
-        {error && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-        {message && <div role="status" className="mb-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}
+        {error && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">{error}</div>}
+        {message && <div role="status" className="mb-4 rounded-md border border-kfl-status-success-bg bg-kfl-status-success-bg/20 text-kfl-status-success p-3 text-sm">{message}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="forgot-username" className="mb-1 block text-sm font-medium">Assigned username</label>
-            <input id="forgot-username" name="username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="app-input w-full" />
+            <Input id="forgot-username" name="username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="w-full" />
           </div>
-          <button type="submit" disabled={submitting || !username.trim()} className="app-btn-primary w-full disabled:opacity-60">
+          <Button type="submit" disabled={submitting || !username.trim()} variant="default" size="sm" className="w-full disabled:opacity-60">
             {submitting ? "Sending…" : "Request reset"}
-          </button>
+          </Button>
         </form>
         <p className="mt-5 text-center text-sm"><Link to="/login" className="text-kfl-blue underline underline-offset-2">Return to sign in</Link></p>
       </section>

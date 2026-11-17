@@ -2,6 +2,7 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { FileText, Clock, ShieldCheck } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export function OccurrenceDetail() {
   const { occurrenceId } = useParams();
@@ -23,7 +24,7 @@ export function OccurrenceDetail() {
           <p className="app-subtitle">{occ.serial_number} — {occ.status}</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={severityClass(occ.severity)}>{occ.severity}</span>
+          <Badge variant={occ.severity === "catastrophic" || occ.severity === "hazardous" || occ.severity === "major" ? "destructive" : occ.severity === "minor" || occ.severity === "negligible" ? "default" : "secondary"} className={`badge ${occ.severity === "catastrophic" || occ.severity === "hazardous" || occ.severity === "major" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : occ.severity === "minor" || occ.severity === "negligible" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>{occ.severity}</Badge>
         </div>
       </header>
 
@@ -35,13 +36,13 @@ export function OccurrenceDetail() {
         <div className="app-surface p-4">
           <div className="app-label">Severity</div>
           <div className="mt-2 flex items-center gap-2">
-            <span className={severityClass(occ.severity)}>{occ.severity}</span>
+            <Badge variant={occ.severity === "catastrophic" || occ.severity === "hazardous" || occ.severity === "major" ? "destructive" : occ.severity === "minor" || occ.severity === "negligible" ? "default" : "secondary"} className={`badge ${occ.severity === "catastrophic" || occ.severity === "hazardous" || occ.severity === "major" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : occ.severity === "minor" || occ.severity === "negligible" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>{occ.severity}</Badge>
           </div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Status</div>
           <div className="mt-2 flex items-center gap-2">
-            <span className="app-status app-status-info">{occ.status}</span>
+            <Badge variant="outline" className="badge">{occ.status}</Badge>
           </div>
         </div>
         <div className="app-surface p-4">
@@ -94,7 +95,7 @@ export function OccurrenceDetail() {
           <dt className="font-medium text-kfl-muted">Reporter</dt>
           <dd className="font-mono text-kfl-text">
             {occ.reporter_id === "CONFIDENTIAL" ? (
-              <span className="app-status app-status-info">Confidential Reporter</span>
+              <Badge variant="outline" className="badge">Confidential Reporter</Badge>
             ) : (
               occ.reporter_id || "—"
             )}
@@ -107,15 +108,4 @@ export function OccurrenceDetail() {
       </section>
     </div>
   );
-}
-
-function severityClass(severity: string) {
-  switch (severity) {
-    case "catastrophic": return "app-status app-status-critical";
-    case "hazardous": return "app-status app-status-warning";
-    case "major": return "app-status app-status-warning";
-    case "minor": return "app-status app-status-info";
-    case "negligible": return "app-status app-status-healthy";
-    default: return "app-status app-status-info";
-  }
 }

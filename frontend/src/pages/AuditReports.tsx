@@ -7,6 +7,10 @@ import { FileText, Plus, RefreshCw } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useAuth } from "../auth/AuthContext";
 import { AuditReportImportWorkflow } from "../components/AuditReportImportWorkflow";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 const AUDIT_REPORT_PAGE_SIZE = 50;
 const AUDIT_REPORT_STATUSES = ["open", "in_progress", "closed", "cancelled"];
@@ -72,18 +76,20 @@ export function AuditReports() {
             View and manage audit engagements and their findings.
           </p>
         </div>
-        {hasPermission("audit_report:create") && <button
+        {hasPermission("audit_report:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Audit"}
-        </button>}
-        <button
+        </Button>}
+        <Button
           onClick={() => qc.invalidateQueries({ queryKey: ["audit-reports"] })}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
         >
           <RefreshCw size={16} /> Refresh
-        </button>
+        </Button>
       </header>
 
       {showForm && (
@@ -95,15 +101,16 @@ export function AuditReports() {
                 Record a new internal or external audit engagement.
               </p>
             </div>
-            <button
+            <Button
               type="button"
               onClick={() => { setShowForm(false); setMutationError(""); }}
-              className="app-btn-secondary px-4 py-2 text-sm"
+              variant="outline"
+              size="sm"
             >
               Cancel
-            </button>
+            </Button>
           </div>
-          {mutationError && <p role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{mutationError}</p>}
+          {mutationError && <p role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{mutationError}</p>}
           <div className="space-y-3 mb-4">
             <FormField
               htmlFor="audit_number"
@@ -111,10 +118,9 @@ export function AuditReports() {
               hint="e.g. SS-KFL-SEP 2026"
               required
             >
-              <input
+              <Input
                 id="audit_number"
                 name="audit_number"
-                className="app-input"
                 placeholder="SS-KFL-SEP 2026"
                 value={auditNumber}
                 onChange={(e) => setAuditNumber(e.target.value)}
@@ -126,44 +132,41 @@ export function AuditReports() {
               hint="Historical source audits must use the provenance import workflow."
               required
             >
-              <input
+              <Input
                 id="audit_date"
                 name="audit_date"
                 type="date"
-                className="app-input"
                 min={todayUtc}
                 value={auditDate}
                 onChange={(e) => setAuditDate(e.target.value)}
               />
             </FormField>
             <FormField htmlFor="auditor_id" label="Auditor User ID" hint="Must be an active independent_auditor account." required>
-              <input id="auditor_id" name="auditor_id" className="app-input" value={auditorId} onChange={(event) => setAuditorId(event.target.value)} autoComplete="off" />
+              <Input id="auditor_id" name="auditor_id" value={auditorId} onChange={(event) => setAuditorId(event.target.value)} autoComplete="off" />
             </FormField>
             <FormField htmlFor="auditee_id" label="Auditee User ID" hint="Must be an active account and different from the auditor." required>
-              <input id="auditee_id" name="auditee_id" className="app-input" value={auditeeId} onChange={(event) => setAuditeeId(event.target.value)} autoComplete="off" />
+              <Input id="auditee_id" name="auditee_id" value={auditeeId} onChange={(event) => setAuditeeId(event.target.value)} autoComplete="off" />
             </FormField>
             <FormField htmlFor="scope" label="Scope" hint="e.g. Safety and Security">
-              <input
+              <Input
                 id="scope"
                 name="scope"
-                className="app-input"
                 placeholder="Safety and Security"
                 value={scope}
                 onChange={(e) => setScope(e.target.value)}
               />
             </FormField>
             <FormField htmlFor="regulatory_basis" label="Regulatory Basis">
-              <input
+              <Input
                 id="regulatory_basis"
                 name="regulatory_basis"
-                className="app-input"
                 placeholder="e.g. KCARs 2018, KCAA CL: O-SMS003"
                 value={regulatoryBasis}
                 onChange={(e) => setRegulatoryBasis(e.target.value)}
               />
             </FormField>
           </div>
-          <button
+          <Button
             type="button"
             disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
             onClick={() =>
@@ -176,10 +179,12 @@ export function AuditReports() {
                 regulatory_basis: regulatoryBasis || undefined,
               })
             }
-            className="app-btn-primary w-full disabled:opacity-60"
+            variant="default"
+            size="sm"
+            className="w-full disabled:opacity-60"
           >
             {createMutation.isPending ? "Creating…" : "Create Audit"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -190,19 +195,26 @@ export function AuditReports() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" className="app-input" value={search} onChange={(event) => { setSearch(event.target.value); setReportOffset(0); }} placeholder="Search audit reports…" />
+            <Input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" value={search} onChange={(event) => { setSearch(event.target.value); setReportOffset(0); }} placeholder="Search audit reports…" />
           </div>
-          <select id="audit-report-status" name="status" aria-label="Filter audit reports by status" className="app-input w-full md:w-auto" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setReportOffset(0); }}>
-            <option value="">All statuses</option>
-            {AUDIT_REPORT_STATUSES.map((status) => <option key={status} value={status}>{status.replace(/_/g, " ")}</option>)}
-          </select>
+          <Select onValueChange={(e) => { setStatusFilter(e); setReportOffset(0); }}>
+            <SelectTrigger id="audit-report-status" name="status" aria-label="Filter audit reports by status">
+              <SelectValue placeholder={statusFilter || "All statuses"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All statuses</SelectItem>
+              {AUDIT_REPORT_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <div className="text-sm font-semibold text-kfl-text">Audit Reports</div>
         </div>
 
         {isError ? (
           <div className="p-10 text-center" role="alert">
             <p className="text-sm font-semibold text-rose-800">Unable to load audit reports.</p>
-            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3" aria-label="Retry loading audit reports">Retry</button>
+            <Button onClick={() => void refetch()} variant="outline" size="sm" className="mt-3" aria-label="Retry loading audit reports">
+              Retry
+            </Button>
           </div>
         ) : isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">
@@ -253,15 +265,9 @@ export function AuditReports() {
                       {r.scope || "—"}
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`app-status ${
-                          r.status === "open"
-                            ? "app-status-warning"
-                            : "app-status-healthy"
-                        }`}
-                      >
+                      <Badge variant={r.status === "open" ? "secondary" : "default"} className={`badge ${r.status === "open" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>
                         {r.status.replace(/_/g, " ").toUpperCase()}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-right text-sm">
                       <div className="flex items-center justify-end gap-3">
@@ -294,24 +300,26 @@ export function AuditReports() {
               Showing {reportOffset + 1}–{reportOffset + reports.length}
             </span>
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
-                className="app-btn-secondary"
+                variant="outline"
+                size="sm"
                 aria-label="Previous audit reports"
                 disabled={reportOffset === 0 || isFetching}
                 onClick={() => setReportOffset(Math.max(0, reportOffset - AUDIT_REPORT_PAGE_SIZE))}
               >
                 Previous
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="app-btn-secondary"
+                variant="outline"
+                size="sm"
                 aria-label="Next audit reports"
                 disabled={!hasNextPage || isFetching}
                 onClick={() => setReportOffset(reportOffset + AUDIT_REPORT_PAGE_SIZE)}
               >
                 Next
-              </button>
+              </Button>
             </div>
           </footer>
         )}

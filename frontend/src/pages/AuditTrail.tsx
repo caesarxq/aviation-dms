@@ -2,18 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { ScrollText } from "lucide-react";
-
-function actionClass(action: string) {
-  switch (action.toLowerCase()) {
-    case "created": return "app-status app-status-healthy";
-    case "updated": return "app-status app-status-warning";
-    case "deleted": return "app-status app-status-critical";
-    case "approved": return "app-status app-status-healthy";
-    case "rejected": return "app-status app-status-critical";
-    case "published": return "app-status app-status-healthy";
-    default: return "app-status app-status-info";
-  }
-}
+import { Badge } from "@/components/ui/badge";
 
 export function AuditTrail() {
   const [entityType, setEntityType] = useState("");
@@ -104,7 +93,9 @@ export function AuditTrail() {
                       <span className="text-kfl-muted ml-1">{ev.entity_id}</span>
                     </td>
                     <td className="px-4 py-4">
-                      <span className={actionClass(ev.action)}>{ev.action}</span>
+                      <Badge variant={ev.action === "deleted" || ev.action === "rejected" ? "destructive" : ev.action === "created" || ev.action === "approved" || ev.action === "published" ? "default" : "secondary"} className={`badge ${ev.action === "deleted" || ev.action === "rejected" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : ev.action === "created" || ev.action === "approved" || ev.action === "published" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>
+                        {ev.action}
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{ev.actor_id}</td>
                     <td className="px-4 py-4 text-xs text-kfl-muted max-w-xs truncate">{ev.details || "—"}</td>

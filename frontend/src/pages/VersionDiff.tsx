@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../api/client";
 import { InlineSuggestionView } from "../components/documents/InlineSuggestionView";
 import { htmlToText } from "../utils/diff";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function VersionDiff() {
   const [docId, setDocId] = useState("");
@@ -43,24 +44,39 @@ export function VersionDiff() {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Document</label>
-            <select id="docid_46" name="docid" className="border border-kfl-border rounded p-2 text-sm w-full" value={docId} onChange={e => { setDocId(e.target.value); setVersionA(""); setVersionB(""); }}>
-              <option value="">— Select document —</option>
-              {docs.map((d: any) => <option key={d.document_id} value={d.document_id}>{d.document_id} — {d.title}</option>)}
-            </select>
+            <Select onValueChange={(e) => { setDocId(e); setVersionA(""); setVersionB(""); }}>
+              <SelectTrigger id="docid_46" name="docid">
+                <SelectValue placeholder={docId || "— Select document —"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— Select document —</SelectItem>
+                {docs.map((d: any) => <SelectItem key={d.document_id} value={d.document_id}>{d.document_id} — {d.title}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Version A (left)</label>
-            <select id="versiona_53" name="versiona" className="border border-kfl-border rounded p-2 text-sm w-full" value={versionA} onChange={e => setVersionA(e.target.value)} disabled={!docId}>
-              <option value="">— Select version —</option>
-              {versions.map((v: any) => <option key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</option>)}
-            </select>
+            <Select disabled={!docId} onValueChange={(e) => setVersionA(e)}>
+              <SelectTrigger id="versiona_53" name="versiona">
+                <SelectValue placeholder="— Select version —" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— Select version —</SelectItem>
+                {versions.map((v: any) => <SelectItem key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <label className="text-sm font-semibold text-kfl-muted mb-2 block">Version B (right)</label>
-            <select id="versionb_60" name="versionb" className="border border-kfl-border rounded p-2 text-sm w-full" value={versionB} onChange={e => setVersionB(e.target.value)} disabled={!docId}>
-              <option value="">— Select version —</option>
-              {versions.map((v: any) => <option key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</option>)}
-            </select>
+            <Select disabled={!docId} onValueChange={(e) => setVersionB(e)}>
+              <SelectTrigger id="versionb_60" name="versionb">
+                <SelectValue placeholder="— Select version —" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— Select version —</SelectItem>
+                {versions.map((v: any) => <SelectItem key={v.version_id} value={v.version_id}>{v.version_number} ({v.state})</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </div>

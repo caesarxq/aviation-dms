@@ -90,7 +90,7 @@ export function Modal({ open, onClose, title, className, description = "Complete
       <div
         ref={panelRef}
         tabIndex={-1}
-        className={`relative w-full max-w-lg mx-4 p-3 bg-white rounded-2xl shadow-2xl border border-kfl-border animate-in fade-in zoom-in duration-200 ${className || ""}`}
+        className={`relative w-full max-w-lg mx-4 p-3 bg-kfl-surface rounded-2xl shadow-2xl border border-kfl-border animate-in fade-in zoom-in duration-200 ${className || ""}`}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (

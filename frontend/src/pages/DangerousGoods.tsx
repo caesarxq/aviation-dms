@@ -5,18 +5,13 @@ import { Plus, Package, Share2 } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { DGResponsibilityMatrixModal } from "../components/ui/modals/DGResponsibilityMatrixModal";
+import { filterBySearch, filterByStatus } from "../utils/filters";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
-
-function dgStatusClass(status: string) {
-  switch (status) {
-    case "accepted": return "app-status app-status-healthy";
-    case "pending": return "app-status app-status-info";
-    case "rejected": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 export function DangerousGoods() {
   const qc = useQueryClient();
@@ -35,11 +30,7 @@ export function DangerousGoods() {
   const [dirty, setDirty] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const filteredShipments = useMemo(() => shipments.filter((shipment: any) => {
-    const query = search.trim().toLowerCase();
-    return (!query || [shipment.shipment_id, shipment.proper_shipping_name, shipment.dg_class, shipment.un_number].some((value) => String(value ?? "").toLowerCase().includes(query))) &&
-      (!statusFilter || shipment.status === statusFilter);
-  }), [shipments, search, statusFilter]);
+  const filteredShipments = useMemo(() => filterByStatus(filterBySearch(shipments as { status?: string }[], search, ["shipment_id", "proper_shipping_name", "dg_class", "un_number"]), statusFilter), [shipments, search, statusFilter]);
 
   const { errors: dgShipFieldErrors, isValid: dgShipIsValid } = useValidation(
     { proper_shipping_name: properShippingName, dg_class: dgClass },
@@ -76,18 +67,20 @@ export function DangerousGoods() {
           <h1 className="app-title">Dangerous Goods Shipments</h1>
           <p className="app-subtitle">Track DG shipments, acceptance checks, and training records.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Shipment"}
-        </button>}
-        {hasPermission("safety:create") && <button
+        </Button>}
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowDGModal(true)}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
         >
           <Share2 size={16} /> Assign DG Responsibility
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -109,16 +102,9 @@ export function DangerousGoods() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Package size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input id="search_shipments_88" name="search_shipments"
-              value={search}
-              type="search"
-              aria-label="Search shipments"
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search shipments…"
-              className="app-input pl-9 relative z-10"
-            />
+            <Input id="search_shipments_88" name="search_shipments" type="search" aria-label="Search shipments" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search shipments…" className="pl-9 relative z-10" />
           </div>
-          <select id="select_field_95" name="status" aria-label="Filter shipments by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-full md:w-auto">
+          <select id="select_field_95" name="status" aria-label="Filter shipments by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="accepted">Accepted</option>
@@ -133,36 +119,40 @@ export function DangerousGoods() {
                 <div className="app-label mb-1">New DG Shipment</div>
                 <p className="text-xs text-kfl-muted">Register a dangerous goods shipment for acceptance.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {dgError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {dgError}
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="field_120" label="Proper shipping name" hint="Use the name shown in the dangerous goods declaration." required>
-                <input id="field_120" name="proper_shipping_name" aria-describedby="field_120-error" aria-invalid={!!dgShipFieldErrors.proper_shipping_name} className={`app-input ${dgShipFieldErrors.proper_shipping_name ? "border-rose-400" : ""}`} placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => { setProperShippingName(e.target.value); setDirty(true); }} />
+                <Input id="field_120" name="proper_shipping_name" aria-describedby="field_120-error" aria-invalid={!!dgShipFieldErrors.proper_shipping_name} className={dgShipFieldErrors.proper_shipping_name ? "border-rose-400" : ""} placeholder="Lithium ion batteries" value={properShippingName} onChange={(e) => { setProperShippingName(e.target.value); setDirty(true); }} />
                 {dgShipFieldErrors.proper_shipping_name && <p id="field_120-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.proper_shipping_name}</p>}
               </FormField>
               <FormField htmlFor="field_124" label="DG class" hint="Enter the applicable hazard class, for example Class 3." required>
-                <input id="field_124" name="dg_class" aria-describedby="field_124-error" aria-invalid={!!dgShipFieldErrors.dg_class} className={`app-input ${dgShipFieldErrors.dg_class ? "border-rose-400" : ""}`} placeholder="Class 3" value={dgClass} onChange={(e) => { setDgClass(e.target.value); setDirty(true); }} />
+                <Input id="field_124" name="dg_class" aria-describedby="field_124-error" aria-invalid={!!dgShipFieldErrors.dg_class} className={dgShipFieldErrors.dg_class ? "border-rose-400" : ""} placeholder="Class 3" value={dgClass} onChange={(e) => { setDgClass(e.target.value); setDirty(true); }} />
                 {dgShipFieldErrors.dg_class && <p id="field_124-error" className="text-[11px] text-rose-700 mt-1">{dgShipFieldErrors.dg_class}</p>}
               </FormField>
               <FormField htmlFor="field_128" label="UN number" hint="Use the four-digit UN number where applicable.">
-                <input id="field_128" name="un_number" className="app-input" placeholder="UN3480" value={unNumber} onChange={(e) => { setUnNumber(e.target.value); setDirty(true); }} />
+                <Input id="field_128" name="un_number" placeholder="UN3480" value={unNumber} onChange={(e) => { setUnNumber(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
-            <button
+            <Button
               disabled={!dgShipIsValid || createMutation.isPending}
               onClick={() => {
                 setDgError("");
                 createMutation.mutate({ proper_shipping_name: properShippingName, dg_class: dgClass, un_number: unNumber });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create Shipment"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -196,7 +186,7 @@ export function DangerousGoods() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{s.dg_class}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{s.un_number || "—"}</td>
                     <td className="px-4 py-4">
-                      <span className={dgStatusClass(s.status)}>{s.status}</span>
+                      <Badge variant={s.status === "accepted" ? "default" : s.status === "rejected" ? "destructive" : "secondary"} className={`badge ${s.status === "accepted" ? "bg-kfl-status-info-bg text-kfl-status-info" : s.status === "rejected" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>{s.status}</Badge>
                     </td>
                   </tr>
                 ))}

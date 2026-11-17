@@ -7,17 +7,9 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
-
-function missionStatusClass(status: string) {
-  switch (status) {
-    case "completed": return "app-status app-status-healthy";
-    case "in_progress": return "app-status app-status-info";
-    case "planned": return "app-status app-status-info";
-    case "cancelled": return "app-status app-status-critical";
-    case "aborted": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 const STATUS_ACTIONS: Record<string, { label: string; state: string; tone: "blue" | "green" | "red" }[]> = {
   planned: [
@@ -135,16 +127,17 @@ export function Missions() {
           <h1 className="app-title">Missions</h1>
           <p className="app-subtitle">Create planned mission records and track their lifecycle. Mission creation does not authorize flight.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           type="button"
           onClick={() => { setShowForm(!showForm); setMissionError(""); }}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Mission"}
-        </button>}
+        </Button>}
       </header>
 
-      {summaryError && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Unable to load mission metrics. <button type="button" className="font-semibold underline" onClick={() => void refetchSummary()}>Retry mission metrics</button></div>}
+      {summaryError && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">Unable to load mission metrics. <button type="button" className="font-semibold underline text-kfl-text" onClick={() => void refetchSummary()}>Retry mission metrics</button></div>}
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="app-surface p-4">
           <div className="app-label">Total Missions</div>
@@ -167,9 +160,9 @@ export function Missions() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_missions_112" name="search_missions" type="search" aria-label="Search missions" value={search} onChange={(e) => { setPage(0); setSearch(e.target.value); }} placeholder="Search missions…" className="app-input pl-9 relative z-10" />
+            <Input id="search_missions_112" name="search_missions" type="search" aria-label="Search missions" value={search} onChange={(e) => { setPage(0); setSearch(e.target.value); }} placeholder="Search missions…" className="pl-9 relative z-10" />
           </div>
-          <select id="select_field_114" name="status" aria-label="Filter missions by status" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }} className="app-input w-full md:w-auto">
+          <select id="select_field_114" name="status" aria-label="Filter missions by status" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }} className="w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="planned">Planned</option>
             <option value="released">Released</option>
@@ -186,41 +179,43 @@ export function Missions() {
               <div>
                 <div className="app-label mb-1">New Mission</div>
                 <p className="text-xs text-kfl-muted">Enter the planning context. Use values confirmed by the current operational procedure.</p>
-                </div>
-                <button type="button" onClick={() => { setShowForm(false); setDirty(false); setMissionError(""); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-                </div>
-                <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                Creating a planned mission does not authorize flight. Release requires the separately approved flight plan, linked approved risk assessment, and release evidence.
-                </div>
-                {missionError && (
-                <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
-                  {missionError}
+              </div>
+              <Button type="button" onClick={() => { setShowForm(false); setDirty(false); setMissionError(""); }} variant="outline" size="sm">
+                Cancel
+              </Button>
+            </div>
+            <div className="mb-3 rounded-md border border-kfl-status-warning-bg bg-kfl-status-warning-bg/20 text-kfl-status-warning p-3 text-sm">
+              Creating a planned mission does not authorize flight. Release requires the separately approved flight plan, linked approved risk assessment, and release evidence.
+            </div>
+            {missionError && (
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
+                {missionError}
               </div>
             )}
             <FormField htmlFor="mission_title_137" label="Mission title" hint="Use the operational mission name or reference." required>
-              <input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={`app-input ${missionFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Mission title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              <Input id="mission_title_137" name="mission_title" aria-describedby="mission_title_137-error" aria-invalid={!!missionFieldErrors.title} className={missionFieldErrors.title ? "border-rose-400" : ""} placeholder="Mission title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {missionFieldErrors.title && <p id="mission_title_137-error" className="text-[11px] text-rose-700 mt-1">{missionFieldErrors.title}</p>}
             </FormField>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               <FormField htmlFor="mission_type" label="Mission type" hint="Use the exact type label in the applicable local procedure." required>
-                <input id="mission_type" name="mission_type" aria-invalid={!!missionFieldErrors.mission_type} className={`app-input ${missionFieldErrors.mission_type ? "border-rose-400" : ""}`} value={missionType} onChange={(e) => { setMissionType(e.target.value); setDirty(true); }} />
+                <Input id="mission_type" name="mission_type" aria-invalid={!!missionFieldErrors.mission_type} className={missionFieldErrors.mission_type ? "border-rose-400" : ""} value={missionType} onChange={(e) => { setMissionType(e.target.value); setDirty(true); }} />
                 {missionFieldErrors.mission_type && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.mission_type}</p>}
               </FormField>
               <FormField htmlFor="mission_priority" label="Priority" hint="Use the approved local priority scale." required>
-                <input id="mission_priority" name="priority" aria-invalid={!!missionFieldErrors.priority} className={`app-input ${missionFieldErrors.priority ? "border-rose-400" : ""}`} value={priority} onChange={(e) => { setPriority(e.target.value); setDirty(true); }} />
+                <Input id="mission_priority" name="priority" aria-invalid={!!missionFieldErrors.priority} className={missionFieldErrors.priority ? "border-rose-400" : ""} value={priority} onChange={(e) => { setPriority(e.target.value); setDirty(true); }} />
                 {missionFieldErrors.priority && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.priority}</p>}
               </FormField>
               <FormField htmlFor="mission_planned_date" label="Planned date">
-                <input id="mission_planned_date" name="planned_date" type="date" className="app-input" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setDirty(true); }} />
+                <Input id="mission_planned_date" name="planned_date" type="date" value={plannedDate} onChange={(e) => { setPlannedDate(e.target.value); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="mission_location" label="Location">
-                <input id="mission_location" name="location" className="app-input" value={location} onChange={(e) => { setLocation(e.target.value); setDirty(true); }} />
+                <Input id="mission_location" name="location" value={location} onChange={(e) => { setLocation(e.target.value); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="mission_description" label="Description" className="md:col-span-2">
-                <textarea id="mission_description" name="description" rows={3} className="app-input" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} />
+                <textarea id="mission_description" name="description" rows={3} value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} className="flex-1 min-h-[80px]" />
               </FormField>
             </div>
-            <button
+            <Button
               type="button"
               disabled={!missionIsValid || createMutation.isPending}
               onClick={() => {
@@ -234,10 +229,12 @@ export function Missions() {
                   location: location.trim() || null,
                 });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create Mission"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -246,7 +243,9 @@ export function Missions() {
         ) : isError ? (
           <div className="p-10 text-center" role="alert">
             <p className="text-sm font-semibold text-rose-800">Unable to load missions.</p>
-            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry missions</button>
+            <Button variant="outline" size="sm" type="button" onClick={() => void refetch()} className="mt-3">
+              Retry missions
+            </Button>
           </div>
         ) : missions.length === 0 && page === 0 && !trimmedSearch && !statusFilter ? (
           <div className="app-surface border-dashed p-10 text-center">
@@ -257,7 +256,7 @@ export function Missions() {
         ) : missions.length === 0 ? (
           <div className="p-10 text-center text-sm text-kfl-muted">
             <p>{page > 0 ? "No missions on this page." : "No missions match these filters."}</p>
-            {page > 0 && <button type="button" className="app-btn-secondary mt-3" disabled={isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>}
+            {page > 0 && <Button variant="outline" size="sm" type="button" disabled={isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</Button>}
           </div>
         ) : (
           <>
@@ -283,26 +282,24 @@ export function Missions() {
                       <div className="mt-1 text-xs text-kfl-muted">{m.planned_date || "Date not set"}</div>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.mission_type}</td>
-                    <td className="px-4 py-4">
-                      <span className={missionStatusClass(m.status)}>{m.status}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={m.status === "completed" ? "default" : m.status === "in_progress" || m.status === "released" ? "secondary" : m.status === "cancelled" || m.status === "aborted" ? "destructive" : "outline"} className={`badge ${m.status === "completed" ? "bg-kfl-status-info-bg text-kfl-status-info" : m.status === "in_progress" || m.status === "released" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : m.status === "cancelled" || m.status === "aborted" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{m.status}</Badge></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.priority}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{m.risk_assessment_id || "Not linked"}</td>
                     <td className="px-4 py-4 text-right text-sm">
                       {hasPermission("safety:update") && availableActions(m.status)
                         .filter((action) => action.state !== "aborted" || hasPermission("safety:close"))
                         .map((a) => (
-                        <button
-                          key={a.state}
-                          type="button"
-                          disabled={transitionMutation.isPending}
-                          onClick={() => transitionMutation.mutate({ id: m.mission_id, state: a.state })}
-                          className="text-xs font-medium px-2 py-1.5 rounded border transition hover:bg-kfl-surface-subtle"
-                          style={{ borderColor: toneColor(a.tone), color: toneColor(a.tone) }}
-                        >
-                          {a.label}
-                        </button>
-                      ))}
+                          <button
+                            key={a.state}
+                            type="button"
+                            disabled={transitionMutation.isPending}
+                            onClick={() => transitionMutation.mutate({ id: m.mission_id, state: a.state })}
+                            className="text-xs font-medium px-2 py-1.5 rounded border transition hover:bg-kfl-surface-subtle"
+                            style={{ borderColor: toneColor(a.tone), color: toneColor(a.tone) }}
+                          >
+                            {a.label}
+                          </button>
+                        ))}
                     </td>
                   </tr>
                 ))}
@@ -312,8 +309,12 @@ export function Missions() {
           <div className="flex items-center justify-between border-t border-kfl-border p-4">
             <span className="text-sm text-kfl-muted">Page {page + 1}</span>
             <div className="flex gap-2">
-              <button type="button" className="app-btn-secondary" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>
-              <button type="button" className="app-btn-secondary" disabled={missions.length < pageSize || isLoading} onClick={() => setPage((current) => current + 1)}>Next page</button>
+              <Button variant="outline" size="sm" type="button" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>
+                Previous page
+              </Button>
+              <Button variant="outline" size="sm" type="button" disabled={missions.length < pageSize || isLoading} onClick={() => setPage((current) => current + 1)}>
+                Next page
+              </Button>
             </div>
           </div>
           </>

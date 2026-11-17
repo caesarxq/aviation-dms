@@ -24,7 +24,8 @@ import {
   Wrench,
   Clock,
   Award,
-  LogOut,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ import { safetyApi } from "../../api/safety";
 import { useAuth } from "../../auth/AuthContext";
 import { getPostLoginPath, ROLE_WORKSPACES } from "../../auth/permissions";
 import { WorkspaceGuide } from "./WorkspaceGuide";
+import { Button } from "@/components/ui/button";
 
 interface NavItem {
   to: string;
@@ -56,6 +58,71 @@ function canSeeNavItem(item: NavItem, activeRole: string | null | undefined, has
   return true;
 }
 
+/** Light/dark/system theme control with OS-change tracking and persistence. */
+type ThemePreference = "light" | "dark" | "system";
+
+function readThemePreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem("kfl-theme");
+    return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function prefersDarkMode(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
+  const [systemDark, setSystemDark] = useState(prefersDarkMode);
+  const isDark = theme === "dark" || (theme === "system" && systemDark);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateFromSystem = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    setSystemDark(media.matches);
+    if (media.addEventListener) {
+      media.addEventListener("change", updateFromSystem);
+      return () => media.removeEventListener("change", updateFromSystem);
+    }
+    media.addListener?.(updateFromSystem);
+    return () => media.removeListener?.(updateFromSystem);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute("data-theme", isDark ? "dark" : "light");
+    root.style.colorScheme = isDark ? "dark" : "light";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", isDark ? "#0d2235" : "#f5f7fa");
+    try {
+      localStorage.setItem("kfl-theme", theme);
+    } catch {
+      // Theme still applies for this session when browser storage is unavailable.
+    }
+  }, [theme, isDark]);
+
+  const nextTheme = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
+  const nextLabel = nextTheme === "system" ? "system preference" : `${nextTheme} mode`;
+  const currentLabel = theme === "system" ? `system (${isDark ? "dark" : "light"})` : `${theme} mode`;
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0"
+      onClick={() => setTheme(nextTheme)}
+      aria-label={`Theme: ${currentLabel}. Switch to ${nextLabel}`}
+      title={`Theme: ${currentLabel} · switch to ${nextLabel}`}
+    >
+      {isDark ? <Sun size={16} className="shrink-0" /> : <Moon size={16} className="shrink-0" />}
+    </Button>
+  );
+}
+
 function CollapsibleSection({ label, icon: Icon, items, initiallyOpen = false }: SectionProps) {
   const [open, setOpen] = useState(initiallyOpen);
 
@@ -73,7 +140,7 @@ function CollapsibleSection({ label, icon: Icon, items, initiallyOpen = false }:
     <div className="mb-3">
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sky-200/70 hover:bg-white/10 transition"
+        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sky-200/90 hover:bg-white/15 hover:text-white transition"
         aria-expanded={effectiveOpen}
         aria-label={label}
       >
@@ -92,9 +159,8 @@ function CollapsibleSection({ label, icon: Icon, items, initiallyOpen = false }:
                 `flex items-center gap-2 rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
                   isActive
                     ? "bg-kfl-blue/20 text-white border-l-2 border-kfl-blue"
-                    : "text-slate-300 hover:bg-white/[0.05] hover:text-white border-l-2 border-transparent"
-                }`
-              }
+                    : "text-sky-200/90 hover:bg-white/15 hover:text-white border-l-2 border-transparent"
+                }`}
               onClick={() => setOpen(true)}
             >
               <item.icon size={14} className="shrink-0 opacity-70" />
@@ -260,37 +326,47 @@ export function AppShell() {
 
   return (
     <div className="app-shell flex min-h-screen bg-kfl-canvas">
-      <aside className="app-sidebar sticky top-0 flex h-screen w-[264px] shrink-0 flex-col bg-kfl-dark px-4 py-5 text-white shadow-xl">
-        <div className="mb-7 flex items-center justify-between gap-3 px-2">
-          <button onClick={() => navigate(homeRoute)} className="rounded-md p-1 text-left focus-visible:ring-2 focus-visible:ring-sky-300" aria-label={homeLabel}>
-            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="h-12 w-auto object-contain object-left" />
-          </button>
-          {hasPermission("compliance:read") && (
-            <button
-              onClick={() => navigate("/notifications")}
-              className="relative rounded-md p-2 text-slate-200 transition hover:bg-white/10 hover:text-white"
-              aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
-            >
-              <Bell size={18} />
-              {unreadCount > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </button>
-          )}
+      <aside className="app-sidebar sticky top-0 flex h-screen w-[248px] shrink-0 flex-col bg-kfl-dark px-4 py-5 text-white shadow-xl overflow-y-auto">
+        <div className="app-sidebar-header mb-7 flex shrink-0 items-center gap-1 px-2">
+          <Button
+            onClick={() => navigate(homeRoute)}
+            variant="ghost"
+            aria-label={homeLabel}
+            className="app-sidebar-brand h-auto min-w-0 flex-1 justify-start overflow-hidden p-0 hover:bg-transparent"
+          >
+            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="app-sidebar-logo h-11 w-auto max-w-[124px] object-contain object-left" />
+          </Button>
+          <div className="app-sidebar-header-actions flex shrink-0 items-center gap-0.5">
+            <ThemeToggle />
+            {hasPermission("compliance:read") && (
+              <Button
+                onClick={() => navigate("/notifications")}
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+              >
+                <Bell size={18} />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-2 px-1">
           {workspaceItems.length > 0 && (
             <nav aria-label="My workspace" className="mb-4 space-y-0.5">
-              <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200/50">My workspace</div>
+              <div className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200/70">My workspace</div>
               {workspaceItems.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   end={item.to === "/"}
-                  className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+                  className={({ isActive }) => `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/95 hover:bg-white/15 hover:text-white"}`}
                 >
                   <item.icon size={16} className="shrink-0" />
                   <span className="nav-label">{item.label}</span>
@@ -302,23 +378,24 @@ export function AppShell() {
             <NavLink
               to="/"
               end
-              className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+              className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/95 hover:bg-white/15 hover:text-white"}`}
             >
               <LayoutDashboard size={16} className="shrink-0" />
               <span className="nav-label">Safety dashboard</span>
             </NavLink>
           )}
-          <button
+          <Button
             type="button"
+            variant="outline"
             aria-label="All modules"
             aria-expanded={allModulesOpen}
             onClick={() => setAllModulesOpen((open) => !open)}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sky-200/70 hover:bg-white/10 transition"
+            className="w-full"
           >
             <LayoutDashboard size={16} className="shrink-0" />
             <span className="flex-1 text-left">All modules</span>
             <ChevronDown size={14} className={`shrink-0 transition-transform ${allModulesOpen ? "" : "-rotate-90"}`} />
-          </button>
+          </Button>
           {allModulesOpen && (
             <div aria-label="All modules navigation" className="space-y-2 pt-1">
               {visibleSections.map((section) => {
@@ -329,7 +406,7 @@ export function AppShell() {
                       key={section.label}
                       to={item.to}
                       end={item.to === "/"}
-                      className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/80 hover:bg-white/10 hover:text-white"}`}
+                      className={({ isActive }) => `mb-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? "bg-kfl-blue/20 text-white" : "text-sky-200/95 hover:bg-white/15 hover:text-white"}`}
                     >
                       <item.icon size={16} className="shrink-0" />
                       <span className="nav-label">{item.label}</span>
@@ -365,17 +442,17 @@ export function AppShell() {
           )}
           <div className="mt-2 text-slate-300">{profile?.user.full_name} · {profile?.active_role}</div>
           <div className="mt-3 flex items-center justify-between gap-2">
-            <NavLink to="/account/security" className="rounded px-2 py-1 text-slate-300 hover:bg-white/10 hover:text-white">Account security</NavLink>
             <NavLink to="/account/profile" className="rounded px-2 py-1 text-slate-300 hover:bg-white/10 hover:text-white">Profile settings</NavLink>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               disabled={loggingOut}
               onClick={() => void handleLogout()}
-              className="flex items-center gap-1 rounded px-2 py-1 text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-60"
               aria-label={logoutError ? "Retry sign out" : "Sign out"}
             >
-              <LogOut size={14} /> {loggingOut ? "Signing out…" : logoutError ? "Retry sign out" : "Sign out"}
-            </button>
+              {loggingOut ? "Signing out…" : logoutError ? "Retry sign out" : "Sign out"}
+            </Button>
           </div>
           <div className="mt-2 text-slate-500">KFL Aviation DMS · v1.0</div>
         </div>

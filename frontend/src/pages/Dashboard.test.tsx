@@ -70,7 +70,7 @@ describe("Dashboard greeting", () => {
     vi.mocked(safetyApi.getTrends).mockRejectedValueOnce(new Error("network"));
     renderDashboard("Miriam Njoroge");
     expect(await screen.findByText("Some dashboard data is unavailable")).toBeInTheDocument();
-    expect(screen.getAllByText("Unavailable", { selector: "div" })).toHaveLength(2);
+    expect(screen.getAllByText("Unavailable", { selector: "div" })).toHaveLength(3);
   });
 
   it("does not show an all-clear deadline state when deadline data fails", async () => {

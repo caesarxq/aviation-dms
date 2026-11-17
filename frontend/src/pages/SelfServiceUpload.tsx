@@ -8,6 +8,8 @@ import { useValidation } from "../utils/validation";
 import { useToast } from "../components/ui/Toast";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 const DOCUMENT_TYPES = [
   "pilot_license", "medical", "type_rating", "proficiency_check",
@@ -134,15 +136,15 @@ export function SelfServiceUpload() {
   });
 
   const statusColor = (s: string) => {
-    if (s === "verified") return "bg-green-100 text-green-800";
-    if (s === "rejected") return "bg-red-100 text-red-800";
-    return "bg-yellow-100 text-yellow-800";
+    if (s === "verified") return "bg-kfl-status-info-bg text-kfl-status-info";
+    if (s === "rejected") return "bg-kfl-status-danger-bg text-kfl-status-danger";
+    return "bg-kfl-status-warning-bg text-kfl-status-warning";
   };
 
   const statusIcon = (s: string) => {
-    if (s === "verified") return <CheckCircle size={14} className="text-green-600" />;
-    if (s === "rejected") return <AlertTriangle size={14} className="text-red-600" />;
-    return <Clock size={14} className="text-yellow-600" />;
+    if (s === "verified") return <CheckCircle size={14} className="text-kfl-status-info" />;
+    if (s === "rejected") return <AlertTriangle size={14} className="text-kfl-status-danger" />;
+    return <Clock size={14} className="text-kfl-status-warning" />;
   };
 
   const uploadRules = {
@@ -172,28 +174,42 @@ export function SelfServiceUpload() {
           <p className="app-subtitle">Upload your credential documents for verification by the compliance team.</p>
         </div>
         {hasPermission("personnel:view") && (
-          <button onClick={() => setShowUpload(true)} className="app-btn-primary flex items-center gap-1">
+          <Button onClick={() => setShowUpload(true)} variant="default" size="sm" className="flex items-center gap-1">
             <Upload size={16} /> Upload Credential
-          </button>
+          </Button>
         )}
       </header>
 
       <Modal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Credential Document" description="Upload your own clear, legible credential file. It will be held for verification.">
         {uploadError && (
-          <div role="alert" className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+          <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
             {uploadError}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="license_type_118" label="Credential type" required>
-            <select id="license_type_118" name="license_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.license_type} onChange={e => { setUploadForm({ ...uploadForm, license_type: e.target.value }); setDirty(true); }}>
-              {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-            </select>
+            <Select onValueChange={(e) => { setUploadForm({ ...uploadForm, license_type: e }); setDirty(true); }}>
+              <SelectTrigger id="license_type_118" name="license_type">
+                <SelectValue placeholder={uploadForm.license_type} />
+              </SelectTrigger>
+              <SelectContent>
+                {DOCUMENT_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </FormField>
           <FormField htmlFor="document_type_125" label="Document type" required>
-            <select id="document_type_125" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={uploadForm.document_type} onChange={e => { setUploadForm({ ...uploadForm, document_type: e.target.value }); setDirty(true); }}>
-              <option value="license_copy">License Copy</option><option value="certificate">Certificate</option><option value="medical_cert">Medical Certificate</option><option value="training_record">Training Record</option><option value="other">Other</option>
-            </select>
+            <Select onValueChange={(e) => { setUploadForm({ ...uploadForm, document_type: e }); setDirty(true); }}>
+              <SelectTrigger id="document_type_125" name="document_type">
+                <SelectValue placeholder={uploadForm.document_type} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="license_copy">License Copy</SelectItem>
+                <SelectItem value="certificate">Certificate</SelectItem>
+                <SelectItem value="medical_cert">Medical Certificate</SelectItem>
+                <SelectItem value="training_record">Training Record</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
           <FormField htmlFor="file_136" label="Credential file" hint="PDF, PNG, or JPEG; maximum 10 MiB." required className="col-span-2">
             <input id="file_136" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" aria-describedby="file_136-error" aria-invalid={!!uploadFieldErrors.file} className={`border border-kfl-border rounded p-2 text-sm w-full ${uploadFieldErrors.file ? "border-rose-400" : ""}`} onChange={e => { setSelectedFile(e.target.files?.[0] || null); setDirty(true); }} />
@@ -201,10 +217,12 @@ export function SelfServiceUpload() {
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={() => { setShowUpload(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-          <button onClick={handleUpload} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
+          <Button variant="outline" size="sm" onClick={() => { setShowUpload(false); setDirty(false); }}>
+            Cancel
+          </Button>
+          <Button onClick={handleUpload} variant="default" size="sm" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Uploading…" : "Submit for Verification"}
-          </button>
+          </Button>
         </div>
       </Modal>
 
@@ -213,43 +231,43 @@ export function SelfServiceUpload() {
           <h2 className="font-semibold text-kfl-text">Your Uploads</h2>
           <div className="flex gap-2">
             {["", "pending", "verified", "rejected"].map(s => (
-              <button key={s} onClick={() => { setStatusFilter(s); setHistoryPage(0); }} className={`text-xs px-2 py-1 rounded ${statusFilter === s ? "bg-kfl-primary text-white" : "text-kfl-muted hover:bg-kfl-surface-subtle"}`}>
+              <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" onClick={() => { setStatusFilter(s); setHistoryPage(0); }}>
                 {s || "All"}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
-        {actionError && <div role="alert" className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">{actionError}</div>}
+        {actionError && <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{actionError}</div>}
         {isError ? (
-          <div role="alert" className="p-6 text-center text-rose-800">
+          <div role="alert" className="p-6 text-center text-kfl-status-danger">
             <p>Unable to load your uploads: {getErrorMessage(loadError, "Please try again.")}</p>
-            <button onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry loading uploads</button>
+            <Button variant="outline" size="sm" type="button" onClick={() => void refetch()}>
+              Retry loading uploads
+            </Button>
           </div>
         ) : isLoading ? (
           <div className="p-10 text-center text-kfl-muted">Loading uploads…</div>
-        ) : filteredUploads.length === 0 ? (
-          <div className="p-10 text-center text-kfl-muted">No uploads found. Upload a credential document to get started.</div>
-        ) : (
+        ): (
           <div className="space-y-3">
             {filteredUploads.map((u: any) => (
-              <div key={u.upload_id} className="border border-kfl-border rounded p-3 hover:bg-kfl-surface-subtle">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
+              <div key={u.upload_id} className="border border-kfl-border rounded-md p-3 hover:bg-kfl-surface-subtle">
+                <div className="flex justify-between items-start mb-2 px-1">
+                  <div className="flex-1">
                     <h4 className="font-medium text-kfl-text">{u.file_name}</h4>
                     <div className="text-sm text-kfl-muted">{u.license_type.replace(/_/g, " ")} • {u.document_type.replace(/_/g, " ")}</div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex-1">
                     <div className={`flex items-center gap-1 ${statusColor(u.verification_status)}`}>
                       {statusIcon(u.verification_status)}
                       <span className="text-xs font-semibold">{u.verification_status}</span>
                     </div>
                     {u.verification_status === "verified" && u.verified_at && <div className="text-xs text-kfl-muted mt-1">Verified by {u.verified_by || "unknown reviewer"} on {u.verified_at}</div>}
                     {u.verification_status === "rejected" && u.updated_at && <div className="text-xs text-kfl-muted mt-1">Rejected by {u.updated_by || "unknown reviewer"} on {u.updated_at}</div>}
-                    {u.rejection_reason && <div className="text-xs text-red-600 mt-1">Reason: {u.rejection_reason}</div>}
+                    {u.rejection_reason && <div className="text-xs text-kfl-status-danger mt-1">Reason: {u.rejection_reason}</div>}
                   </div>
                 </div>
-                <div className="text-xs text-kfl-muted mb-2">{u.file_size || 0} bytes, {u.content_type || "—"}</div>
-                {u.download_url && <a href={u.download_url} download className="inline-flex items-center gap-1 text-xs font-medium text-kfl-blue hover:underline">
+                <div className="text-xs text-kfl-muted mb-2 px-1">{u.file_size || 0} bytes, {u.content_type || "—"}</div>
+                {u.download_url && <a href={u.download_url} download className="inline-flex items-center gap-1 text-xs font-medium text-kfl-blue hover:underline px-1">
                   <Download size={13} /> Download {u.file_name}
                 </a>}
               </div>
@@ -257,57 +275,63 @@ export function SelfServiceUpload() {
           </div>
         )}
         {!isLoading && !isError && (historyPage > 0 || uploadsPageData.hasNext) && (
-          <div className="mt-4 flex items-center justify-between border-t border-kfl-border pt-4 text-sm">
+          <div className="mt-4 flex items-center justify-between border-t border-kfl-border pt-4 text-sm px-3">
             <span className="text-kfl-muted">Page {historyPage + 1}</span>
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
                 aria-label="Previous upload history page"
                 disabled={historyPage === 0 || isLoading}
                 onClick={() => setHistoryPage((current) => Math.max(0, current - 1))}
-                className="app-btn-secondary text-xs"
+                variant="outline"
+                size="sm"
+                className="text-xs"
               >
                 Previous
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 aria-label="Next upload history page"
                 disabled={!uploadsPageData.hasNext || isLoading}
                 onClick={() => setHistoryPage((current) => current + 1)}
-                className="app-btn-secondary text-xs"
+                variant="outline"
+                size="sm"
+                className="text-xs"
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}
       </section>
 
-      {canReadPersonnel && <section className="app-surface mt-5 overflow-hidden">
+      {canReadPersonnel && <section className="app-surface mt-5 overflow-y-auto">
         <div className="border-b border-kfl-border p-4">
           <h2 className="font-semibold text-kfl-text">Verification queue</h2>
           <p className="mt-1 text-xs text-kfl-muted">Review the submitted document itself before recording a decision.</p>
         </div>
         {queueError ? (
-          <div role="alert" className="p-6 text-center text-rose-800">
+          <div role="alert" className="p-6 text-center text-kfl-status-danger">
             <p>Unable to load the verification queue.</p>
-            <button type="button" onClick={() => void refetchQueue()} className="app-btn-secondary mt-3">Retry verification queue</button>
+            <Button variant="outline" size="sm" type="button" onClick={() => void refetchQueue()}>
+              Retry verification queue
+            </Button>
           </div>
         ) : queueLoading ? (
           <div className="p-8 text-center text-sm text-kfl-muted">Loading verification queue…</div>
         ) : verificationQueue.length === 0 ? (
           <div className="p-8 text-center text-sm text-kfl-muted">No uploads awaiting verification.</div>
-        ) : (
+        ): (
           <div className="space-y-3 p-4">
             {verificationQueue.map((upload: any) => (
               <div key={upload.upload_id} className="rounded border border-kfl-border p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+                <div className="flex flex-wrap items-start justify-between gap-3 px-1">
+                  <div className="flex-1">
                     <h3 className="font-medium text-kfl-text">{upload.file_name}</h3>
                     <p className="mt-1 text-sm text-kfl-muted">Person {upload.person_id} · {upload.license_type.replace(/_/g, " ")} · {upload.document_type.replace(/_/g, " ")}</p>
                     <p className="mt-1 text-xs text-kfl-muted">{upload.file_size || 0} bytes · {upload.content_type || "—"}</p>
                   </div>
-                  {upload.download_url && <a href={upload.download_url} download className="inline-flex items-center gap-1 text-xs font-medium text-kfl-blue hover:underline">
+                  {upload.download_url && <a href={upload.download_url} download className="inline-flex items-center gap-1 text-xs font-medium text-kfl-blue hover:underline px-1">
                     <Download size={13} /> Download {upload.file_name}
                   </a>}
                 </div>
@@ -315,20 +339,24 @@ export function SelfServiceUpload() {
                   <p className="mt-3 text-xs text-kfl-muted">This upload cannot be reviewed by the current account.</p>
                 ) : canManagePersonnel && canReviewUpload(upload) && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button type="button" disabled={verifyMutation.isPending} aria-label={`Verify ${upload.upload_id}`} onClick={() => verifyMutation.mutate({ id: upload.upload_id, status: "verified" })} className="app-btn-secondary inline-flex items-center gap-1 text-xs">
+                    <Button type="button" disabled={verifyMutation.isPending} aria-label={`Verify ${upload.upload_id}`} variant="outline" size="sm" onClick={() => verifyMutation.mutate({ id: upload.upload_id, status: "verified" })} className="inline-flex items-center gap-1">
                       <CheckCircle size={13} /> Verify
-                    </button>
-                    <button type="button" disabled={verifyMutation.isPending} aria-label={`Reject ${upload.upload_id}`} onClick={() => { setRejectingUploadId(upload.upload_id); setRejectionReason(""); }} className="app-btn-secondary inline-flex items-center gap-1 text-xs text-red-700">
+                    </Button>
+                    <Button type="button" disabled={verifyMutation.isPending} aria-label={`Reject ${upload.upload_id}`} variant="outline" size="sm" className="text-kfl-status-danger hover:text-kfl-status-danger/80" onClick={() => { setRejectingUploadId(upload.upload_id); setRejectionReason(""); }}>
                       <AlertTriangle size={13} /> Reject
-                    </button>
+                    </Button>
                     {rejectingUploadId === upload.upload_id && (
                       <div className="mt-2 w-full space-y-2">
                         <FormField htmlFor={`rejection_reason_${upload.upload_id}`} label={`Rejection reason for ${upload.upload_id}`} required>
-                          <textarea id={`rejection_reason_${upload.upload_id}`} name="rejection_reason" rows={2} className="app-input" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
+                          <textarea id={`rejection_reason_${upload.upload_id}`} name="rejection_reason" rows={2} className="flex-1 min-h-[80px]" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
                         </FormField>
                         <div className="flex gap-2">
-                          <button type="button" disabled={!rejectionReason.trim() || verifyMutation.isPending} onClick={() => verifyMutation.mutate({ id: upload.upload_id, status: "rejected", reason: rejectionReason.trim() })} className="app-btn-primary text-xs">Confirm rejection</button>
-                          <button type="button" onClick={() => { setRejectingUploadId(""); setRejectionReason(""); }} className="app-btn-secondary text-xs">Cancel</button>
+                          <Button type="button" disabled={!rejectionReason.trim() || verifyMutation.isPending} variant="destructive" size="sm" onClick={() => verifyMutation.mutate({ id: upload.upload_id, status: "rejected", reason: rejectionReason.trim() })}>
+                            Confirm rejection
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setRejectingUploadId(""); setRejectionReason(""); }}>
+                            Cancel
+                          </Button>
                         </div>
                       </div>
                     )}
@@ -342,24 +370,28 @@ export function SelfServiceUpload() {
           <div className="flex items-center justify-between border-t border-kfl-border p-4 text-sm">
             <span className="text-kfl-muted">Page {queuePage + 1}</span>
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
                 aria-label="Previous verification queue page"
                 disabled={queuePage === 0 || queueLoading}
                 onClick={() => setQueuePage((current) => Math.max(0, current - 1))}
-                className="app-btn-secondary text-xs"
+                variant="outline"
+                size="sm"
+                className="text-xs"
               >
                 Previous
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 aria-label="Next verification queue page"
                 disabled={!queuePageData.hasNext || queueLoading}
                 onClick={() => setQueuePage((current) => current + 1)}
-                className="app-btn-secondary text-xs"
+                variant="outline"
+                size="sm"
+                className="text-xs"
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}

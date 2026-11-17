@@ -3,15 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { MaintenanceRecord } from "../types";
 import { Wrench, Plus, Trash2 } from "lucide-react";
-
-function statusClass(status: string) {
-  switch (status.toLowerCase()) {
-    case "completed": return "app-status app-status-healthy";
-    case "pending": return "app-status app-status-warning";
-    case "overdue": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function MaintenanceManagement() {
   const qc = useQueryClient();
@@ -72,9 +67,9 @@ export function MaintenanceManagement() {
           <h1 className="app-title">Maintenance Management</h1>
           <p className="app-subtitle">Track aircraft maintenance, inspections, and work orders.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <Plus size={16} /> New Record
-        </button>
+        </Button>
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -96,27 +91,18 @@ export function MaintenanceManagement() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Maintenance Records</div>
           <div className="flex gap-2">
-            <input
-              id="maintenance_aircraft_filter"
-              name="aircraft_registration"
-              placeholder="Aircraft registration"
-              className="app-input w-full md:w-auto"
-              value={aircraftFilter}
-              onChange={(e) => setAircraftFilter(e.target.value)}
-            />
-            <select
-              id="maintenance_status_filter"
-              name="status"
-              aria-label="Filter by status"
-              className="app-input w-full md:w-auto"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">All statuses</option>
-              <option value="completed">Completed</option>
-              <option value="pending">Pending</option>
-              <option value="overdue">Overdue</option>
-            </select>
+            <Input id="maintenance_aircraft_filter" name="aircraft_registration" placeholder="Aircraft registration" value={aircraftFilter} onChange={(e) => setAircraftFilter(e.target.value)} className="w-full md:w-auto" />
+            <Select onValueChange={(e) => setStatusFilter(e)}>
+              <SelectTrigger id="maintenance_status_filter" name="status" aria-label="Filter by status">
+                <SelectValue placeholder={statusFilter || "All statuses"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="overdue">Overdue</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -152,36 +138,27 @@ export function MaintenanceManagement() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary max-w-xs truncate">{record.description}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.performed_at}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.next_due || "—"}</td>
-                    <td className="px-4 py-4"><span className={statusClass(record.status)}>{record.status}</span></td>
+                    <td className="px-4 py-4"><Badge variant={record.status === "completed" ? "default" : record.status === "pending" ? "secondary" : "destructive"} className={`badge ${record.status === "completed" ? "bg-kfl-status-info-bg text-kfl-status-info" : record.status === "pending" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{record.status}</Badge></td>
                     <td className="px-4 py-4 text-right">
-                      <button
-                        id={`edit_maintenance_${record.record_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          setEditingId(record.record_id);
-                          setForm({
-                            aircraft_registration: record.aircraft_registration,
-                            maintenance_type: record.maintenance_type,
-                            description: record.description,
-                            performed_by: record.performed_by,
-                            performed_at: record.performed_at,
-                            next_due: record.next_due || "",
-                            notes: record.notes || "",
-                          });
-                        }}
-                      >
+                      <Button variant="outline" size="sm" id={`edit_maintenance_${record.record_id}`} onClick={() => {
+                        setEditingId(record.record_id);
+                        setForm({
+                          aircraft_registration: record.aircraft_registration,
+                          maintenance_type: record.maintenance_type,
+                          description: record.description,
+                          performed_by: record.performed_by,
+                          performed_at: record.performed_at,
+                          next_due: record.next_due || "",
+                          notes: record.notes || "",
+                        });
+                      }}>
                         Edit
-                      </button>
-                      <button
-                        id={`delete_maintenance_${record.record_id}`}
-                        aria-label={`Delete maintenance record ${record.record_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          if (confirm("Delete this maintenance record?")) deleteMutation.mutate(record.record_id);
-                        }}
-                      >
+                      </Button>
+                      <Button variant="destructive" size="sm" aria-label={`Delete maintenance record ${record.record_id}`} id={`delete_maintenance_${record.record_id}`} onClick={() => {
+                        if (confirm("Delete this maintenance record?")) deleteMutation.mutate(record.record_id);
+                      }}>
                         <Trash2 size={14} />
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -201,87 +178,40 @@ export function MaintenanceManagement() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Aircraft Registration</span>
-                <input
-                  id="maintenance_aircraft"
-                  name="aircraft_registration"
-                  className="app-input"
-                  value={form.aircraft_registration}
-                  onChange={(e) => setForm({ ...form, aircraft_registration: e.target.value })}
-                />
+                <Input id="maintenance_aircraft" name="aircraft_registration" value={form.aircraft_registration} onChange={(e) => setForm({ ...form, aircraft_registration: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Maintenance Type</span>
-                <input
-                  id="maintenance_type"
-                  name="maintenance_type"
-                  className="app-input"
-                  value={form.maintenance_type}
-                  onChange={(e) => setForm({ ...form, maintenance_type: e.target.value })}
-                />
+                <Input id="maintenance_type" name="maintenance_type" value={form.maintenance_type} onChange={(e) => setForm({ ...form, maintenance_type: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Description</span>
-                <textarea
-                  id="maintenance_description"
-                  name="description"
-                  className="app-input"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                />
+                <textarea id="maintenance_description" name="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="flex-1 min-h-[80px]" />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Performed By</span>
-                <input
-                  id="maintenance_performed_by"
-                  name="performed_by"
-                  className="app-input"
-                  value={form.performed_by}
-                  onChange={(e) => setForm({ ...form, performed_by: e.target.value })}
-                />
+                <Input id="maintenance_performed_by" name="performed_by" value={form.performed_by} onChange={(e) => setForm({ ...form, performed_by: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Performed At</span>
-                <input
-                  id="maintenance_performed_at"
-                  name="performed_at"
-                  type="date"
-                  className="app-input"
-                  value={form.performed_at}
-                  onChange={(e) => setForm({ ...form, performed_at: e.target.value })}
-                />
+                <Input id="maintenance_performed_at" name="performed_at" type="date" value={form.performed_at} onChange={(e) => setForm({ ...form, performed_at: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Next Due</span>
-                <input
-                  id="maintenance_next_due"
-                  name="next_due"
-                  type="date"
-                  className="app-input"
-                  value={form.next_due}
-                  onChange={(e) => setForm({ ...form, next_due: e.target.value })}
-                />
+                <Input id="maintenance_next_due" name="next_due" type="date" value={form.next_due} onChange={(e) => setForm({ ...form, next_due: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Notes</span>
-                <textarea
-                  id="maintenance_notes"
-                  name="notes"
-                  className="app-input"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
+                <textarea id="maintenance_notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="flex-1 min-h-[80px]" />
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => { setIsCreating(false); setEditingId(null); }}>Cancel</button>
-              <button
-                id="maintenance_submit"
-                className="app-btn"
-                disabled={!form.aircraft_registration || !form.maintenance_type || !form.description || !form.performed_by || !form.performed_at}
-                onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}
-              >
+              <Button variant="outline" size="sm" onClick={() => { setIsCreating(false); setEditingId(null); }}>
+                Cancel
+              </Button>
+              <Button id="maintenance_submit" variant="default" size="sm" disabled={!form.aircraft_registration || !form.maintenance_type || !form.description || !form.performed_by || !form.performed_at} onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}>
                 {editingId ? (updateMutation.isPending ? "Saving…" : "Save") : (createMutation.isPending ? "Creating…" : "Create")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

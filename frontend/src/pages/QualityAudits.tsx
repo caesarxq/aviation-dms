@@ -8,27 +8,9 @@ import { CorrectiveActionsModal } from "../components/ui/modals/CorrectiveAction
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
-
-function auditStatusClass(status: string) {
-  switch (status) {
-    case "completed": return "app-status app-status-healthy";
-    case "in_progress": return "app-status app-status-info";
-    case "planned": return "app-status app-status-info";
-    case "cancelled": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
-
-function carStatusClass(status: string) {
-  switch (status) {
-    case "closed": return "app-status app-status-healthy";
-    case "verified": return "app-status app-status-healthy";
-    case "open": return "app-status app-status-info";
-    case "in_progress": return "app-status app-status-info";
-    case "overdue": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 export function QualityAudits() {
   const qc = useQueryClient();
@@ -83,18 +65,20 @@ export function QualityAudits() {
           <h1 className="app-title">Quality Audits</h1>
           <p className="app-subtitle">Plan, execute, and track quality audits and findings.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <ClipboardCheck size={16} /> {showForm ? "Cancel" : "New Audit"}
-        </button>}
-        {hasPermission("safety:create") && <button
+        </Button>}
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowCarModal(true)}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
         >
           <Wrench size={16} /> Create CAR
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -115,9 +99,9 @@ export function QualityAudits() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_audits_95" name="search_audits" type="search" aria-label="Search quality audits" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search audits…" className="app-input pl-9 relative z-10" />
+            <Input id="search_audits_95" name="search_audits" type="search" aria-label="Search quality audits" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search audits…" className="pl-9 relative z-10" />
           </div>
-          <select id="select_field_97" name="status" aria-label="Filter quality audits by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-full md:w-auto">
+          <select id="select_field_97" name="status" aria-label="Filter quality audits by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="planned">Planned</option>
             <option value="in_progress">In Progress</option>
@@ -132,27 +116,31 @@ export function QualityAudits() {
                 <div className="app-label mb-1">New Quality Audit</div>
                 <p className="text-xs text-kfl-muted">Schedule a quality audit.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {auditError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {auditError}
               </div>
             )}
             <FormField htmlFor="audit_title_119" label="Audit title" hint="Use the audit scope or activity name." required>
-              <input id="audit_title_150" name="audit_title" aria-describedby="audit_title_150-error" aria-invalid={!!qaFieldErrors.title} className={`app-input ${qaFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Audit title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              <Input id="audit_title_150" name="audit_title" aria-describedby="audit_title_150-error" aria-invalid={!!qaFieldErrors.title} className={qaFieldErrors.title ? "border-rose-400" : ""} placeholder="Audit title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {qaFieldErrors.title && <p id="audit_title_150-error" className="text-[11px] text-rose-700 mt-1">{qaFieldErrors.title}</p>}
             </FormField>
-            <button
+            <Button
               disabled={!qaIsValid || createMutation.isPending}
               onClick={() => {
                 setAuditError("");
                 createMutation.mutate({ title, auditor_id: "u-quality" });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create Audit"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -184,9 +172,7 @@ export function QualityAudits() {
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{a.audit_id}</td>
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{a.title}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{a.audit_type}</td>
-                    <td className="px-4 py-4">
-                      <span className={auditStatusClass(a.status)}>{a.status}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={a.status === "completed" ? "default" : a.status === "in_progress" ? "secondary" : a.status === "cancelled" ? "destructive" : "outline"} className={`badge ${a.status === "completed" ? "bg-kfl-status-info-bg text-kfl-status-info" : a.status === "in_progress" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : a.status === "cancelled" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{a.status}</Badge></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{a.findings_count}</td>
                   </tr>
                 ))}
@@ -261,9 +247,7 @@ export function CorrectiveActions() {
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{c.title}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{c.owner_id}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{c.due_date || "—"}</td>
-                    <td className="px-4 py-4">
-                      <span className={carStatusClass(c.status)}>{c.status}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={c.status === "closed" || c.status === "verified" ? "default" : c.status === "in_progress" ? "secondary" : c.status === "overdue" ? "destructive" : "outline"} className={`badge ${c.status === "closed" || c.status === "verified" ? "bg-kfl-status-info-bg text-kfl-status-info" : c.status === "in_progress" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : c.status === "overdue" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{c.status}</Badge></td>
                   </tr>
                 ))}
               </tbody>

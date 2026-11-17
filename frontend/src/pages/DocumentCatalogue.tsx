@@ -10,6 +10,12 @@ import { useToast } from "../components/ui/Toast";
 import { VersionDiffModal } from "../components/ui/modals/VersionDiffModal";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 export function DocumentCatalogue() {
   const { toast } = useToast();
@@ -88,73 +94,107 @@ export function DocumentCatalogue() {
           <p className="app-subtitle">Find, review, and open the controlled documents that support safe operations.</p>
         </div>
         <div className="flex gap-2">
-          {canCreate && <button onClick={() => setShowNewDoc(true)} className="app-btn-secondary flex items-center gap-1">
-            <Plus size={16} /> New Document
-          </button>}
-          <button onClick={() => setShowVersionDiffModal(true)} className="app-btn-secondary">
+          {canCreate && (
+            <Button onClick={() => setShowNewDoc(true)} variant="outline" size="sm">
+              <Plus size={16} /> New Document
+            </Button>
+          )}
+          <Button onClick={() => setShowVersionDiffModal(true)} variant="outline" size="sm">
             <Shuffle size={16} /> Version Diff
-          </button>
-          {canEdit && <Link to="/documents/DOC-001/edit" className="app-btn-primary"><FileText size={16} /> Open editor <ArrowUpRight size={15} /></Link>}
+          </Button>
+          {canEdit && (
+            <Button asChild variant="default" size="sm" className="flex items-center gap-1">
+              <Link to="/documents/DOC-001/edit">
+                <FileText size={16} /> Open editor <ArrowUpRight size={15} />
+              </Link>
+            </Button>
+          )}
         </div>
       </header>
 
       {/* New Document Modal */}
       <Modal open={showNewDoc} onClose={() => setShowNewDoc(false)} title="Create New Document" description="Create the controlled-document record first. Use the official document identifier, choose the document class and classification, and mark KCAA approval when regulatory approval is required.">
         {newDocError && (
-          <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+          <div className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
             {newDocError}
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">
           <FormField htmlFor="document_id_89" label="Document ID" hint="Use the controlled identifier, for example DOC-016." required>
-            <input id="document_id_89" name="document_id" aria-describedby="document_id_89-error" aria-invalid={!!docErrors.document_id} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.document_id ? "border-rose-400" : ""}`} placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setField("document_id", e.target.value)} />
-            {docErrors.document_id && <p id="document_id_89-error" className="text-[11px] text-rose-700 mt-1">{docErrors.document_id}</p>}
+            <Input id="document_id_89" name="document_id" aria-describedby="document_id_89-error" aria-invalid={!!docErrors.document_id} placeholder="DOC-016" value={newDocForm.document_id} onChange={e => setField("document_id", e.target.value)} />
+            {docErrors.document_id && <p id="document_id_89-error" className="text-[11px] text-kfl-status-danger mt-1">{docErrors.document_id}</p>}
           </FormField>
           <FormField htmlFor="title_95" label="Document title" required>
-            <input id="title_95" name="title" aria-describedby="title_95-error" aria-invalid={!!docErrors.title} className={`border border-kfl-border rounded p-2 text-sm w-full ${docErrors.title ? "border-rose-400" : ""}`} placeholder="Title" value={newDocForm.title} onChange={e => setField("title", e.target.value)} />
-            {docErrors.title && <p id="title_95-error" className="text-[11px] text-rose-700 mt-1">{docErrors.title}</p>}
+            <Input id="title_95" name="title" aria-describedby="title_95-error" aria-invalid={!!docErrors.title} placeholder="Title" value={newDocForm.title} onChange={e => setField("title", e.target.value)} />
+            {docErrors.title && <p id="title_95-error" className="text-[11px] text-kfl-status-danger mt-1">{docErrors.title}</p>}
           </FormField>
           <FormField htmlFor="doc_class_101" label="Document class" hint="Choose the controlled-document category.">
-            <select id="doc_class_101" name="doc_class" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.doc_class} onChange={e => setField("doc_class", e.target.value)}>
-              <option value="manual">Manual</option><option value="procedure">Procedure</option><option value="form">Form</option><option value="checklist">Checklist</option><option value="report">Report</option>
-            </select>
+            <Select onValueChange={e => setField("doc_class", e)}>
+              <SelectTrigger id="doc_class_101" name="doc_class" aria-describedby="doc_class_101-hint">
+                <SelectValue placeholder="Select a class" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="manual">Manual</SelectItem>
+                <SelectItem value="procedure">Procedure</SelectItem>
+                <SelectItem value="form">Form</SelectItem>
+                <SelectItem value="checklist">Checklist</SelectItem>
+                <SelectItem value="report">Report</SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
           <FormField htmlFor="classification_104" label="Classification" hint="Select the highest applicable handling restriction.">
-            <select id="classification_104" name="classification" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.classification} onChange={e => setField("classification", e.target.value)}>
-              <option value="S0">S0 Public</option><option value="S1">S1 Internal</option><option value="S2">S2 Confidential</option><option value="S3">S3 Restricted</option><option value="S4">S4 Highly Restricted</option>
-            </select>
+            <Select onValueChange={e => setField("classification", e)}>
+              <SelectTrigger id="classification_104" name="classification" aria-describedby="classification_104-hint">
+                <SelectValue placeholder="Select classification" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="S0">S0 Public</SelectItem>
+                <SelectItem value="S1">S1 Internal</SelectItem>
+                <SelectItem value="S2">S2 Confidential</SelectItem>
+                <SelectItem value="S3">S3 Restricted</SelectItem>
+                <SelectItem value="S4">S4 Highly Restricted</SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
-          <label className="flex items-center gap-2 text-sm self-end pb-2">
-            <input id="kcaa_approval_required_108" name="kcaa_approval_required" type="checkbox" checked={newDocForm.kcaa_approval_required} onChange={e => setField("kcaa_approval_required", e.target.checked)} />
-            KCAA approval required
-          </label>
+          <div className="flex items-center gap-2 text-sm self-end pb-2">
+            <Checkbox id="kcaa_approval_required_108" name="kcaa_approval_required" checked={Boolean(newDocForm.kcaa_approval_required)} onCheckedChange={(checked) => setField("kcaa_approval_required", Boolean(checked))} />
+            <Label htmlFor="kcaa_approval_required_108">KCAA approval required</Label>
+          </div>
           <FormField htmlFor="review_due_date_111" label="Review due date" hint="Set the next controlled-document review date.">
-            <input id="review_due_date_111" name="review_due_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={newDocForm.review_due_date} onChange={e => setField("review_due_date", e.target.value)} />
+            <Input type="date" id="review_due_date_111" name="review_due_date" aria-describedby="review_due_date_111-hint" placeholder="YYYY-MM-DD" value={newDocForm.review_due_date} onChange={e => setField("review_due_date", e.target.value)} />
           </FormField>
         </div>
         <div className="mt-4 flex gap-2 justify-end">
-          <button onClick={() => { setShowNewDoc(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-          <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
+          <Button onClick={() => { setShowNewDoc(false); setDirty(false); }} variant="outline" size="sm">Cancel</Button>
+          <Button onClick={handleCreate} variant="default" size="sm" disabled={createMutation.isPending}>
             {createMutation.isPending ? "Creating…" : "Create Document"}
-          </button>
+          </Button>
         </div>
       </Modal>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="app-surface p-4"><div className="app-label">Total documents</div><div className="mt-2 text-2xl font-bold text-kfl-text">{docs.length}</div></div>
-        <div className="app-surface p-4"><div className="app-label">Published baseline</div><div className="mt-2 text-2xl font-bold text-emerald-700">{docs.filter((d: any) => d.status === "published").length}</div></div>
-        <div className="app-surface p-4"><div className="app-label">KCAA-controlled</div><div className="mt-2 flex items-center gap-2 text-2xl font-bold text-kfl-blue"><ShieldCheck size={21} />{docs.filter((d: any) => d.kcaa_approval_required).length}</div></div>
+        <div className="app-surface p-4"><div className="app-label">Published baseline</div><div className="mt-2 text-2xl font-bold text-kfl-status-success">{docs.filter((d: any) => d.status === "published").length}</div></div>
+        <div className="app-surface p-4"><div className="app-label">KCAA-controlled</div><div className="mt-2 flex items-center gap-2 text-2xl font-bold text-kfl-status-info"><ShieldCheck size={21} />{docs.filter((d: any) => d.kcaa_approval_required).length}</div></div>
       </section>
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Search size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, ID, or class" className="app-input pl-9" aria-label="Search documents" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, ID, or class" className="pl-9" aria-label="Search documents" />
           </div>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="app-input w-full md:w-auto" aria-label="Filter document status">
-            <option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="in_review">In review</option>
-          </select>
+          <Select onValueChange={e => setStatus(e)}>
+            <SelectTrigger aria-label="Filter document status">
+              <SelectValue placeholder={status || "All statuses"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="published">Published</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="in_review">In review</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         {isLoading ? <div className="p-10 text-center text-sm text-kfl-muted">Loading controlled documents…</div> : filteredDocs.length === 0 ? <div className="p-10 text-center text-sm text-kfl-muted">No documents match this view.</div> : (
           <div className="overflow-x-auto">
@@ -167,7 +207,11 @@ export function DocumentCatalogue() {
                   <tr key={d.document_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4"><div className="font-semibold text-kfl-text">{d.title}</div><div className="mt-1 font-mono text-[11px] text-kfl-muted">{d.document_id}</div></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.doc_class}</td>
-                    <td className="px-4 py-4"><span className={`app-status ${d.status === "published" ? "app-status-healthy" : "app-status-warning"}`}>{d.status}</span></td>
+                    <td className="px-4 py-4">
+                      <Badge variant={d.status === "published" ? "default" : "outline"} className={d.status === "published" ? "bg-kfl-status-success-bg text-kfl-status-success" : "bg-kfl-status-warning-bg text-kfl-status-warning"}>
+                        {d.status}
+                      </Badge>
+                    </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.classification}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.kcaa_approval_required ? "Required" : "No"}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.review_due_date || "—"}</td>

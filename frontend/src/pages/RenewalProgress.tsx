@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/client";
 import { KeyRound, Shield, CheckCircle, Clock, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export function RenewalProgress() {
   const [tab, setTab] = useState<"licenses" | "insurance">("licenses");
@@ -26,7 +28,6 @@ export function RenewalProgress() {
     queryFn: () => api.get("/p1/aircraft").then((r: any) => r.data),
   });
 
-  // Fetch insurance for all aircraft
   const [selectedAircraft, setSelectedAircraft] = useState("");
 
   const { data: insurance = [] } = useQuery({
@@ -45,22 +46,21 @@ export function RenewalProgress() {
   };
 
   const statusIcon = (days: number | null) => {
-    if (days === null) return <CheckCircle size={14} className="text-gray-400" />;
-    if (days <= 0) return <AlertTriangle size={14} className="text-red-600" />;
-    if (days <= 7) return <AlertTriangle size={14} className="text-red-500" />;
-    if (days <= 30) return <Clock size={14} className="text-yellow-500" />;
-    return <CheckCircle size={14} className="text-green-500" />;
+    if (days === null) return <CheckCircle size={14} className="text-kfl-muted" />;
+    if (days <= 0) return <AlertTriangle size={14} className="text-kfl-status-danger" />;
+    if (days <= 7) return <AlertTriangle size={14} className="text-kfl-status-danger" />;
+    if (days <= 30) return <Clock size={14} className="text-kfl-status-warning" />;
+    return <CheckCircle size={14} className="text-kfl-status-info" />;
   };
 
   const statusColor = (days: number | null) => {
-    if (days === null) return "text-gray-500";
-    if (days <= 0) return "text-red-600 font-bold";
-    if (days <= 7) return "text-red-500 font-semibold";
-    if (days <= 30) return "text-yellow-600";
-    return "text-green-600";
+    if (days === null) return "text-kfl-muted";
+    if (days <= 0) return "text-kfl-status-danger font-bold";
+    if (days <= 7) return "text-kfl-status-danger font-semibold";
+    if (days <= 30) return "text-kfl-status-warning";
+    return "text-kfl-status-info";
   };
 
-  // Group licenses by person
   const licensesByPerson = licenses.reduce((acc: any, lic: any) => {
     if (!acc[lic.person_id]) acc[lic.person_id] = [];
     acc[lic.person_id].push(lic);
@@ -76,12 +76,12 @@ export function RenewalProgress() {
           <p className="app-subtitle">Track credential and insurance renewal status across all personnel and aircraft.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setTab("licenses")} className={`px-3 py-1.5 text-sm rounded ${tab === "licenses" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>
+          <Button variant={tab === "licenses" ? "default" : "outline"} size="sm" onClick={() => setTab("licenses")}>
             <KeyRound size={14} className="inline mr-1" /> Licenses
-          </button>
-          <button onClick={() => setTab("insurance")} className={`px-3 py-1.5 text-sm rounded ${tab === "insurance" ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>
+          </Button>
+          <Button variant={tab === "insurance" ? "default" : "outline"} size="sm" onClick={() => setTab("insurance")}>
             <Shield size={14} className="inline mr-1" /> Insurance
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -93,17 +93,17 @@ export function RenewalProgress() {
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Expiring (90d)</div>
-          <div className="mt-2 text-2xl font-bold text-yellow-600">{expiringLic.length}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-warning">{expiringLic.length}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Critical (7d)</div>
-          <div className="mt-2 text-2xl font-bold text-red-600">
+          <div className="mt-2 text-2xl font-bold text-kfl-status-danger">
             {expiringLic.filter((l: any) => daysUntil(l.expiry_date) !== null && daysUntil(l.expiry_date)! <= 7).length}
           </div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Expired</div>
-          <div className="mt-2 text-2xl font-bold text-red-700">
+          <div className="mt-2 text-2xl font-bold text-kfl-status-danger">
             {licenses.filter((l: any) => l.status === "expired").length}
           </div>
         </div>
@@ -135,13 +135,9 @@ export function RenewalProgress() {
                             <div className={`text-sm ${statusColor(days)}`}>{l.expiry_date}</div>
                             <div className="text-xs text-kfl-muted">{days !== null ? `${days} days` : "—"}</div>
                           </div>
-                          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                            l.status === "valid" ? "bg-green-100 text-green-800" :
-                            l.status === "expiring_soon" ? "bg-yellow-100 text-yellow-800" :
-                            "bg-red-100 text-red-800"
-                          }`}>{l.status}</span>
+                          <Badge variant={l.status === "valid" ? "default" : l.status === "expiring_soon" ? "secondary" : "destructive"} className={`badge ${l.status === "valid" ? "bg-kfl-status-info-bg text-kfl-status-info" : l.status === "expiring_soon" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{l.status}</Badge>
                           {l.renewal_status && l.renewal_status !== "not_started" && (
-                            <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-800">{l.renewal_status.replace(/_/g, " ")}</span>
+                            <span className="px-2 py-0.5 rounded text-xs bg-kfl-status-info-bg text-kfl-status-info">{l.renewal_status.replace(/_/g, " ")}</span>
                           )}
                         </div>
                       );
@@ -169,12 +165,12 @@ export function RenewalProgress() {
 
           {/* Expiring insurance summary */}
           {expiringIns.length > 0 && (
-            <div className="app-surface p-4 mb-4 border-l-4 border-yellow-500">
-              <h3 className="font-semibold text-yellow-700 flex items-center gap-2 mb-2">
+            <div className="app-surface p-4 mb-4 border-l-4 border-kfl-status-warning-bg">
+              <h3 className="font-semibold text-kfl-status-warning flex items-center gap-2 mb-2">
                 <AlertTriangle size={16} /> {expiringIns.length} Policy/Policies Expiring Within 90 Days
               </h3>
               {expiringIns.map((i: any) => (
-                <div key={i.insurance_id} className="text-sm text-yellow-600">
+                <div key={i.insurance_id} className="text-sm text-kfl-status-warning">
                   {i.insurance_type} — {i.aircraft_id} — expires {i.expiry_date} ({daysUntil(i.expiry_date)} days)
                 </div>
               ))}
@@ -198,12 +194,12 @@ export function RenewalProgress() {
                       </div>
                     </div>
                     <div className="flex gap-2 flex-wrap">
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${i.status === "active" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}`}>{i.status}</span>
+                      <Badge variant={i.status === "active" ? "default" : "secondary"} className={`badge ${i.status === "active" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-surface-subtle text-kfl-muted"}`}>{i.status}</Badge>
                       {i.renewal_status && i.renewal_status !== "not_started" && (
-                        <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-800">{i.renewal_status.replace(/_/g, " ")}</span>
+                        <span className="px-2 py-0.5 rounded text-xs bg-kfl-status-info-bg text-kfl-status-info">{i.renewal_status.replace(/_/g, " ")}</span>
                       )}
-                      {i.broker && <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">Broker: {i.broker}</span>}
-                      {i.coverage_amount && <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600">Coverage: {i.coverage_amount} {i.currency}</span>}
+                      {i.broker && <span className="px-2 py-0.5 rounded text-xs bg-kfl-surface-subtle text-kfl-muted">Broker: {i.broker}</span>}
+                      {i.coverage_amount && <span className="px-2 py-0.5 rounded text-xs bg-kfl-surface-subtle text-kfl-muted">Coverage: {i.coverage_amount} {i.currency}</span>}
                     </div>
                   </div>
                 );

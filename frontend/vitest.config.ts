@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const root = path.resolve(process.cwd());
 const alias = {
-  '@': root,
+  '@': path.resolve(root, "src"),
 }
 
 export default defineConfig({

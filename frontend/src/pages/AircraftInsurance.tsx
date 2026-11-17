@@ -8,7 +8,9 @@ import { RenewalProgressModal } from "../components/ui/modals/RenewalProgressMod
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 const INSURANCE_TYPES = ["hull", "liability", "war_risk", "passenger_liability", "cargo_liability"];
 const AIRCRAFT_DOC_TYPES = ["airworthiness_cert", "registration", "arc", "noise_cert", "radio_license", "maintenance_release"];
 
@@ -146,11 +148,11 @@ export function AircraftInsurance() {
   };
 
   const statusColor = (days: number | null) => {
-    if (days === null) return "text-gray-600";
-    if (days <= 0) return "text-red-600 font-bold";
-    if (days <= 7) return "text-red-600 font-bold";
-    if (days <= 30) return "text-yellow-600";
-    return "text-green-600";
+    if (days === null) return "text-kfl-muted";
+    if (days <= 0) return "text-kfl-status-danger font-bold";
+    if (days <= 7) return "text-kfl-status-danger font-bold";
+    if (days <= 30) return "text-kfl-status-warning";
+    return "text-kfl-status-info";
   };
 
   return (
@@ -161,24 +163,24 @@ export function AircraftInsurance() {
           <h1 className="app-title">Aircraft Insurance & Documents</h1>
           <p className="app-subtitle">Track aircraft insurance policies and airworthiness documents.</p>
         </div>
-        <button onClick={() => setShowRenewalModal(true)} className="app-btn-secondary">
+        <Button onClick={() => setShowRenewalModal(true)} variant="outline" size="sm">
           <KeyRound size={16} /> Renewal Progress
-        </button>
+        </Button>
       </header>
 
       {/* Expiry alerts */}
       {(expiringIns.length > 0 || expiringDocs.length > 0) && (
-        <div className="app-surface p-4 mb-4 border-l-4 border-red-500">
-          <h3 className="font-semibold text-red-700 flex items-center gap-2 mb-2">
+        <div className="app-surface p-4 mb-4 border-l-4 border-kfl-status-danger-bg">
+          <h3 className="font-semibold text-kfl-status-danger flex items-center gap-2 mb-2">
             <AlertTriangle size={16} /> Expiring Soon
           </h3>
           {expiringIns.map((i: any) => (
-            <div key={i.insurance_id} className="text-sm text-red-600">
+            <div key={i.insurance_id} className="text-sm text-kfl-status-danger">
               Insurance: {i.insurance_type} — {i.registration || i.aircraft_id} — expires {i.expiry_date} ({daysUntil(i.expiry_date)} days)
             </div>
           ))}
           {expiringDocs.map((d: any) => (
-            <div key={d.doc_id} className="text-sm text-red-600">
+            <div key={d.doc_id} className="text-sm text-kfl-status-danger">
               Document: {d.document_type} — {d.registration || d.aircraft_id} — expires {d.expiry_date} ({daysUntil(d.expiry_date)} days)
             </div>
           ))}
@@ -206,37 +208,59 @@ export function AircraftInsurance() {
           <div className="app-surface p-5 mb-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-kfl-text flex items-center gap-2"><Shield size={16} /> Insurance Policies</h3>
-              <button onClick={() => setShowInsForm(true)} className="app-btn-secondary text-sm px-3 py-1 flex items-center gap-1">
+              <Button onClick={() => setShowInsForm(true)} variant="outline" size="sm" className="text-sm px-3 py-1 flex items-center gap-1">
                 <Plus size={14} /> Add Policy
-              </button>
+              </Button>
             </div>
 
             {/* Insurance Modal */}
             <Modal open={showInsForm} onClose={() => setShowInsForm(false)} title="Add Insurance Policy" description="Record the policy for the selected aircraft. Enter the insurer and policy number exactly as issued, then provide coverage, premium, start, and expiry details for compliance tracking.">
               {insError && (
-                <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                   {insError}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <FormField htmlFor="insurance_type_180" label="Insurance type" required>
-                  <select id="insurance_type_180" name="insurance_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={insForm.insurance_type} onChange={e => { setInsForm({ ...insForm, insurance_type: e.target.value }); setInsDirty(true); }}>
-                    {INSURANCE_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-                  </select>
+                  <Select onValueChange={e => { setInsForm({ ...insForm, insurance_type: e }); setInsDirty(true); }}>
+                    <SelectTrigger id="insurance_type_180" name="insurance_type" aria-describedby="insurance_type_180-hint">
+                      <SelectValue placeholder="Select a type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INSURANCE_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </FormField>
-                <FormField htmlFor="insurer_183" label="Insurer" required><input id="insurer_183" name="insurer" aria-describedby="insurer_183-error" aria-invalid={!!insFieldErrors.insurer} className={`border border-kfl-border rounded p-2 text-sm w-full ${insFieldErrors.insurer ? "border-rose-400" : ""}`} placeholder="Insurer" value={insForm.insurer} onChange={e => { setInsForm({ ...insForm, insurer: e.target.value }); setInsDirty(true); }} />{insFieldErrors.insurer && <p id="insurer_183-error" className="text-[11px] text-rose-700 mt-1">{insFieldErrors.insurer}</p>}</FormField>
-                <FormField htmlFor="policy_number_184" label="Policy number" required><input id="policy_number_184" name="policy_number" aria-describedby="policy_number_184-error" aria-invalid={!!insFieldErrors.policy_number} className={`border border-kfl-border rounded p-2 text-sm w-full ${insFieldErrors.policy_number ? "border-rose-400" : ""}`} placeholder="Policy number" value={insForm.policy_number} onChange={e => { setInsForm({ ...insForm, policy_number: e.target.value }); setInsDirty(true); }} />{insFieldErrors.policy_number && <p id="policy_number_184-error" className="text-[11px] text-rose-700 mt-1">{insFieldErrors.policy_number}</p>}</FormField>
-                <FormField htmlFor="broker_185" label="Broker"><input id="broker_185" name="broker" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Broker" value={insForm.broker} onChange={e => { setInsForm({ ...insForm, broker: e.target.value }); setInsDirty(true); }} /></FormField>
-                <FormField htmlFor="start_date_186" label="Start date"><input id="start_date_186" name="start_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={insForm.start_date} onChange={e => { setInsForm({ ...insForm, start_date: e.target.value }); setInsDirty(true); }} /></FormField>
-                <FormField htmlFor="expiry_date_187" label="Expiry date" hint="Required for renewal tracking." required><input id="expiry_date_187" name="expiry_date" type="date" aria-describedby="expiry_date_187-error" aria-invalid={!!insFieldErrors.expiry_date} className={`border border-kfl-border rounded p-2 text-sm w-full ${insFieldErrors.expiry_date ? "border-rose-400" : ""}`} value={insForm.expiry_date} onChange={e => { setInsForm({ ...insForm, expiry_date: e.target.value }); setInsDirty(true); }} />{insFieldErrors.expiry_date && <p id="expiry_date_187-error" className="text-[11px] text-rose-700 mt-1">{insFieldErrors.expiry_date}</p>}</FormField>
-                <FormField htmlFor="coverage_amount_188" label="Coverage amount"><input id="coverage_amount_188" name="coverage_amount" type="number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Coverage amount" value={insForm.coverage_amount} onChange={e => { setInsForm({ ...insForm, coverage_amount: e.target.value }); setInsDirty(true); }} /></FormField>
-                <FormField htmlFor="premium_amount_189" label="Premium amount"><input id="premium_amount_189" name="premium_amount" type="number" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Premium amount" value={insForm.premium_amount} onChange={e => { setInsForm({ ...insForm, premium_amount: e.target.value }); setInsDirty(true); }} /></FormField>
+                <FormField htmlFor="insurer_183" label="Insurer" required>
+                  <Input id="insurer_183" name="insurer" aria-describedby="insurer_183-error" aria-invalid={!!insFieldErrors.insurer} placeholder="Insurer" value={insForm.insurer} onChange={e => { setInsForm({ ...insForm, insurer: e.target.value }); setInsDirty(true); }} />
+                  {insFieldErrors.insurer && <p id="insurer_183-error" className="text-[11px] text-kfl-status-danger mt-1">{insFieldErrors.insurer}</p>}
+                </FormField>
+                <FormField htmlFor="policy_number_184" label="Policy number" required>
+                  <Input id="policy_number_184" name="policy_number" aria-describedby="policy_number_184-error" aria-invalid={!!insFieldErrors.policy_number} placeholder="Policy number" value={insForm.policy_number} onChange={e => { setInsForm({ ...insForm, policy_number: e.target.value }); setInsDirty(true); }} />
+                  {insFieldErrors.policy_number && <p id="policy_number_184-error" className="text-[11px] text-kfl-status-danger mt-1">{insFieldErrors.policy_number}</p>}
+                </FormField>
+                <FormField htmlFor="broker_185" label="Broker">
+                  <Input id="broker_185" name="broker" placeholder="Broker" value={insForm.broker} onChange={e => { setInsForm({ ...insForm, broker: e.target.value }); setInsDirty(true); }} />
+                </FormField>
+                <FormField htmlFor="start_date_186" label="Start date">
+                  <Input type="date" id="start_date_186" name="start_date" value={insForm.start_date} onChange={e => { setInsForm({ ...insForm, start_date: e.target.value }); setInsDirty(true); }} />
+                </FormField>
+                <FormField htmlFor="expiry_date_187" label="Expiry date" hint="Required for renewal tracking." required>
+                  <Input type="date" id="expiry_date_187" name="expiry_date" aria-describedby="expiry_date_187-error" aria-invalid={!!insFieldErrors.expiry_date} value={insForm.expiry_date} onChange={e => { setInsForm({ ...insForm, expiry_date: e.target.value }); setInsDirty(true); }} />
+                  {insFieldErrors.expiry_date && <p id="expiry_date_187-error" className="text-[11px] text-kfl-status-danger mt-1">{insFieldErrors.expiry_date}</p>}
+                </FormField>
+                <FormField htmlFor="coverage_amount_188" label="Coverage amount">
+                  <Input type="number" id="coverage_amount_188" name="coverage_amount" placeholder="Coverage amount" value={insForm.coverage_amount} onChange={e => { setInsForm({ ...insForm, coverage_amount: e.target.value }); setInsDirty(true); }} />
+                </FormField>
+                <FormField htmlFor="premium_amount_189" label="Premium amount">
+                  <Input type="number" id="premium_amount_189" name="premium_amount" placeholder="Premium amount" value={insForm.premium_amount} onChange={e => { setInsForm({ ...insForm, premium_amount: e.target.value }); setInsDirty(true); }} />
+                </FormField>
               </div>
               <div className="mt-4 flex gap-2 justify-end">
-                <button onClick={() => { setShowInsForm(false); setInsDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-                <button onClick={handleCreateIns} className="app-btn-primary px-4 py-2 text-sm" disabled={createInsMutation.isPending}>
+                <Button onClick={() => { setShowInsForm(false); setInsDirty(false); }} variant="outline" size="sm">Cancel</Button>
+                <Button onClick={handleCreateIns} variant="default" size="sm" disabled={createInsMutation.isPending}>
                   {createInsMutation.isPending ? "Saving…" : "Save Policy"}
-                </button>
+                </Button>
               </div>
             </Modal>
 
@@ -273,35 +297,52 @@ export function AircraftInsurance() {
           <div className="app-surface p-5">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-kfl-text flex items-center gap-2"><Calendar size={16} /> Aircraft Documents</h3>
-              <button onClick={() => setShowDocForm(true)} className="app-btn-secondary text-sm px-3 py-1 flex items-center gap-1">
+              <Button onClick={() => setShowDocForm(true)} variant="outline" size="sm" className="text-sm px-3 py-1 flex items-center gap-1">
                 <Plus size={14} /> Add Document
-              </button>
+              </Button>
             </div>
 
             {/* Aircraft Document Modal */}
             <Modal open={showDocForm} onClose={() => setShowDocForm(false)} title="Add Aircraft Document" description="Record an airworthiness, registration, or other aircraft document for the selected aircraft. Use the document number and issuing authority exactly as printed and include expiry details when applicable.">
               {docError && (
-                <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+                <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                   {docError}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <FormField htmlFor="document_type_252" label="Document type" required>
-                  <select id="document_type_252" name="document_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.document_type} onChange={e => { setDocForm({ ...docForm, document_type: e.target.value }); setDocDirty(true); }}>
-                    {AIRCRAFT_DOC_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
-                  </select>
+                  <Select onValueChange={e => { setDocForm({ ...docForm, document_type: e }); setDocDirty(true); }}>
+                    <SelectTrigger id="document_type_252" name="document_type" aria-describedby="document_type_252-hint">
+                      <SelectValue placeholder="Select a type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AIRCRAFT_DOC_TYPES.map(t => <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </FormField>
-                <FormField htmlFor="document_number_255" label="Document number" required><input id="document_number_255" name="document_number" aria-describedby="document_number_255-error" aria-invalid={!!docFieldErrors.document_number} className={`border border-kfl-border rounded p-2 text-sm w-full ${docFieldErrors.document_number ? "border-rose-400" : ""}`} placeholder="Document number" value={docForm.document_number} onChange={e => { setDocForm({ ...docForm, document_number: e.target.value }); setDocDirty(true); }} />{docFieldErrors.document_number && <p id="document_number_255-error" className="text-[11px] text-rose-700 mt-1">{docFieldErrors.document_number}</p>}</FormField>
-                <FormField htmlFor="issuing_authority_256" label="Issuing authority" required><input id="issuing_authority_256" name="issuing_authority" aria-describedby="issuing_authority_256-error" aria-invalid={!!docFieldErrors.issuing_authority} className={`border border-kfl-border rounded p-2 text-sm w-full ${docFieldErrors.issuing_authority ? "border-rose-400" : ""}`} placeholder="Issuing authority" value={docForm.issuing_authority} onChange={e => { setDocForm({ ...docForm, issuing_authority: e.target.value }); setDocDirty(true); }} />{docFieldErrors.issuing_authority && <p id="issuing_authority_256-error" className="text-[11px] text-rose-700 mt-1">{docFieldErrors.issuing_authority}</p>}</FormField>
-                <FormField htmlFor="issue_date_257" label="Issue date"><input id="issue_date_257" name="issue_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.issue_date} onChange={e => { setDocForm({ ...docForm, issue_date: e.target.value }); setDocDirty(true); }} /></FormField>
-                <FormField htmlFor="expiry_date_258" label="Expiry date" hint="Enter the expiry date when the document is time-limited."><input id="expiry_date_258" name="expiry_date" type="date" className="border border-kfl-border rounded p-2 text-sm w-full" value={docForm.expiry_date} onChange={e => { setDocForm({ ...docForm, expiry_date: e.target.value }); setDocDirty(true); }} /></FormField>
-                <FormField htmlFor="notes_259" label="Notes"><input id="notes_259" name="notes" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Additional notes" value={docForm.notes} onChange={e => { setDocForm({ ...docForm, notes: e.target.value }); setDocDirty(true); }} /></FormField>
+                <FormField htmlFor="document_number_255" label="Document number" required>
+                  <Input id="document_number_255" name="document_number" aria-describedby="document_number_255-error" aria-invalid={!!docFieldErrors.document_number} placeholder="Document number" value={docForm.document_number} onChange={e => { setDocForm({ ...docForm, document_number: e.target.value }); setDocDirty(true); }} />
+                  {docFieldErrors.document_number && <p id="document_number_255-error" className="text-[11px] text-kfl-status-danger mt-1">{docFieldErrors.document_number}</p>}
+                </FormField>
+                <FormField htmlFor="issuing_authority_256" label="Issuing authority" required>
+                  <Input id="issuing_authority_256" name="issuing_authority" aria-describedby="issuing_authority_256-error" aria-invalid={!!docFieldErrors.issuing_authority} placeholder="Issuing authority" value={docForm.issuing_authority} onChange={e => { setDocForm({ ...docForm, issuing_authority: e.target.value }); setDocDirty(true); }} />
+                  {docFieldErrors.issuing_authority && <p id="issuing_authority_256-error" className="text-[11px] text-kfl-status-danger mt-1">{docFieldErrors.issuing_authority}</p>}
+                </FormField>
+                <FormField htmlFor="issue_date_257" label="Issue date">
+                  <Input type="date" id="issue_date_257" name="issue_date" value={docForm.issue_date} onChange={e => { setDocForm({ ...docForm, issue_date: e.target.value }); setDocDirty(true); }} />
+                </FormField>
+                <FormField htmlFor="expiry_date_258" label="Expiry date" hint="Enter the expiry date when the document is time-limited.">
+                  <Input type="date" id="expiry_date_258" name="expiry_date" value={docForm.expiry_date} onChange={e => { setDocForm({ ...docForm, expiry_date: e.target.value }); setDocDirty(true); }} />
+                </FormField>
+                <FormField htmlFor="notes_259" label="Notes">
+                  <Input id="notes_259" name="notes" placeholder="Additional notes" value={docForm.notes} onChange={e => { setDocForm({ ...docForm, notes: e.target.value }); setDocDirty(true); }} />
+                </FormField>
               </div>
               <div className="mt-4 flex gap-2 justify-end">
-                <button onClick={() => { setShowDocForm(false); setDocDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-                <button onClick={handleCreateDoc} className="app-btn-primary px-4 py-2 text-sm" disabled={createDocMutation.isPending}>
+                <Button onClick={() => { setShowDocForm(false); setDocDirty(false); }} variant="outline" size="sm">Cancel</Button>
+                <Button onClick={handleCreateDoc} variant="default" size="sm" disabled={createDocMutation.isPending}>
                   {createDocMutation.isPending ? "Saving…" : "Save Document"}
-                </button>
+                </Button>
               </div>
             </Modal>
 
@@ -325,7 +366,7 @@ export function AircraftInsurance() {
                     <td className="px-4 py-2 text-sm">{d.issuing_authority || "—"}</td>
                     <td className="px-4 py-2 text-sm">{d.issue_date || "—"}</td>
                     <td className="px-4 py-2 text-sm">{d.expiry_date || "Permanent"}</td>
-                    <td className={`px-4 py-2 text-sm ${d.expiry_date ? statusColor(daysUntil(d.expiry_date)) : "text-gray-600"}`}>
+                    <td className={`px-4 py-2 text-sm ${d.expiry_date ? statusColor(daysUntil(d.expiry_date)) : "text-kfl-muted"}`}>
                       {d.expiry_date ? daysUntil(d.expiry_date) : "N/A"}
                     </td>
                     <td className="px-4 py-2 text-sm">{d.status}</td>

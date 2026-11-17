@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { ToastProvider } from "./components/ui/Toast";
+import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { getPostLoginPath } from "./auth/permissions";
 import { RequireAccess, RequireAuth } from "./auth/RequireAccess";
@@ -46,13 +47,13 @@ const AuditDashboard = lazy(() => import("./pages/AuditDashboard").then((module)
 const DocumentEditor = lazy(() => import("./pages/DocumentEditor").then((module) => ({ default: module.DocumentEditor })));
 const DocumentViewer = lazy(() => import("./pages/DocumentViewer").then((module) => ({ default: module.DocumentViewer })));
 const Notifications = lazy(() => import("./pages/Notifications").then((module) => ({ default: module.Notifications })));
-const PersonnelLicenses = lazy(() => import("./pages/PersonnelLicenses"));
-const DocumentProposals = lazy(() => import("./pages/DocumentProposals"));
-const RenewalProgress = lazy(() => import("./pages/RenewalProgress"));
-const VersionDiff = lazy(() => import("./pages/VersionDiff"));
-const SelfServiceUpload = lazy(() => import("./pages/SelfServiceUpload"));
-const AircraftInsurance = lazy(() => import("./pages/AircraftInsurance"));
-const AdminObservability = lazy(() => import("./pages/AdminObservability"));
+const PersonnelLicenses = lazy(() => import("./pages/PersonnelLicenses").then((module) => ({ default: module.PersonnelLicenses })));
+const DocumentProposals = lazy(() => import("./pages/DocumentProposals").then((module) => ({ default: module.default })));
+const RenewalProgress = lazy(() => import("./pages/RenewalProgress").then((module) => ({ default: module.RenewalProgress })));
+const VersionDiff = lazy(() => import("./pages/VersionDiff").then((module) => ({ default: module.VersionDiff })));
+const SelfServiceUpload = lazy(() => import("./pages/SelfServiceUpload").then((module) => ({ default: module.SelfServiceUpload })));
+const AircraftInsurance = lazy(() => import("./pages/AircraftInsurance").then((module) => ({ default: module.AircraftInsurance })));
+const AdminObservability = lazy(() => import("./pages/AdminObservability").then((module) => ({ default: module.default })));
 const DocumentControllerDashboard = lazy(() => import("./pages/DocumentControllerDashboard").then((module) => ({ default: module.DocumentControllerDashboard })));
 const ComplianceDashboard = lazy(() => import("./pages/ComplianceDashboard").then((module) => ({ default: module.ComplianceDashboard })));
 
@@ -81,9 +82,10 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <Suspense fallback={<RouteLoading />}>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AuthProvider>
+          <Suspense fallback={<RouteLoading />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/setup" element={<PasswordSetupPage />} />
@@ -143,5 +145,6 @@ export default function App() {
         </Suspense>
       </AuthProvider>
     </ToastProvider>
-  );
+  </ErrorBoundary>
+);
 }

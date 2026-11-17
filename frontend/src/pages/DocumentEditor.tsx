@@ -7,9 +7,17 @@ import { Eye, Save, ArrowLeft, Bold, Italic, Underline, ListOrdered, Link, Image
 import { useToast } from "../components/ui/Toast";
 import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/DocumentOutline";
 import { InlineSuggestionView } from "../components/documents/InlineSuggestionView";
+import { TipTapEditor } from "../components/documents/TipTapEditor";
 import { htmlToText } from "../utils/diff";
 import DOMPurify from "dompurify";
 import { useAuth } from "../auth/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 
 const DOCUMENT_ALLOWED_TAGS = [
   "a", "abbr", "address", "article", "b", "blockquote", "br", "caption", "cite", "code", "col", "colgroup",
@@ -41,14 +49,15 @@ export function DocumentEditor() {
           <h1 className="app-title">Document Editor</h1>
           <p className="app-subtitle">Propose changes to controlled documents. All suggestions undergo manual review before adoption or rejection.</p>
         </div>
-        <button
+        <Button
           onClick={() => setDocId("")}
           disabled={!docId}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
           aria-label="Back to list"
         >
           <ArrowLeft size={16} /> Back to List
-        </button>
+        </Button>
       </header>
 
       {!docId && <DocumentSelector setDocId={setDocId} />}
@@ -67,6 +76,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const qc = useQueryClient();
   const { toast } = useToast();
   const editorRef = useRef<HTMLDivElement>(null);
+  const tipTapEditorRef = useRef<InstanceType<typeof import("@tiptap/core").Editor> | null>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ offsetX: 0, offsetY: 0 });
@@ -102,6 +112,22 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const [submitSeverity, setSubmitSeverity] = useState("minor");
   const [submitting, setSubmitting] = useState(false);
 
+  // --- High-fidelity manual mode: read-only formatted display with proposal overlay ---
+  // Detected when the source contains embedded CSS, page-break classes, or PDF-conversion markers.
+  const highFidelityManual = /<(?:style|link|svg)\b|@import\b/i.test(originalContent) || /\sstyle\s*=/i.test(originalContent) || /class=[\"'][^\"']*\b(?:pf|pc|t)\b/i.test(originalContent);
+
+  // Proposed changes for high-fidelity manuals: text selection -> proposed replacement
+  const [proposedChangeRanges, setProposedChangeRanges] = useState<Array<{
+    id: string;
+    originalText: string;
+    proposedText: string;
+    startOffset: number;
+    endOffset: number;
+  }>>([]);
+  const [selectionPending, setSelectionPending] = useState<{ text: string; start: number; end: number } | null>(null);
+  const [proposeDialogOpen, setProposeDialogOpen] = useState(false);
+  const [proposedReplacement, setProposedReplacement] = useState("");
+
   useEffect(() => {
     if (content?.content !== undefined) {
       const base = content.content || "";
@@ -110,12 +136,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     }
   }, [content?.content]);
 
-  const [liveSuggestionContent, setLiveSuggestionContent] = useState("");
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setLiveSuggestionContent(currentContent), 250);
-    return () => window.clearTimeout(timer);
-  }, [currentContent]);
+  const liveSuggestionContent = currentContent;
 
   const liveOriginalText = useMemo(() => htmlToText(originalContent), [originalContent]);
   const liveProposedText = useMemo(() => htmlToText(liveSuggestionContent), [liveSuggestionContent]);
@@ -139,36 +160,61 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     }
   }, []);
 
-  const selectOutlineItem = useCallback((item: { anchorId: string; blockIndex: number }) => {
+  const selectOutlineItem = useCallback((item: { anchorId: string; blockIndex: number; heading: string }) => {
     setActiveOutlineAnchor(item.anchorId);
     const editor = editorRef.current;
     if (!editor) return;
-    const selector = item.anchorId.startsWith("page-")
-      ? ".pf"
-      : item.anchorId.startsWith("heading-")
-        ? ".t"
-        : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
-    const blocks = editor.querySelectorAll(selector);
-    const target = blocks[item.blockIndex] as HTMLElement | undefined;
-    if (!target) return;
-    const pageFrame = target.closest(".pf") as HTMLElement | null;
-    if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && pageFrame?.parentElement) {
-      pageFrame.parentElement.scrollTop = pageFrame.offsetTop;
-    } else {
-      const navigationTarget = target;
-      navigationTarget.scrollIntoView?.({ behavior: "auto", block: "center" });
-    }
-    if (target) {
+
+    try {
+      // Find the target element by matching heading text content.
+      // This is more robust than index-based lookup, which breaks between
+      // DOMParser parsing (used by buildOutlineFromHtml) and browser rendering
+      // (used when content is set via innerHTML).
+      const blocks = editor.querySelectorAll("h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote");
+      let target: HTMLElement | undefined;
+      for (const block of Array.from(blocks)) {
+        if ((block.textContent || "").trim() === item.heading) {
+          target = block as HTMLElement;
+          break;
+        }
+      }
+
+      // Fall back to index-based lookup if text matching fails
+      if (!target) {
+        const selector = item.anchorId.startsWith("page-")
+          ? ".pf"
+          : item.anchorId.startsWith("heading-")
+            ? ".t"
+            : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+        const fallbackBlocks = editor.querySelectorAll(selector);
+        target = fallbackBlocks[item.blockIndex] as HTMLElement | undefined;
+      }
+
+      if (!target) return;
+
+      const pageFrame = target.closest(".pf") as HTMLElement | null;
+      if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && pageFrame?.parentElement) {
+        pageFrame.parentElement.scrollTop = pageFrame.offsetTop;
+      } else {
+        target.scrollIntoView?.({ behavior: "auto", block: "center" });
+      }
       target.classList.add("proposal-target-highlight");
       window.setTimeout(() => target.classList.remove("proposal-target-highlight"), 2500);
+    } catch (err) {
+      console.error("Outline navigation failed:", err);
     }
   }, []);
 
+  // For high-fidelity manuals: render exact source HTML without sanitization, read-only.
   useEffect(() => {
+    if (!highFidelityManual) return;
     const el = editorRef.current;
     if (!el) return;
-    el.innerHTML = sanitizeDocumentHtml(originalContent);
-  }, [originalContent]);
+    el.innerHTML = originalContent;
+    // Preserve document structure: ensure the container fills the editor area
+    el.style.display = "block";
+    el.style.overflow = "auto";
+  }, [originalContent, highFidelityManual]);
 
   useEffect(() => {
     const match = targetSection?.match(/^(block|page)-(\d+)$/);
@@ -186,7 +232,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       window.setTimeout(() => target.classList.remove("proposal-target-highlight"), 2500);
     }, 50);
     return () => window.clearTimeout(timer);
-  }, [originalContent, targetSection]);
+  }, [originalContent, targetSection, highFidelityManual]);
 
   useEffect(() => {
     if (!toolbarDragging) return;
@@ -221,47 +267,89 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     event.preventDefault();
   };
 
-  const handleEditorInput = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    const html = sanitizeDocumentHtml(el.innerHTML);
-    if (html !== el.innerHTML) el.innerHTML = html;
-    setCurrentContent(html);
-    setDirty(true);
-  }, []);
-
-  const handleEditorPaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const html = event.clipboardData.getData("text/html");
-    const text = event.clipboardData.getData("text/plain");
-    if (html) {
-      document.execCommand("insertHTML", false, sanitizeDocumentHtml(html));
-    } else {
-      document.execCommand("insertText", false, text);
-    }
-    handleEditorInput();
-  }, [handleEditorInput]);
-
+  // --- Regular document editing ---
 
   const revertChanges = useCallback(() => {
     if (!window.confirm("Discard all unsuggested changes and revert to original?")) return;
     setCurrentContent(originalContent);
+    setProposedChangeRanges([]);
     setDirty(false);
-    if (editorRef.current) editorRef.current.innerHTML = sanitizeDocumentHtml(originalContent);
-  }, [originalContent]);
+    // TipTapEditor syncs value prop changes automatically via internal useEffect
+  }, [originalContent, highFidelityManual]);
 
   const toggleFormat = useCallback((command: string, value?: string) => {
-    const el = editorRef.current;
-    if (!el) return;
-    document.execCommand(command, false, value || undefined);
-    const html = sanitizeDocumentHtml(el.innerHTML);
-    if (html !== el.innerHTML) el.innerHTML = html;
-    setCurrentContent(html);
+    if (highFidelityManual) return;
+    if (!tipTapEditorRef.current) return;
+    if (command === "bold") tipTapEditorRef.current.commands.toggleBold();
+    else if (command === "italic") tipTapEditorRef.current.commands.toggleItalic();
+    else if (command === "underline") tipTapEditorRef.current.commands.toggleUnderline();
+    else if (command === "insertOrderedList") tipTapEditorRef.current.commands.toggleOrderedList();
+    else if (command === "bulletList") tipTapEditorRef.current.commands.toggleBulletList();
+    else if (command === "insertLink" && value) tipTapEditorRef.current.commands.extendMarkRange("link", { href: value });
+    else if (command === "insertImage" && value) tipTapEditorRef.current.commands.setImage({ src: value });
     setDirty(true);
-  }, []);
+  }, [highFidelityManual]);
 
   const hasChanges = currentContent !== originalContent;
-  const highFidelityManual = /<(?:style|link|svg)\b|@import\b/i.test(originalContent) || /\sstyle\s*=/i.test(originalContent) || /class=["'][^"']*\b(?:pf|pc|t)\b/i.test(originalContent);
+
+  // --- High-fidelity manual: text selection for proposing changes ---
+
+  const handleEditorMouseUp = useCallback(() => {
+    if (!highFidelityManual) return;
+    const el = editorRef.current;
+    if (!el) return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return;
+    const text = selection.toString().trim();
+    if (!text || text.length < 2) return;
+
+    const range = selection.getRangeAt(0);
+    // Compute offsets within the editor's text content for reference
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let startOffset = 0;
+    let endOffset = 0;
+    let current = 0;
+    let foundStart = false;
+    let foundEnd = false;
+
+    let node: Node | null;
+    while ((node = walker.nextNode()) && (!foundEnd)) {
+      const len = node.textContent?.length || 0;
+      if (!foundStart && range.startContainer === node.parentNode || range.startContainer === node) {
+        startOffset = current + (range.startContainer === node ? range.startOffset : 0);
+        foundStart = true;
+      }
+      if (foundStart && range.endContainer === node.parentNode || range.endContainer === node) {
+        endOffset = current + (range.endContainer === node ? range.endOffset : 0);
+        foundEnd = true;
+      }
+      current += len;
+    }
+
+    setSelectionPending({ text, start: Math.max(0, startOffset), end: Math.max(0, endOffset) });
+    setProposeDialogOpen(true);
+  }, [highFidelityManual]);
+
+  const handleProposeChange = useCallback(() => {
+    if (!selectionPending) return;
+    const newRange = {
+      id: `${Date.now()}`,
+      originalText: selectionPending.text,
+      proposedText: proposedReplacement.trim() || selectionPending.text,
+      startOffset: selectionPending.start,
+      endOffset: selectionPending.end,
+    };
+    setProposedChangeRanges((prev) => [...prev, newRange]);
+    setSelectionPending(null);
+    setProposedReplacement("");
+    setProposeDialogOpen(false);
+    setDirty(true);
+  }, [selectionPending, proposedReplacement]);
+
+  const removeProposedChange = useCallback((id: string) => {
+    setProposedChangeRanges((prev) => prev.filter((r) => r.id !== id));
+    setDirty(true);
+  }, []);
 
   const { data: proposalPreview, isLoading: previewLoading } = useQuery({
     queryKey: ["proposal-preview", docId, currentContent],
@@ -291,13 +379,11 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       setSelectedChangeSequences([]);
       setSubmitRationale("");
       setSubmitSeverity("minor");
-      setLiveSuggestionContent("");
+      setProposedChangeRanges([]);
       setDirty(false);
       setEditError("");
-      // Reset the editor to the original content so the submitted changes
-      // no longer appear as pending edits in the editor or diff preview.
       setCurrentContent(originalContent);
-      if (editorRef.current) editorRef.current.innerHTML = sanitizeDocumentHtml(originalContent);
+      // TipTapEditor syncs value prop changes automatically via internal useEffect
       qc.invalidateQueries({ queryKey: ["doc-content", docId] });
       toast({ title: "Proposal submitted", message: "Your change proposal has been submitted for manual review.", type: "success" });
     },
@@ -310,7 +396,21 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const handleSubmitProposal = () => {
     setEditError("");
     if (highFidelityManual) {
-      setEditError("Proposal submission is disabled for this formatted manual because secure sanitization can alter its embedded layout. No edited content will be submitted.");
+      if (proposedChangeRanges.length === 0) {
+        setEditError("No changes were proposed for submission.");
+        return;
+      }
+      // Build proposed content by applying replacements to original text for preview
+      let proposedText = originalContent;
+      for (const change of proposedChangeRanges) {
+        proposedText = proposedText.split(change.originalText).join(change.proposedText);
+      }
+      createProposalMutation.mutate({
+        proposed_content: sanitizeDocumentHtml(proposedText),
+        selected_change_sequences: proposedChangeRanges.map((_, i) => i),
+        rationale: submitRationale.trim() || undefined,
+        severity: submitSeverity || "minor",
+      });
       return;
     }
     if (!proposalPreview?.changes?.length) {
@@ -349,11 +449,11 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
   const handleSave = () => {
     setEditError("");
     if (highFidelityManual) {
-      setEditError("Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Proposal submission is also disabled; no edited content will be submitted.");
+      setEditError("Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Propose changes instead; they undergo manual review before adoption.");
       return;
     }
     setSaving(true);
-    updateMutation.mutate({ content: sanitizeDocumentHtml(currentContent), change_summary: changeSummary });
+    updateMutation.mutate({ content: currentContent, change_summary: changeSummary });
   };
 
   const primaryDetectedChange = proposalPreview?.changes?.find((change: any) => selectedChangeSequences.includes(change.change_sequence)) || proposalPreview?.changes?.[0];
@@ -362,10 +462,10 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 
   return (
     <div ref={editorShellRef} className={`flex flex-col h-full relative ${isFullscreen ? "bg-kfl-canvas p-4" : ""}`}>
-      {/* Moveable suggesting toolbar. Drag the grip to reposition; position is remembered locally. */}
+      {/* Moveable suggesting toolbar */}
       <div
         ref={toolbarRef}
-        className={`fixed z-50 rounded-xl border border-kfl-border bg-white/95 p-2 shadow-xl backdrop-blur-md ${toolbarDragging ? "cursor-grabbing select-none" : ""} ${toolbarPosition ? "" : "bottom-4 left-4"}`}
+        className={`fixed z-50 rounded-xl border border-kfl-border bg-kfl-surface p-2 shadow-xl backdrop-blur-md ${toolbarDragging ? "cursor-grabbing select-none" : ""} ${toolbarPosition ? "" : "bottom-4 left-4"}`}
         style={toolbarPosition ? { left: toolbarPosition.left, top: toolbarPosition.top } : undefined}
       >
         <div className="flex flex-col gap-1">
@@ -379,7 +479,9 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             >
               <GripVertical size={14} />
             </button>
-            <span className="text-[10px] font-semibold text-kfl-text" title="Mode">Suggest</span>
+            <span className="text-[10px] font-semibold text-kfl-text" title="Mode">
+              {highFidelityManual ? "Read-Only (Formatted)" : "Suggesting"}
+            </span>
             {toolbarPosition && (
               <button
                 type="button"
@@ -391,29 +493,31 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
               </button>
             )}
           </div>
-          <div className="flex gap-1 px-1">
-            <button onClick={() => toggleFormat("bold")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Bold"><Bold size={14} className="text-kfl-blue font-bold" /></button>
-            <button onClick={() => toggleFormat("italic")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Italic"><Italic size={14} className="text-kfl-blue font-bold" /></button>
-            <button onClick={() => toggleFormat("underline")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Underline"><Underline size={14} className="text-kfl-blue font-bold" /></button>
-            <button onClick={() => toggleFormat("insertOrderedList")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Ordered List"><ListOrdered size={14} className="text-kfl-blue font-bold" /></button>
-            <button onClick={() => toggleFormat("insertLink")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Insert Link"><Link size={14} className="text-kfl-blue font-bold" /></button>
-            <button onClick={() => {
-              const url = window.prompt("Image URL:");
-              if (url) toggleFormat("insertImage", url);
-            }} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Insert Image"><ImageIcon size={14} className="text-kfl-blue font-bold" /></button>
-          </div>
+          {!highFidelityManual && (
+            <div className="flex gap-1 px-1">
+              <button onClick={() => toggleFormat("bold")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Bold"><Bold size={14} className="text-kfl-blue font-bold" /></button>
+              <button onClick={() => toggleFormat("italic")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Italic"><Italic size={14} className="text-kfl-blue font-bold" /></button>
+              <button onClick={() => toggleFormat("underline")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Underline"><Underline size={14} className="text-kfl-blue font-bold" /></button>
+              <button onClick={() => toggleFormat("insertOrderedList")} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Ordered List"><ListOrdered size={14} className="text-kfl-blue font-bold" /></button>
+              <button onClick={() => { const url = window.prompt("Link URL:"); if (url) toggleFormat("insertLink", url); }} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Insert Link"><Link size={14} className="text-kfl-blue font-bold" /></button>
+              <button onClick={() => {
+                const url = window.prompt("Image URL:");
+                if (url) toggleFormat("insertImage", url);
+              }} className="p-1.5 hover:bg-kfl-blue/10 rounded transition" title="Insert Image"><ImageIcon size={14} className="text-kfl-blue font-bold" /></button>
+            </div>
+          )}
           <div className="flex gap-1 px-1 border-t border-kfl-border pt-1">
             <button
               onClick={() => setShowPreview(!showPreview)}
               className={`p-1.5 hover:bg-kfl-blue/10 rounded transition ${showPreview ? "bg-kfl-blue/10" : ""}`}
-              title={showPreview ? "Hide live suggestions" : "Show live suggestions"}
+              title={showPreview ? "Hide live suggestions" : "Show suggestions"}
             >
               <Eye size={14} className="text-kfl-blue font-bold" />
             </button>
             {canPropose && (
               <button
                 onClick={() => setShowSubmit(true)}
-                disabled={highFidelityManual}
+                disabled={highFidelityManual ? proposedChangeRanges.length === 0 : false}
                 className="p-1.5 hover:bg-emerald-500/10 rounded transition text-emerald-600 font-bold disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Submit proposal for review"
                 title="Submit proposal for review"
@@ -450,46 +554,61 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
         <div>
           <h2 className="text-lg font-bold text-kfl-text">{docId}</h2>
           <p className="text-xs text-kfl-muted">
-            Mode: <span className="font-semibold text-emerald-600">Suggesting</span>{hasChanges ? ` · unsaved changes` : ""}
+            Mode:{" "}
+            {highFidelityManual ? (
+              <span className="font-semibold text-blue-600">Read-Only (Formatted Manual)</span>
+            ) : (
+              <span className="font-semibold text-emerald-600">Suggesting</span>
+            )}
+            {hasChanges ? ` · unsaved changes` : ""}
           </p>
+          {highFidelityManual && proposedChangeRanges.length > 0 && (
+            <p className="text-xs text-kfl-muted mt-1">
+              {proposedChangeRanges.length} proposed change{proposedChangeRanges.length !== 1 ? "s" : ""} highlighted in the document.
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={() => setShowPreview(!showPreview)}
-            className="app-btn-secondary px-3 py-2 flex items-center gap-1 text-sm"
+            variant="outline"
+            size="sm"
           >
             <Eye size={16} /> {showPreview ? "Hide suggestions" : "Show suggestions"}
-          </button>
+          </Button>
           {canUpdate && (
-            <button
+            <Button
               onClick={handleSave}
               disabled={saving || !dirty || highFidelityManual}
-              className="app-btn-primary px-4 py-2 flex items-center gap-1 text-sm"
+              size="sm"
             >
               <Save size={16} /> {saving ? "Saving…" : "Save as Draft"}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             onClick={() => setDocId("")}
-            className="app-btn-secondary px-3 py-2 flex items-center gap-1 text-sm"
+            variant="outline"
+            size="sm"
           >
             <ArrowLeft size={16} /> Back
-          </button>
+          </Button>
         </div>
       </div>
       {editError && (
         <div className="px-5 py-2">
-          <div className="p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">{editError}</div>
+          <div className="p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{editError}</div>
         </div>
       )}
       {highFidelityManual && (
-        <div className="px-5 py-2">
-          <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Proposal submission is also disabled; no edited content will be submitted.</div>
-        </div>
+      <div className="px-5 py-2">
+      <div className="rounded-md border border-kfl-status-warning-bg bg-kfl-status-warning-bg/20 p-3 text-sm text-kfl-status-warning">
+        Direct draft saving is disabled for this formatted manual because secure sanitization can alter its embedded layout. Proposal submission is also disabled; propose changes instead, they undergo manual review before adoption.
+      </div>
+      </div>
       )}
       <div className={`flex-1 min-h-[600px] overflow-y-auto relative ${showOutline ? "flex" : ""}`}>
         {showOutline && (
-          <aside className="relative z-20 w-80 border-r border-kfl-border bg-kfl-surface-subtle shrink-0 pointer-events-auto">
+          <aside className="relative w-80 border-r border-kfl-border bg-kfl-surface-subtle shrink-0 pr-2 pointer-events-auto">
             <DocumentOutline
               items={outlineItems}
               activeAnchor={activeOutlineAnchor}
@@ -497,28 +616,71 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
             />
           </aside>
         )}
-        <div className="flex-1 flex flex-col gap-4">
-          {/* Suggesting-mode banner */}
-          <div className="border-b border-kfl-border bg-emerald-50 p-2 flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Suggesting mode — changes are tracked live below while you edit.</span>
-            <button
-              onClick={revertChanges}
-              className="text-xs text-rose-600 hover:text-rose-800 underline"
-            >
-              Revert all suggestions
-            </button>
-          </div>
+        <div className={`flex-1 flex flex-col gap-4 ${showOutline ? "pl-2" : ""}`}>
+          {!highFidelityManual && (
+            <>
+              {/* Suggesting-mode banner */}
+              <div className="border-b border-kfl-border bg-emerald-50 p-2 flex flex-wrap gap-2 items-center">
+                <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Suggesting mode — changes are tracked live below while you edit.</span>
+                <button
+                  onClick={revertChanges}
+                  className="text-xs text-rose-600 hover:text-rose-800 underline"
+                >
+                  Revert all suggestions
+                </button>
+              </div>
 
-          {/* Editable rich-text area — current proposed content */}
-          <div ref={editorRef}
-            className="min-h-[500px] overflow-y-auto bg-white p-4 text-kfl-text"
-            contentEditable={true}
-            onInput={handleEditorInput}
-            onPaste={handleEditorPaste}
-            onDrop={(event) => event.preventDefault()}
-            suppressContentEditableWarning={true}
-            spellCheck={true}
-          />
+              {/* Editable rich-text area — current proposed content */}
+              <TipTapEditor
+                value={currentContent}
+                onChange={setCurrentContent}
+                editorRef={(editor) => { tipTapEditorRef.current = editor; }}
+                className="min-h-[500px] overflow-y-auto bg-kfl-surface p-4 text-kfl-text"
+              />
+            </>
+          )}
+          {highFidelityManual && (
+            <>
+              {/* Read-only formatted manual — exact layout preserved */}
+              <div ref={editorRef}
+                className="min-h-[500px] overflow-y-auto bg-white p-4 text-kfl-text leading-relaxed"
+                contentEditable={false}
+                onMouseUp={handleEditorMouseUp}
+                onContextMenu={() => {
+                  // Allow native context menu for copy; selection handled by onMouseUp
+                }}
+                onInput={(e) => e.preventDefault()}
+                onPaste={(e) => e.preventDefault()}
+                suppressContentEditableWarning={true}
+              >
+                {/* Content injected via useEffect into innerHTML to preserve formatting */}
+              </div>
+              {proposedChangeRanges.length > 0 && (
+                <div className="border-t border-kfl-border bg-kfl-surface-subtle p-3">
+                  <h4 className="text-xs font-semibold text-kfl-text mb-2">Proposed Changes</h4>
+                  <ul className="space-y-1 text-xs">
+                    {proposedChangeRanges.map((change) => (
+                      <li key={change.id} className="flex items-start gap-2 p-1.5 rounded border border-kfl-border bg-kfl-surface">
+                        <button
+                          onClick={() => removeProposedChange(change.id)}
+                          className="text-rose-600 hover:text-rose-800 underline text-[10px] ml-auto"
+                          title="Remove proposed change"
+                        >
+                          Remove
+                        </button>
+                        <div>
+                          <div className="text-[10px] text-kfl-muted">Original:</div>
+                          <div className="text-xs line-through text-red-600">{change.originalText}</div>
+                          <div className="text-[10px] text-kfl-muted mt-0.5">Proposed:</div>
+                          <div className="text-xs underline text-emerald-700">{change.proposedText}</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
 
           <div className="border-t border-kfl-border bg-kfl-surface-subtle px-4 py-3 flex gap-4 items-start">
             <div className="flex-1">
@@ -550,103 +712,164 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       </div>
 
       {/* Submit Proposal Dialog */}
-      {canPropose && showSubmit && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl border border-white">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-kfl-text">Submit Change Proposal</h3>
-              <button onClick={() => setShowSubmit(false)} className="text-kfl-muted hover:text-kfl-text"><X size={20} /></button>
-            </div>
-            <p className="text-sm text-kfl-muted mb-4">
+      <Dialog open={showSubmit && canPropose} onOpenChange={open => { if (!open) setShowSubmit(false); }}>
+        <DialogContent className="max-w-md w-full">
+          <DialogHeader>
+            <DialogTitle>Submit Change Proposal</DialogTitle>
+            <DialogDescription>
               Your suggested changes will be recorded as a proposal and undergo the prescribed manual change process before being adopted or rejected.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="proposal-target-ref" className="block text-xs font-semibold text-kfl-muted mb-1">Auto-detected Target Reference</label>
-                <input
-                  id="proposal-target-ref"
-                  name="target_ref"
-                  readOnly
-                  className="w-full border border-kfl-border rounded p-2 text-sm bg-kfl-surface-subtle text-kfl-text"
-                  value={primaryDetectedChange?.target_ref || (previewLoading ? "Detecting changed sections…" : "No detected change")}
-                />
-              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {highFidelityManual ? (
               <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs font-semibold text-kfl-text">Detected changes</span>
-                  <span className="text-xs text-kfl-muted">{proposalPreview?.change_count ?? 0} total · {selectedChangeSequences.length} selected</span>
+                  <span className="text-xs font-semibold text-kfl-text">Proposed changes</span>
+                  <span className="text-xs text-kfl-muted">{proposedChangeRanges.length} proposed</span>
                 </div>
-                {previewLoading ? (
-                  <p className="text-xs text-kfl-muted">Detecting sections and atomic changes…</p>
-                ) : proposalPreview?.changes?.length ? (
-                  <div className="max-h-56 space-y-2 overflow-y-auto">
-                    {proposalPreview.changes.map((change: any) => {
-                      const checked = selectedChangeSequences.includes(change.change_sequence);
-                      return (
-                        <label key={change.change_sequence} className="flex cursor-pointer gap-2 rounded border border-kfl-border bg-white p-2 text-xs">
-                          <input id="checked_526" name="checked"
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(event) => setSelectedChangeSequences((current) => event.target.checked ? [...current, change.change_sequence] : current.filter((sequence) => sequence !== change.change_sequence))}
-                          />
-                          <span>
-                            <span className="block font-semibold text-kfl-text">{change.target_ref}</span>
-                            <span className="block text-[11px] text-kfl-muted">{change.proposal_type} · {change.grouping_reason}</span>
-                            <span className="block text-red-700">{change.original_text || "(new text)"}</span>
-                            <span className="block text-emerald-700">→ {change.proposed_text || "(removed)"}</span>
-                          </span>
-                        </label>
-                      );
-                    })}
+                <div className="max-h-48 space-y-1 overflow-y-auto text-xs">
+                  {proposedChangeRanges.map((change) => (
+                    <div key={change.id} className="p-1 rounded border border-kfl-border bg-kfl-surface">
+                      <div className="text-[10px] text-kfl-muted line-through">{change.originalText}</div>
+                      <div className="text-[10px] underline text-emerald-700">{change.proposedText}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <Label htmlFor="proposal-target-ref">Auto-detected Target Reference</Label>
+                  <Input
+                    id="proposal-target-ref"
+                    name="target_ref"
+                    readOnly
+                    value={primaryDetectedChange?.target_ref || (previewLoading ? "Detecting changed sections…" : "No detected change")}
+                  />
+                </div>
+                <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-kfl-text">Detected changes</span>
+                    <span className="text-xs text-kfl-muted">{proposalPreview?.change_count ?? 0} total · {selectedChangeSequences.length} selected</span>
                   </div>
-                ) : (
-                  <p className="text-xs text-kfl-muted">No atomic changes detected.</p>
-                )}
-              </div>
-              <div>
-                <label htmlFor="proposal-rationale" className="block text-xs font-semibold text-kfl-muted mb-1">Rationale</label>
-                <textarea
-                  id="proposal-rationale"
-                  name="rationale"
-                  className="w-full border border-kfl-border rounded p-2 text-sm focus:border-kfl-blue focus:outline-none"
-                  placeholder="Why is this change needed?"
-                  value={submitRationale}
-                  onChange={(e) => setSubmitRationale(e.target.value)}
-                  rows={3}
-                />
-              </div>
-              <div>
-                <label htmlFor="proposal-severity" className="block text-xs font-semibold text-kfl-muted mb-1">Severity</label>
-                <select
-                  id="proposal-severity"
-                  name="severity"
-                  className="w-full border border-kfl-border rounded p-2 text-sm focus:border-kfl-blue focus:outline-none"
-                  value={submitSeverity}
-                  onChange={(e) => setSubmitSeverity(e.target.value)}
-                >
-                  <option value="minor">Minor</option>
-                  <option value="major">Major</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-              <div className="pt-3 border-t border-kfl-border text-xs text-kfl-muted">
-                <p><strong>Original text:</strong> {originalContent.length} chars</p>
-                <p><strong>Proposed text:</strong> {currentContent.length} chars</p>
-              </div>
+                  {previewLoading ? (
+                    <p className="text-xs text-kfl-muted">Detecting sections and atomic changes…</p>
+                  ) : proposalPreview?.changes?.length ? (
+                    <div className="max-h-56 space-y-2 overflow-y-auto">
+                      {proposalPreview.changes.map((change: any) => {
+                        const checked = selectedChangeSequences.includes(change.change_sequence);
+                        return (
+                          <label key={change.change_sequence} className="flex cursor-pointer gap-2 rounded border border-kfl-border bg-kfl-surface p-2 text-xs">
+                            <input id={`checked_${change.change_sequence}`} name="checked"
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => setSelectedChangeSequences((current) => event.target.checked ? [...current, change.change_sequence] : current.filter((sequence) => sequence !== change.change_sequence))}
+                            />
+                            <span>
+                              <span className="block font-semibold text-kfl-text">{change.target_ref}</span>
+                              <span className="block text-[11px] text-kfl-muted">{change.proposal_type} · {change.grouping_reason}</span>
+                              <span className="block text-red-700">{change.original_text || "(new text)"}</span>
+                              <span className="block text-emerald-700">→ {change.proposed_text || "(removed)"}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-kfl-muted">No atomic changes detected.</p>
+                  )}
+                </div>
+              </>
+            )}
+            <div>
+              <Label htmlFor="proposal-rationale">Rationale</Label>
+              <Textarea
+                id="proposal-rationale"
+                name="rationale"
+                placeholder="Why is this change needed?"
+                value={submitRationale}
+                onChange={(e) => setSubmitRationale(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div>
+              <Label htmlFor="proposal-severity">Severity</Label>
+              <Select onValueChange={(value) => setSubmitSeverity(value)}>
+                <SelectTrigger id="proposal-severity" name="severity">
+                  <SelectValue placeholder={submitSeverity} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="minor">Minor</SelectItem>
+                  <SelectItem value="major">Major</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="pt-3 border-t border-kfl-border text-xs text-kfl-muted">
+              <p><strong>Original text:</strong> {originalContent.length} chars</p>
+              <p><strong>Proposed text:</strong> {currentContent.length} chars</p>
             </div>
             <div className="mt-6 flex gap-2 justify-end">
-              <button onClick={() => setShowSubmit(false)} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
-              <button
+              <Button onClick={() => setShowSubmit(false)} variant="outline">Cancel</Button>
+              <Button
                 onClick={handleSubmitProposal}
-                disabled={submitting || previewLoading || !proposalPreview?.changes?.length || !selectedChangeSequences.length || !hasChanges}
-                className="app-btn-primary px-4 py-2 text-sm disabled:opacity-50"
+                disabled={submitting || previewLoading || !hasChanges || (highFidelityManual && proposedChangeRanges.length === 0) || (!highFidelityManual && (!proposalPreview?.changes?.length || !selectedChangeSequences.length))}
               >
                 {submitting ? "Submitting…" : "Submit Proposal"}
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+        <DialogClose>
+          <X size={20} />
+        </DialogClose>
+      </Dialog>
+
+      {/* Propose Change dialog (high-fidelity manual text selection) */}
+      <Dialog open={proposeDialogOpen} onOpenChange={setProposeDialogOpen}>
+        <DialogContent className="max-w-sm w-full">
+          <DialogHeader>
+            <DialogTitle>Propose Change</DialogTitle>
+            <DialogDescription>
+              Select the replacement text for the selected passage. The original formatting of the manual is preserved; only your proposed text is recorded for review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="propose-original">Original (read-only)</Label>
+              <Textarea
+                id="propose-original"
+                value={selectionPending?.text || ""}
+                readOnly
+                rows={3}
+                className="bg-kfl-surface-subtle"
+              />
+            </div>
+            <div>
+              <Label htmlFor="propose-replacement">Proposed replacement</Label>
+              <Textarea
+                id="propose-replacement"
+                value={proposedReplacement}
+                onChange={(e) => setProposedReplacement(e.target.value)}
+                placeholder="Type the replacement text…"
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2 justify-end">
+            <Button onClick={() => { setProposeDialogOpen(false); setSelectionPending(null); setProposedReplacement(""); }} variant="outline">Cancel</Button>
+            <Button
+              onClick={handleProposeChange}
+              disabled={!selectionPending || !proposedReplacement.trim()}
+            >
+              Propose Change
+            </Button>
+          </div>
+        </DialogContent>
+        <DialogClose>
+          <X size={20} />
+        </DialogClose>
+      </Dialog>
     </div>
   );
 }
@@ -682,7 +905,9 @@ function DocumentSelector({ setDocId }: { setDocId: (id: string) => void }) {
                 <td className="px-4 py-4 text-sm font-medium text-kfl-text">{d.title}</td>
                 <td className="px-4 py-4 text-sm text-kfl-secondary">{d.doc_class}</td>
                 <td className="px-4 py-4 text-sm">
-                  <span className={`app-status ${d.status === "published" ? "app-status-healthy" : d.status === "draft" ? "app-status-warning" : "app-status-info"}`}>{d.status}</span>
+                  <Badge variant={d.status === "published" ? "default" : d.status === "draft" ? "outline" : "secondary"} className={d.status === "published" ? "bg-kfl-status-success-bg text-kfl-status-success" : d.status === "draft" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}>
+                    {d.status}
+                  </Badge>
                 </td>
                 <td className="px-4 py-4 text-sm text-kfl-secondary">{d.kcaa_approval_required ? "Required" : "No"}</td>
                 <td className="px-4 py-4 text-sm text-kfl-secondary">{d.review_due_date || "—"}</td>

@@ -3,6 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { DutyRecord, CrewMember } from "../types";
 import { Clock, Plus, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 function formatHours(hours: number | null | undefined) {
   if (hours === null || hours === undefined) return "—";
@@ -21,7 +24,7 @@ export function DutyTimeTracking() {
     aircraft_reg: "",
     role: "",
     location: "",
-    block_hours: "" as string | number,
+    block_hours: "",
     notes: "",
   });
 
@@ -66,28 +69,26 @@ export function DutyTimeTracking() {
           <h1 className="app-title">Duty Time Tracking</h1>
           <p className="app-subtitle">Log duty periods, block hours, and FDTL compliance.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <Plus size={16} /> New Duty
-        </button>
+        </Button>
       </header>
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Duty Records</div>
           <div className="flex gap-2">
-            <select
-              id="duty_crew_filter"
-              name="crew_id"
-              aria-label="Filter by crew"
-              className="app-input w-full md:w-auto"
-              value={crewFilter}
-              onChange={(e) => setCrewFilter(e.target.value)}
-            >
-              <option value="">All crew</option>
-              {crewList.map((c: CrewMember) => (
-                <option key={c.crew_id} value={c.crew_id}>{c.full_name}</option>
-              ))}
-            </select>
+            <Select onValueChange={(e) => setCrewFilter(e)}>
+              <SelectTrigger id="duty_crew_filter" name="crew_id" aria-label="Filter by crew">
+                <SelectValue placeholder={crewFilter || "All crew"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All crew</SelectItem>
+                {crewList.map((c: CrewMember) => (
+                  <SelectItem key={c.crew_id} value={c.crew_id}>{c.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -125,35 +126,26 @@ export function DutyTimeTracking() {
                       <td className="px-4 py-4 text-sm text-kfl-secondary">{duty.aircraft_reg || "—"}</td>
                       <td className="px-4 py-4 text-sm text-kfl-secondary">{formatHours(duty.block_hours)}</td>
                       <td className="px-4 py-4 text-right">
-                        <button
-                          id={`edit_duty_${duty.duty_id}`}
-                          className="app-btn app-btn-ghost"
-                          onClick={() => {
-                            setEditingId(duty.duty_id);
-                            setForm({
-                              crew_id: duty.crew_id,
-                              duty_start: duty.duty_start,
-                              duty_end: duty.duty_end,
-                              aircraft_reg: duty.aircraft_reg || "",
-                              role: duty.role,
-                              location: duty.location || "",
-                              block_hours: duty.block_hours ?? "",
-                              notes: duty.notes || "",
-                            });
-                          }}
-                        >
+                        <Button variant="outline" size="sm" id={`edit_duty_${duty.duty_id}`} onClick={() => {
+                          setEditingId(duty.duty_id);
+                          setForm({
+                            crew_id: duty.crew_id,
+                            duty_start: duty.duty_start,
+                            duty_end: duty.duty_end,
+                            aircraft_reg: duty.aircraft_reg || "",
+                            role: duty.role,
+                            location: duty.location || "",
+                            block_hours: duty.block_hours != null ? String(duty.block_hours) : "",
+                            notes: duty.notes || "",
+                          });
+                        }}>
                           Edit
-                        </button>
-                        <button
-                          id={`delete_duty_${duty.duty_id}`}
-                          aria-label={`Delete duty record ${duty.duty_id}`}
-                          className="app-btn app-btn-ghost"
-                          onClick={() => {
-                            if (confirm("Delete this duty record?")) deleteMutation.mutate(duty.duty_id);
-                          }}
-                        >
+                        </Button>
+                        <Button variant="destructive" size="sm" aria-label={`Delete duty record ${duty.duty_id}`} id={`delete_duty_${duty.duty_id}`} onClick={() => {
+                          if (confirm("Delete this duty record?")) deleteMutation.mutate(duty.duty_id);
+                        }}>
                           <Trash2 size={14} />
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -174,104 +166,54 @@ export function DutyTimeTracking() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Crew Member</span>
-                <select
-                  id="duty_crew_id"
-                  name="crew_id"
-                  className="app-input"
-                  value={form.crew_id}
-                  onChange={(e) => setForm({ ...form, crew_id: e.target.value })}
-                >
-                  <option value="">Select crew</option>
-                  {crewList.map((c: CrewMember) => (
-                    <option key={c.crew_id} value={c.crew_id}>{c.full_name}</option>
-                  ))}
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, crew_id: e })}>
+                  <SelectTrigger id="duty_crew_id" name="crew_id">
+                    <SelectValue placeholder={form.crew_id || "Select crew"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Select crew</SelectItem>
+                    {crewList.map((c: CrewMember) => (
+                      <SelectItem key={c.crew_id} value={c.crew_id}>{c.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Role</span>
-                <input
-                  id="duty_role"
-                  name="role"
-                  className="app-input"
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                />
+                <Input id="duty_role" name="role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Duty Start</span>
-                <input
-                  id="duty_start"
-                  name="duty_start"
-                  type="datetime-local"
-                  className="app-input"
-                  value={form.duty_start}
-                  onChange={(e) => setForm({ ...form, duty_start: e.target.value })}
-                />
+                <Input id="duty_start" name="duty_start" type="datetime-local" value={form.duty_start} onChange={(e) => setForm({ ...form, duty_start: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Duty End</span>
-                <input
-                  id="duty_end"
-                  name="duty_end"
-                  type="datetime-local"
-                  className="app-input"
-                  value={form.duty_end}
-                  onChange={(e) => setForm({ ...form, duty_end: e.target.value })}
-                />
+                <Input id="duty_end" name="duty_end" type="datetime-local" value={form.duty_end} onChange={(e) => setForm({ ...form, duty_end: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Aircraft Registration</span>
-                <input
-                  id="duty_aircraft"
-                  name="aircraft_reg"
-                  className="app-input"
-                  value={form.aircraft_reg}
-                  onChange={(e) => setForm({ ...form, aircraft_reg: e.target.value })}
-                />
+                <Input id="duty_aircraft" name="aircraft_reg" value={form.aircraft_reg} onChange={(e) => setForm({ ...form, aircraft_reg: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Location</span>
-                <input
-                  id="duty_location"
-                  name="location"
-                  className="app-input"
-                  value={form.location}
-                  onChange={(e) => setForm({ ...form, location: e.target.value })}
-                />
+                <Input id="duty_location" name="location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Block Hours</span>
-                <input
-                  id="duty_block_hours"
-                  name="block_hours"
-                  type="number"
-                  step="0.1"
-                  className="app-input"
-                  value={form.block_hours}
-                  onChange={(e) => setForm({ ...form, block_hours: e.target.value === "" ? "" : parseFloat(e.target.value) })}
-                />
+                <Input id="duty_block_hours" name="block_hours" type="number" step="0.1" value={form.block_hours} onChange={(e) => setForm({ ...form, block_hours: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Notes</span>
-                <textarea
-                  id="duty_notes"
-                  name="notes"
-                  className="app-input"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
+                <textarea id="duty_notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="flex-1 min-h-[80px]" />
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => { setIsCreating(false); setEditingId(null); }}>Cancel</button>
-              <button
-                id="duty_submit"
-                className="app-btn"
-                disabled={!form.crew_id || !form.duty_start || !form.duty_end || !form.role}
-                onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}
-              >
+              <Button variant="outline" size="sm" onClick={() => { setIsCreating(false); setEditingId(null); }}>
+                Cancel
+              </Button>
+              <Button id="duty_submit" variant="default" size="sm" disabled={!form.crew_id || !form.duty_start || !form.duty_end || !form.role} onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}>
                 {editingId ? (updateMutation.isPending ? "Saving…" : "Save") : (createMutation.isPending ? "Creating…" : "Create")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

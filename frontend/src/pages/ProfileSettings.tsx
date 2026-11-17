@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import api from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function ProfileSettingsPage() {
   const [profile, setProfile] = useState<{
@@ -95,24 +97,24 @@ export function ProfileSettingsPage() {
 
       <section className="mb-6 app-surface overflow-hidden">
         <div className="border-b border-kfl-border px-5 py-4"><h2 className="font-bold text-kfl-text">Change Password</h2><p className="mt-1 text-xs text-kfl-muted">Update your account password.</p></div>
-        {error && <div role="alert" className="m-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-        {message && <div role="status" className="m-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}
+        {error && <div role="alert" className="m-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">{error}</div>}
+        {message && <div role="status" className="m-4 rounded-md border border-kfl-status-success-bg bg-kfl-status-success-bg/20 text-kfl-status-success p-3 text-sm">{message}</div>}
         <form onSubmit={handlePasswordChange} className="m-6 space-y-4">
           <div>
             <label htmlFor="profile-current-password" className="mb-1 block text-sm font-medium text-kfl-text">Current Password</label>
-            <input id="profile-current-password" name="current_password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required className="app-input w-full" />
+            <Input id="profile-current-password" name="current_password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required className="w-full" />
           </div>
           <div>
             <label htmlFor="profile-new-password" className="mb-1 block text-sm font-medium text-kfl-text">New Password</label>
-            <input id="profile-new-password" name="new_password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required minLength={12} className="app-input w-full" />
+            <Input id="profile-new-password" name="new_password" type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required minLength={12} className="w-full" />
           </div>
           <div>
             <label htmlFor="profile-confirm-password" className="mb-1 block text-sm font-medium text-kfl-text">Confirm New Password</label>
-            <input id="profile-confirm-password" name="confirm_password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={12} className="app-input w-full" />
+            <Input id="profile-confirm-password" name="confirm_password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={12} className="w-full" />
           </div>
-          <button type="submit" disabled={submitting} className="app-btn-primary w-full disabled:opacity-60">
+          <Button type="submit" disabled={submitting} variant="default" size="sm" className="w-full disabled:opacity-60">
             {submitting ? "Changing…" : "Change Password"}
-          </button>
+          </Button>
         </form>
       </section>
 

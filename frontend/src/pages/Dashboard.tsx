@@ -6,13 +6,15 @@ import { safetyApi } from "../api/safety";
 import { SafetyKPIsModal } from "../components/ui/modals/SafetyKPIsModal";
 import { useAuth } from "../auth/AuthContext";
 import { ROLE_WORKSPACES } from "../auth/permissions";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
-    blue: "bg-sky-50 text-kfl-blue",
-    green: "bg-emerald-50 text-emerald-700",
-    amber: "bg-amber-50 text-amber-700",
-    red: "bg-red-50 text-red-700",
+    blue: "bg-kfl-status-info-bg text-kfl-status-info",
+    green: "bg-kfl-status-success-bg text-kfl-status-success",
+    amber: "bg-kfl-status-warning-bg text-kfl-status-warning",
+    red: "bg-kfl-status-danger-bg text-kfl-status-danger",
   };
   return (
     <div className="app-surface p-5 transition hover:-translate-y-0.5 hover:shadow-card">
@@ -31,9 +33,9 @@ function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
 }
 
 function priorityClass(priority: string) {
-  if (priority === "critical") return "app-status app-status-critical";
-  if (priority === "high") return "app-status app-status-warning";
-  return "app-status app-status-info";
+  if (priority === "critical") return "badge badge-destructive";
+  if (priority === "high") return "badge badge-secondary";
+  return "badge badge-outline";
 }
 
 export function Dashboard() {
@@ -119,18 +121,21 @@ export function Dashboard() {
           <p className="app-subtitle">{profile?.user.full_name ? `Welcome, ${profile.user.full_name}. ` : ""}A clear view of safety, compliance, and operational commitments.</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`app-status ${hasDataErrors ? "app-status-warning" : "app-status-info"}`}>
+          <Badge variant={hasDataErrors ? "secondary" : "outline"} className={hasDataErrors ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}>
             {isLoading ? "Checking dashboard data" : hasDataErrors ? "Some dashboard data is unavailable" : "Dashboard data loaded"}
-          </span>
-          <Link to="/notifications" className="app-btn-secondary">
-            View notifications <ArrowUpRight size={15} />
-          </Link>
-          <button
+          </Badge>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/notifications">
+              View notifications <ArrowUpRight size={15} />
+            </Link>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setShowKpiModal(true)}
-            className="app-btn-secondary"
           >
             <BarChart3 size={16} /> View Safety KPIs
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -157,7 +162,9 @@ export function Dashboard() {
               </div>
               <p className="mt-1 text-xs text-kfl-muted">The next 30 days across the control system.</p>
             </div>
-            <Link to="/notifications" className="text-xs font-bold text-kfl-blue hover:text-kfl-blue-ink">Open centre</Link>
+            <Button asChild variant="outline" size="sm" className="text-xs">
+              <Link to="/notifications">Open centre</Link>
+            </Button>
           </div>
 
           <div className="p-5">
@@ -224,7 +231,9 @@ export function Dashboard() {
                   <p className="text-sm font-semibold text-kfl-text">{label}</p>
                   <p className="mt-0.5 text-xs text-kfl-muted">{value}</p>
                 </div>
-                <span className={`app-status ${tone === "critical" ? "app-status-critical" : tone === "healthy" ? "app-status-healthy" : "app-status-info"}`}>{status}</span>
+                <Badge variant={tone === "critical" ? "destructive" : tone === "healthy" ? "default" : "outline"} className={tone === "critical" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : tone === "healthy" ? "bg-kfl-status-success-bg text-kfl-status-success" : "bg-kfl-status-info-bg text-kfl-status-info"}>
+                  {status}
+                </Badge>
               </div>
             ))}
           </div>

@@ -5,26 +5,10 @@ import { AlertTriangle, Plus } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
-
-function riskClass(risk: string) {
-  switch (risk) {
-    case "critical": return "app-status app-status-critical";
-    case "high": return "app-status app-status-warning";
-    case "medium": return "app-status app-status-info";
-    case "low": return "app-status app-status-healthy";
-    default: return "app-status app-status-info";
-  }
-}
-
-function statusClass(status: string) {
-  switch (status) {
-    case "identified": return "app-status app-status-info";
-    case "assessed": return "app-status app-status-warning";
-    case "mitigated": return "app-status app-status-healthy";
-    case "closed": return "app-status app-status-info";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function Hazards() {
   const qc = useQueryClient();
@@ -87,12 +71,13 @@ export function Hazards() {
           <h1 className="app-title">Hazard Register</h1>
           <p className="app-subtitle">Identify, assess, and mitigate operational hazards.</p>
         </div>
-        <button
+        <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Hazard"}
-        </button>
+        </Button>
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -121,78 +106,102 @@ export function Hazards() {
               <div className="app-label mb-1">New Hazard</div>
               <p className="text-xs text-kfl-muted">Record a newly identified hazard for assessment and mitigation.</p>
             </div>
-            <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+              Cancel
+            </Button>
           </div>
           <div className="space-y-3 mb-4">
             <FormField htmlFor="hazard_title" label="Hazard title" hint="Brief title describing the hazard." required>
-              <input id="hazard_title" name="title" aria-describedby="hazard_title-error" aria-invalid={!!hazardErrors.title} className={`app-input ${hazardErrors.title ? "border-rose-400" : ""}`} placeholder="Hazard title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              <Input id="hazard_title" name="title" aria-describedby="hazard_title-error" aria-invalid={!!hazardErrors.title} className={hazardErrors.title ? "border-rose-400" : ""} placeholder="Hazard title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {hazardErrors.title && <p id="hazard_title-error" className="text-[11px] text-rose-700 mt-1">{hazardErrors.title}</p>}
             </FormField>
             <FormField htmlFor="hazard_description" label="Description" hint="Describe the hazard, conditions, and potential consequences." required>
-              <textarea id="hazard_description" name="description" aria-describedby="hazard_description-error" aria-invalid={!!hazardErrors.description} className={`app-input ${hazardErrors.description ? "border-rose-400" : ""}`} placeholder="Describe the hazard" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} rows={3} />
+              <textarea id="hazard_description" name="description" aria-describedby="hazard_description-error" aria-invalid={!!hazardErrors.description} className={hazardErrors.description ? "border-rose-400" : ""} placeholder="Describe the hazard" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} rows={3} />
               {hazardErrors.description && <p id="hazard_description-error" className="text-[11px] text-rose-700 mt-1">{hazardErrors.description}</p>}
             </FormField>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label className="app-label">Category</label>
-              <select id="hazard_category" name="category" value={category} onChange={(e) => { setCategory(e.target.value); setDirty(true); }} className="app-input">
-                <option value="operational">Operational</option>
-                <option value="technical">Technical</option>
-                <option value="environmental">Environmental</option>
-                <option value="human">Human Factors</option>
-                <option value="organizational">Organizational</option>
-              </select>
+              <Select onValueChange={(e) => { setCategory(e); setDirty(true); }}>
+                <SelectTrigger id="hazard_category" name="category">
+                  <SelectValue placeholder={category} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="operational">Operational</SelectItem>
+                  <SelectItem value="technical">Technical</SelectItem>
+                  <SelectItem value="environmental">Environmental</SelectItem>
+                  <SelectItem value="human">Human Factors</SelectItem>
+                  <SelectItem value="organizational">Organizational</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="app-label">Risk Level</label>
-              <select id="hazard_risk" name="risk_level" value={riskLevel} onChange={(e) => { setRiskLevel(e.target.value); setDirty(true); }} className="app-input">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
+              <Select onValueChange={(e) => { setRiskLevel(e); setDirty(true); }}>
+                <SelectTrigger id="hazard_risk" name="risk_level">
+                  <SelectValue placeholder={riskLevel} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label className="app-label">Likelihood</label>
-              <select id="hazard_likelihood" name="likelihood" value={likelihood} onChange={(e) => { setLikelihood(e.target.value); setDirty(true); }} className="app-input">
-                <option value="">—</option>
-                <option value="rare">Rare</option>
-                <option value="unlikely">Unlikely</option>
-                <option value="possible">Possible</option>
-                <option value="likely">Likely</option>
-                <option value="certain">Certain</option>
-              </select>
+              <Select onValueChange={(e) => { setLikelihood(e); setDirty(true); }}>
+                <SelectTrigger id="hazard_likelihood" name="likelihood">
+                  <SelectValue placeholder={likelihood || "—"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">—</SelectItem>
+                  <SelectItem value="rare">Rare</SelectItem>
+                  <SelectItem value="unlikely">Unlikely</SelectItem>
+                  <SelectItem value="possible">Possible</SelectItem>
+                  <SelectItem value="likely">Likely</SelectItem>
+                  <SelectItem value="certain">Certain</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <label className="app-label">Severity</label>
-              <select id="hazard_severity" name="severity" value={severity} onChange={(e) => { setSeverity(e.target.value); setDirty(true); }} className="app-input">
-                <option value="">—</option>
-                <option value="negligible">Negligible</option>
-                <option value="minor">Minor</option>
-                <option value="major">Major</option>
-                <option value="hazardous">Hazardous</option>
-                <option value="catastrophic">Catastrophic</option>
-              </select>
+              <Select onValueChange={(e) => { setSeverity(e); setDirty(true); }}>
+                <SelectTrigger id="hazard_severity" name="severity">
+                  <SelectValue placeholder={severity || "—"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">—</SelectItem>
+                  <SelectItem value="negligible">Negligible</SelectItem>
+                  <SelectItem value="minor">Minor</SelectItem>
+                  <SelectItem value="major">Major</SelectItem>
+                  <SelectItem value="hazardous">Hazardous</SelectItem>
+                  <SelectItem value="catastrophic">Catastrophic</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="space-y-3 mb-4">
             <FormField htmlFor="hazard_mitigation" label="Initial mitigation" hint="Planned controls or immediate actions.">
-              <textarea id="hazard_mitigation" name="mitigation" className="app-input" placeholder="Initial mitigation measures" value={mitigation} onChange={(e) => { setMitigation(e.target.value); setDirty(true); }} rows={2} />
+              <textarea id="hazard_mitigation" name="mitigation" placeholder="Initial mitigation measures" value={mitigation} onChange={(e) => { setMitigation(e.target.value); setDirty(true); }} rows={2} />
             </FormField>
             <FormField htmlFor="hazard_owner" label="Owner ID" hint="Person responsible for tracking this hazard.">
-              <input id="hazard_owner" name="owner_id" className="app-input" placeholder="e.g. u-safety/security" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
+              <Input id="hazard_owner" name="owner_id" placeholder="e.g. u-safety/security" value={ownerId} onChange={(e) => { setOwnerId(e.target.value); setDirty(true); }} />
             </FormField>
           </div>
-          <button
+          <Button
             disabled={!hazardIsValid || createMutation.isPending}
             onClick={() => createMutation.mutate({ title, description, category, risk_level: riskLevel, likelihood: likelihood || null, severity: severity || null, mitigation: mitigation || null, owner_id: ownerId || null })}
-            className="app-btn-primary w-full"
+            variant="default"
+            size="sm"
+            className="w-full disabled:opacity-60"
           >
             {createMutation.isPending ? "Submitting…" : "Submit Hazard"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -200,26 +209,36 @@ export function Hazards() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Hazard Register</div>
           <div className="flex gap-2">
-            <select id="hazard_status_filter" name="status" aria-label="Filter by status" className="app-input w-full md:w-auto" onChange={(e) => {
-              const val = e.target.value;
+            <Select onValueChange={(e) => {
+              const val = e;
               qc.setQueryData(["hazards"], (old: any[]) => val ? old.filter((h: any) => h.status === val) : old);
             }}>
-              <option value="">All statuses</option>
-              <option value="identified">Identified</option>
-              <option value="assessed">Assessed</option>
-              <option value="mitigated">Mitigated</option>
-              <option value="closed">Closed</option>
-            </select>
-            <select id="hazard_risk_filter" name="risk_level" aria-label="Filter by risk level" className="app-input w-full md:w-auto" onChange={(e) => {
-              const val = e.target.value;
+              <SelectTrigger id="hazard_status_filter" name="status" aria-label="Filter by status">
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="identified">Identified</SelectItem>
+                <SelectItem value="assessed">Assessed</SelectItem>
+                <SelectItem value="mitigated">Mitigated</SelectItem>
+                <SelectItem value="closed">Closed</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select onValueChange={(e) => {
+              const val = e;
               qc.setQueryData(["hazards"], (old: any[]) => val ? old.filter((h: any) => h.risk_level === val) : old);
             }}>
-              <option value="">All risk levels</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
+              <SelectTrigger id="hazard_risk_filter" name="risk_level" aria-label="Filter by risk level">
+                <SelectValue placeholder="All risk levels" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All risk levels</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="critical">Critical</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -254,25 +273,21 @@ export function Hazards() {
                       <div className="mt-1 text-xs text-kfl-muted line-clamp-1">{h.description}</div>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{h.category}</td>
-                    <td className="px-4 py-4">
-                      <span className={riskClass(h.risk_level)}>{h.risk_level}</span>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={statusClass(h.status)}>{h.status}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={h.risk_level === "critical" || h.risk_level === "high" ? "destructive" : h.risk_level === "medium" ? "secondary" : "default"} className={`badge ${h.risk_level === "critical" || h.risk_level === "high" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : h.risk_level === "medium" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{h.risk_level}</Badge></td>
+                    <td className="px-4 py-4"><Badge variant={h.status === "mitigated" || h.status === "closed" ? "default" : h.status === "assessed" ? "secondary" : "outline"} className={`badge ${h.status === "mitigated" || h.status === "closed" ? "bg-kfl-status-info-bg text-kfl-status-info" : h.status === "assessed" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{h.status}</Badge></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{h.owner_id || "—"}</td>
                     <td className="px-4 py-4 text-right text-sm">
-                      <select
-                        aria-label={`Update status for ${h.hazard_id}`}
-                        className="app-input w-auto text-xs"
-                        value={h.status}
-                        onChange={(e) => updateMutation.mutate({ id: h.hazard_id, data: { status: e.target.value } })}
-                      >
-                        <option value="identified">Identified</option>
-                        <option value="assessed">Assessed</option>
-                        <option value="mitigated">Mitigated</option>
-                        <option value="closed">Closed</option>
-                      </select>
+                      <Select onValueChange={(e) => updateMutation.mutate({ id: h.hazard_id, data: { status: e } })}>
+                        <SelectTrigger aria-label={`Update status for ${h.hazard_id}`} className="w-auto text-xs">
+                          <SelectValue placeholder={h.status} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="identified">Identified</SelectItem>
+                          <SelectItem value="assessed">Assessed</SelectItem>
+                          <SelectItem value="mitigated">Mitigated</SelectItem>
+                          <SelectItem value="closed">Closed</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </td>
                   </tr>
                 ))}
