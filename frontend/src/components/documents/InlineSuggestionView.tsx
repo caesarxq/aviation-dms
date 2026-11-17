@@ -7,7 +7,7 @@ export function InlineSuggestionView({ originalText, proposedText }: { originalT
   const deletions = segments.filter((segment) => segment.type === "removed").length;
 
   return (
-    <section className="rounded-lg border border-kfl-border bg-white" aria-label="Live suggestion markup">
+    <section className="rounded-lg border border-kfl-border bg-kfl-surface" aria-label="Live suggestion markup">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kfl-border bg-kfl-surface-subtle px-4 py-3">
         <div>
           <h3 className="text-sm font-bold text-kfl-text">Live suggestion markup</h3>

@@ -7,15 +7,9 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
-
-function outsourcedStatusClass(status: string) {
-  switch (status) {
-    case "active": return "app-status app-status-healthy";
-    case "inactive": return "app-status app-status-critical";
-    case "pending": return "app-status app-status-info";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 export function OutsourcedFunctions() {
   const qc = useQueryClient();
@@ -70,12 +64,13 @@ export function OutsourcedFunctions() {
           <h1 className="app-title">Outsourced Functions</h1>
           <p className="app-subtitle">Manage outsourced service providers and their scope of work.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "Add Provider"}
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -92,7 +87,7 @@ export function OutsourcedFunctions() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_providers_73" name="search_providers" type="search" aria-label="Search providers" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search providers…" className="app-input pl-9 relative z-10" />
+            <Input id="search_providers_73" name="search_providers" type="search" aria-label="Search providers" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search providers…" className="pl-9 relative z-10" />
           </div>
         </div>
 
@@ -103,24 +98,26 @@ export function OutsourcedFunctions() {
                 <div className="app-label mb-1">New Outsourced Function</div>
                 <p className="text-xs text-kfl-muted">Register an external service provider.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {ofError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {ofError}
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="provider_name_94" label="Provider name" hint="Use the legal or trading name of the external provider." required>
-                <input id="provider_name_94" name="provider_name" aria-describedby="provider_name_94-error" aria-invalid={!!ofFieldErrors.provider_name} className={`app-input ${ofFieldErrors.provider_name ? "border-rose-400" : ""}`} placeholder="Provider name" value={provider} onChange={(e) => { setProvider(e.target.value); setDirty(true); }} />
+                <Input id="provider_name_94" name="provider_name" aria-describedby="provider_name_94-error" aria-invalid={!!ofFieldErrors.provider_name} className={ofFieldErrors.provider_name ? "border-rose-400" : ""} placeholder="Provider name" value={provider} onChange={(e) => { setProvider(e.target.value); setDirty(true); }} />
                 {ofFieldErrors.provider_name && <p id="provider_name_94-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.provider_name}</p>}
               </FormField>
               <FormField htmlFor="scope_of_work_98" label="Scope of work" hint="Describe the service being outsourced." required>
-                <input id="scope_of_work_98" name="scope_of_work" aria-describedby="scope_of_work_98-error" aria-invalid={!!ofFieldErrors.scope_of_work} className={`app-input ${ofFieldErrors.scope_of_work ? "border-rose-400" : ""}`} placeholder="Scope of work" value={scope} onChange={(e) => { setScope(e.target.value); setDirty(true); }} />
+                <Input id="scope_of_work_98" name="scope_of_work" aria-describedby="scope_of_work_98-error" aria-invalid={!!ofFieldErrors.scope_of_work} className={ofFieldErrors.scope_of_work ? "border-rose-400" : ""} placeholder="Scope of work" value={scope} onChange={(e) => { setScope(e.target.value); setDirty(true); }} />
                 {ofFieldErrors.scope_of_work && <p id="scope_of_work_98-error" className="text-[11px] text-rose-700 mt-1">{ofFieldErrors.scope_of_work}</p>}
               </FormField>
             </div>
-            <button
+            <Button
               disabled={!ofIsValid || createMutation.isPending}
               onClick={() => {
                 setOfError("");
@@ -130,10 +127,12 @@ export function OutsourcedFunctions() {
                 }
                 createMutation.mutate({ provider_name: provider, scope });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create Provider"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -162,9 +161,7 @@ export function OutsourcedFunctions() {
                   <tr key={i.function_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.provider_name}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.scope}</td>
-                    <td className="px-4 py-4">
-                      <span className={outsourcedStatusClass(i.status)}>{i.status}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={i.status === "active" ? "default" : i.status === "inactive" ? "destructive" : "outline"} className={`badge ${i.status === "active" ? "bg-kfl-status-info-bg text-kfl-status-info" : i.status === "inactive" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{i.status}</Badge></td>
                   </tr>
                 ))}
               </tbody>
@@ -228,12 +225,13 @@ export function SafetyKPIs() {
           <h1 className="app-title">Safety KPIs</h1>
           <p className="app-subtitle">Monitor key safety performance indicators and targets.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <BarChart3 size={16} /> {showForm ? "Cancel" : "Add KPI"}
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -246,7 +244,7 @@ export function SafetyKPIs() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_kpis_208" name="search_kpis" type="search" aria-label="Search KPIs" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search KPIs…" className="app-input pl-9 relative z-10" />
+            <Input id="search_kpis_208" name="search_kpis" type="search" aria-label="Search KPIs" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search KPIs…" className="pl-9 relative z-10" />
           </div>
         </div>
 
@@ -257,23 +255,25 @@ export function SafetyKPIs() {
                 <div className="app-label mb-1">New Safety KPI</div>
                 <p className="text-xs text-kfl-muted">Define a safety performance indicator.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {kpiError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {kpiError}
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField htmlFor="kpi_name_229" label="KPI name" hint="Name the safety performance measure." required>
-                <input id="kpi_name_229" name="kpi_name" aria-describedby="kpi_name_229-error" aria-invalid={!!kpiFieldErrors.kpi_name} className={`app-input ${kpiFieldErrors.kpi_name ? "border-rose-400" : ""}`} placeholder="KPI name" value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} />
+                <Input id="kpi_name_229" name="kpi_name" aria-describedby="kpi_name_229-error" aria-invalid={!!kpiFieldErrors.kpi_name} className={kpiFieldErrors.kpi_name ? "border-rose-400" : ""} placeholder="KPI name" value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} />
                 {kpiFieldErrors.kpi_name && <p id="kpi_name_229-error" className="text-[11px] text-rose-700 mt-1">{kpiFieldErrors.kpi_name}</p>}
               </FormField>
               <FormField htmlFor="target_value_233" label="Target value" hint="Include the unit or threshold in the target description.">
-                <input id="target_value_233" name="target_value" className="app-input" placeholder="Target value" value={target} onChange={(e) => { setTarget(e.target.value); setDirty(true); }} />
+                <Input id="target_value_233" name="target_value" placeholder="Target value" value={target} onChange={(e) => { setTarget(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
-            <button
+            <Button
               disabled={!kpiIsValid || createMutation.isPending}
               onClick={() => {
                 setKpiError("");
@@ -283,10 +283,12 @@ export function SafetyKPIs() {
                 }
                 createMutation.mutate({ kpi_name: name, target });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create KPI"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -377,12 +379,13 @@ export function SecurityReviews() {
           <h1 className="app-title">Security Review Meetings</h1>
           <p className="app-subtitle">Schedule and track security review meetings.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Calendar size={16} /> {showForm ? "Cancel" : "Schedule Review"}
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -395,7 +398,7 @@ export function SecurityReviews() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_reviews_339" name="search_reviews" type="search" aria-label="Search reviews" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search reviews…" className="app-input pl-9 relative z-10" />
+            <Input id="search_reviews_339" name="search_reviews" type="search" aria-label="Search reviews" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search reviews…" className="pl-9 relative z-10" />
           </div>
         </div>
 
@@ -406,18 +409,20 @@ export function SecurityReviews() {
                 <div className="app-label mb-1">Schedule Security Review</div>
                 <p className="text-xs text-kfl-muted">Create a security review meeting record.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {srError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {srError}
               </div>
             )}
             <FormField htmlFor="date_357" label="Meeting date" required>
-              <input id="date_357" name="date" aria-describedby="date_357-error" aria-invalid={!!srFieldErrors.meeting_date} type="date" className={`app-input mb-3 ${srFieldErrors.meeting_date ? "border-rose-400" : ""}`} value={date} onChange={(e) => { setDate(e.target.value); setDirty(true); }} />
+              <Input id="date_357" name="date" aria-describedby="date_357-error" aria-invalid={!!srFieldErrors.meeting_date} type="date" className={srFieldErrors.meeting_date ? "border-rose-400" : ""} value={date} onChange={(e) => { setDate(e.target.value); setDirty(true); }} />
               {srFieldErrors.meeting_date && <p id="date_357-error" className="text-[11px] text-rose-700 mt-1">{srFieldErrors.meeting_date}</p>}
             </FormField>
-            <button
+            <Button
               disabled={!srIsValid || createMutation.isPending}
               onClick={() => {
                 setSrError("");
@@ -427,10 +432,12 @@ export function SecurityReviews() {
                 }
                 createMutation.mutate({ meeting_date: date });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Scheduling…" : "Schedule Review"}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -525,12 +532,13 @@ export function DGResponsibilityMatrix() {
           <h1 className="app-title">DG Responsibility Matrix</h1>
           <p className="app-subtitle">Assign DG responsibilities across projects and routes.</p>
         </div>
-        {hasPermission("safety:create") && <button
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Share2 size={16} /> {showForm ? "Cancel" : "Add Entry"}
-        </button>}
+        </Button>}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -543,7 +551,7 @@ export function DGResponsibilityMatrix() {
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
-            <input id="search_matrix_entries_465" name="search_matrix_entries" type="search" aria-label="Search matrix entries" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search matrix entries…" className="app-input pl-9 relative z-10" />
+            <Input id="search_matrix_entries_465" name="search_matrix_entries" type="search" aria-label="Search matrix entries" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search matrix entries…" className="pl-9 relative z-10" />
           </div>
         </div>
 
@@ -554,26 +562,28 @@ export function DGResponsibilityMatrix() {
                 <div className="app-label mb-1">New DG Responsibility Entry</div>
                 <p className="text-xs text-kfl-muted">Assign DG responsibility for a project or route.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             {dgError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {dgError}
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <FormField htmlFor="project_or_route_486" label="Project or route" hint="Identify the operation or route covered." required>
-                <input id="project_or_route_486" name="project_or_route" aria-describedby="project_or_route_486-error" aria-invalid={!!dgFieldErrors.project_or_route} className={`app-input ${dgFieldErrors.project_or_route ? "border-rose-400" : ""}`} placeholder="Project or route" value={project} onChange={(e) => { setProject(e.target.value); setDirty(true); }} />
+                <Input id="project_or_route_486" name="project_or_route" aria-describedby="project_or_route_486-error" aria-invalid={!!dgFieldErrors.project_or_route} className={dgFieldErrors.project_or_route ? "border-rose-400" : ""} placeholder="Project or route" value={project} onChange={(e) => { setProject(e.target.value); setDirty(true); }} />
                 {dgFieldErrors.project_or_route && <p id="project_or_route_486-error" className="text-[11px] text-rose-700 mt-1">{dgFieldErrors.project_or_route}</p>}
               </FormField>
               <FormField htmlFor="process_stage_490" label="Process stage" hint="Name the stage where DG responsibility applies.">
-                <input id="process_stage_490" name="process_stage" className="app-input" placeholder="Process stage" value={stage} onChange={(e) => { setStage(e.target.value); setDirty(true); }} />
+                <Input id="process_stage_490" name="process_stage" placeholder="Process stage" value={stage} onChange={(e) => { setStage(e.target.value); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="responsible_role_494" label="Responsible role" hint="Use the accountable post or role, not a password or secret.">
-                <input id="responsible_role_494" name="responsible_role" className="app-input" placeholder="Responsible role" value={role} onChange={(e) => { setRole(e.target.value); setDirty(true); }} />
+                <Input id="responsible_role_494" name="responsible_role" placeholder="Responsible role" value={role} onChange={(e) => { setRole(e.target.value); setDirty(true); }} />
               </FormField>
             </div>
-            <button
+            <Button
               disabled={!dgIsValid || createMutation.isPending}
               onClick={() => {
                 setDgError("");
@@ -583,10 +593,12 @@ export function DGResponsibilityMatrix() {
                 }
                 createMutation.mutate({ project_or_route: project, process_stage: stage, responsible_role: role });
               }}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Creating…" : "Create Entry"}
-            </button>
+            </Button>
           </div>
         )}
 

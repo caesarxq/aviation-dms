@@ -1,6 +1,9 @@
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   ArrowLeft,
   Copy,
@@ -18,8 +21,7 @@ import {
   type OutlineItem,
 } from "../components/documents/DocumentOutline";
 
-const DOCUMENT_CSP =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'>';
+const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\">';
 
 function addDocumentCsp(source: string): string {
   const isHtmlDocument = /<(?:!doctype\s+html|html\b|head\b|body\b|div\b|p\b|h[1-6]\b|table\b|span\b|section\b)/i.test(source);
@@ -259,9 +261,9 @@ export function DocumentViewer() {
   };
 
   const getStatusColor = (status: string) => {
-    if (status === "resolved") return "bg-green-100 text-green-800";
-    if (status === "dismissed") return "bg-gray-100 text-gray-800";
-    return "bg-blue-100 text-blue-800";
+    if (status === "resolved") return "bg-kfl-status-info-bg text-kfl-status-info";
+    if (status === "dismissed") return "bg-kfl-surface-subtle text-kfl-muted";
+    return "bg-kfl-status-warning-bg text-kfl-status-warning";
   };
 
   if (isLoading) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading document…</div></div>;
@@ -279,92 +281,98 @@ export function DocumentViewer() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={() => setShowOutline((value) => !value)}
-            className={`app-btn-secondary px-3 py-2 flex items-center gap-1 ${showOutline ? "bg-kfl-blue/10" : ""}`}
+            variant={showOutline ? "default" : "outline"}
+            size="sm"
             aria-label={showOutline ? "Hide document outline" : "Show document outline"}
           >
             <ListTree size={16} /> {showOutline ? "Hide outline" : "Outline"}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={toggleFullscreen}
-            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
+            variant="outline"
+            size="sm"
             title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
           >
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => navigator.clipboard.writeText(content.content || "")}
-            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
+            variant="outline"
+            size="sm"
           >
             <Copy size={16} /> Copy Content
-          </button>
+          </Button>
           {attachedFiles.length > 0 && (
             <div className="flex items-center gap-2 border-l border-kfl-border pl-3">
               <div className="text-xs text-kfl-muted">Attached files:</div>
               {attachedFiles.map((f: any) => (
-                <button
+                <Button
                   key={f.file_id}
                   onClick={() => downloadFileMutation.mutate({ fileId: f.file_id, originalFilename: f.original_filename })}
-                  className="app-btn-secondary px-2 py-1 text-xs hover:bg-kfl-blue/10"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs px-2 py-1 hover:bg-kfl-surface-subtle"
                   title={`Download ${f.original_filename} (${f.file_size} bytes)`}
                 >
                   <Download size={12} /> {f.original_filename.length > 20 ? `${f.original_filename.slice(0, 17)}…` : f.original_filename}
-                </button>
+                </Button>
               ))}
             </div>
           )}
-          <button
+          <Button
             onClick={() => window.history.back()}
-            className="app-btn-secondary px-3 py-2 flex items-center gap-1"
+            variant="outline"
+            size="sm"
           >
             <ArrowLeft size={16} /> Back
-          </button>
+          </Button>
         </div>
       </header>
       {selection && (
         <div
-          className="fixed z-50 max-w-sm rounded border border-kfl-border bg-white p-3 shadow-lg"
+          className="fixed z-50 max-w-sm rounded-md border border-kfl-border bg-kfl-popover p-3 shadow-lg"
           style={{ left: selection.x, top: selection.y }}
           role="dialog"
           aria-label="Add document annotation"
         >
           <p className="mb-2 text-xs text-kfl-muted">Selected: "{selection.text}"</p>
           <div className="mb-2 flex gap-2">
-            <button type="button" onClick={() => setAnnotationType("comment")} className="app-btn-secondary px-2 py-1 text-xs">
+            <Button type="button" onClick={() => setAnnotationType("comment")} variant="outline" size="sm" className="px-2 py-1 text-xs">
               Comment
-            </button>
-            <button type="button" onClick={() => setAnnotationType("highlight")} className="app-btn-secondary px-2 py-1 text-xs">
+            </Button>
+            <Button type="button" onClick={() => setAnnotationType("highlight")} variant="outline" size="sm" className="px-2 py-1 text-xs">
               Highlight
-            </button>
+            </Button>
           </div>
-          <label htmlFor="document-annotation-comment" className="mb-1 block text-xs font-semibold">
+          <label htmlFor="document-annotation-comment" className="mb-1 block text-xs font-semibold text-kfl-text">
             Comment
           </label>
-          <textarea ref={annotationCommentRef} id="document-annotation-comment" name="content" className="app-input mb-2 w-full" rows={2} value={annotationContent} onChange={(event) => setAnnotationContent(event.target.value)} />
-          <label htmlFor="document-annotation-target" className="mb-1 block text-xs font-semibold">
+          <textarea ref={annotationCommentRef} id="document-annotation-comment" name="content" className="mb-2 w-full" rows={2} value={annotationContent} onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setAnnotationContent(event.target.value)} />
+          <label htmlFor="document-annotation-target" className="mb-1 block text-xs font-semibold text-kfl-text">
             Target reference
           </label>
-          <input id="document-annotation-target" name="target_ref" className="app-input mb-2 w-full" value={annotationTarget} onChange={(event) => setAnnotationTarget(event.target.value)} placeholder="Optional section reference" />
+          <Input id="document-annotation-target" name="target_ref" className="mb-2 w-full" value={annotationTarget} onChange={(event) => setAnnotationTarget(event.target.value)} placeholder="Optional section reference" />
           <div className="flex justify-end gap-2">
-            <button type="button" className="app-btn-secondary px-3 py-1 text-xs" onClick={closeAnnotationDialog}>
+            <Button type="button" variant="outline" size="sm" className="px-3 py-1 text-xs" onClick={closeAnnotationDialog}>
               Cancel
-            </button>
-            <button type="button" className="app-btn-primary px-3 py-1 text-xs" onClick={submitAnnotation} disabled={createMutation.isPending}>
+            </Button>
+            <Button type="button" variant="default" size="sm" className="px-3 py-1 text-xs" onClick={submitAnnotation} disabled={createMutation.isPending}>
               {createMutation.isPending ? "Saving…" : "Add Annotation"}
-            </button>
+            </Button>
           </div>
         </div>
       )}
       <section className="app-surface p-5">
         <div className={`flex gap-4 ${isFullscreen ? "h-[calc(100vh-170px)]" : "h-[calc(100vh-220px)]"}`}>
           {showOutline && (
-            <aside className="w-72 shrink-0 overflow-y-auto rounded border border-kfl-border bg-kfl-surface-subtle">
+            <aside className="w-72 shrink-0 overflow-y-auto rounded-md border border-kfl-border bg-kfl-surface-subtle">
               <DocumentOutline items={outlineItems} activeAnchor={activeOutlineAnchor} onSelect={selectOutlineItem} />
             </aside>
           )}
-          <div className="relative min-w-0 flex-1 overflow-hidden rounded border border-kfl-border bg-white">
+          <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-kfl-border bg-white">
             <iframe
               ref={iframeRef}
               title={docId || "Document"}
@@ -389,22 +397,22 @@ export function DocumentViewer() {
         ) : (
           <div className="space-y-3">
             {annotations.map((a: any) => (
-              <div key={a.annotation_id} className="border border-kfl-border rounded p-3 bg-kfl-surface">
+              <div key={a.annotation_id} className="border border-kfl-border rounded-md p-3 bg-kfl-surface">
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${getStatusColor(a.status)}`}>{a.status}</span>
-                    <span className={`text-xs ${a.annotation_type === "comment" ? "text-blue-600" : "text-yellow-600"}`}>{a.annotation_type}</span>
+                    <Badge variant={a.status === "resolved" ? "default" : "secondary"} className={`badge ${getStatusColor(a.status)}`}>{a.status}</Badge>
+                    <span className={`text-xs ${a.annotation_type === "comment" ? "text-kfl-blue" : "text-kfl-status-warning"}`}>{a.annotation_type}</span>
                     <span className="text-xs text-kfl-muted font-mono ml-2">{a.annotation_id}</span>
                   </div>
                   <div className="flex gap-1">
                     {a.status !== "resolved" && (
-                      <button onClick={() => handleResolve(a.annotation_id)} className="text-xs text-green-600 hover:text-green-800 flex items-center gap-1">
+                      <Button onClick={() => handleResolve(a.annotation_id)} variant="link" size="sm" className="text-xs text-kfl-status-info hover:text-kfl-status-info/80 flex items-center gap-1">
                         <Check size={12} /> Resolve
-                      </button>
+                      </Button>
                     )}
-                    <button onClick={() => handleDismiss(a.annotation_id)} className="text-xs text-red-600 hover:text-red-800 flex items-center gap-1">
+                    <Button onClick={() => handleDismiss(a.annotation_id)} variant="link" size="sm" className="text-xs text-kfl-status-danger hover:text-kfl-status-danger/80 flex items-center gap-1">
                       <X size={12} /> Dismiss
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 <div className="text-sm text-kfl-secondary mb-2">{a.target_ref || "No target reference"}</div>

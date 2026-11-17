@@ -4,10 +4,10 @@ import { AlertTriangle, BarChart3, ShieldAlert } from "lucide-react";
 
 function MetricCard({ label, value, sublabel, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
-    blue: "bg-sky-50 text-kfl-blue",
-    green: "bg-emerald-50 text-emerald-700",
-    amber: "bg-amber-50 text-amber-700",
-    red: "bg-red-50 text-red-700",
+    blue: "bg-kfl-status-info-bg text-kfl-status-info",
+    green: "bg-kfl-status-success-bg text-kfl-status-success",
+    amber: "bg-kfl-status-warning-bg text-kfl-status-warning",
+    red: "bg-kfl-status-danger-bg text-kfl-status-danger",
   };
   return (
     <div className="app-surface p-5 transition hover:-translate-y-0.5 hover:shadow-card">
@@ -63,7 +63,7 @@ export function AuditDashboard() {
       </header>
 
       {isLoading && <div className="mb-4 text-sm text-kfl-muted">Loading audit summary…</div>}
-      {isError && <div role="alert" className="mb-4 text-sm text-rose-800">Unable to load audit summary. <button type="button" onClick={() => void refetch()} className="font-semibold underline">Retry</button></div>}
+      {isError && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">Unable to load audit summary. <button type="button" onClick={() => void refetch()} className="font-semibold underline">Retry</button></div>}
 
       <section className="mb-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard

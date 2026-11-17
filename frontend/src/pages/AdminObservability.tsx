@@ -13,11 +13,13 @@ import {
   Wifi,
 } from "lucide-react";
 import api from "../api/client";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 function StatusPill({ ok, children, size }: { ok?: boolean; children: ReactNode; size?: "sm" | "md" | "xs" }) {
-  const base = "app-status px-2 py-0.5 rounded font-semibold";
+  const base = "badge px-2 py-0.5 rounded font-semibold";
   const sizeClass = size === "xs" ? "text-[9px] px-1" : size === "sm" ? "text-[10px] px-1.5" : "text-xs px-2";
-  return <span className={`${base} ${ok ? "app-status-healthy" : "app-status-critical"} ${sizeClass}`}>{children}</span>;
+  return <Badge variant={ok ? "default" : "destructive"} className={`${base} ${sizeClass} ${ok ? "bg-kfl-status-success-bg text-kfl-status-success" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{children}</Badge>;
 }
 
 export default function AdminObservability() {
@@ -159,9 +161,9 @@ export default function AdminObservability() {
           <h1 className="app-title">System Observability</h1>
           <p className="app-subtitle">System health, workflow posture, audit activity, backup state, and administrator-controlled access profiles.</p>
         </div>
-        <button className="app-btn-secondary" onClick={() => refetch()} disabled={isFetching}>
+        <Button onClick={() => refetch()} variant="outline" size="sm" disabled={isFetching}>
           <RefreshCw size={15} className={isFetching ? "animate-spin" : ""} /> Refresh
-        </button>
+        </Button>
       </header>
 
       <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
@@ -225,13 +227,15 @@ export default function AdminObservability() {
             )}
           </div>
           <p className="mt-2 text-xs text-kfl-muted">{scanner.detail || (scanner.configured === false ? "Set DMS_CLAMD_HOST/PORT" : "")}</p>
-          <button
-            className="mt-2 app-btn-secondary px-3 py-1.5 text-xs"
+          <Button
+            className="mt-2 px-3 py-1.5 text-xs"
+            variant="outline"
+            size="sm"
             onClick={() => scannerTestMutation.mutate()}
             disabled={scannerTestMutation.isPending}
           >
             {scannerTestMutation.isPending ? "Testing…" : "Test connection"}
-          </button>
+          </Button>
           {scannerTestResult && (
             <p className="mt-1 text-xs">{scannerTestResult.reachable === true ? "✓ Reachable" : scannerTestResult.reachable === false ? "✗ Unreachable" : "—"} {scannerTestResult.detail}</p>
           )}
@@ -332,13 +336,14 @@ export default function AdminObservability() {
               </div>
             </div>
             <div className="flex items-center gap-2 mt-4">
-              <button
+              <Button
                 type="button"
-                className="app-btn-secondary px-3 py-1.5 text-xs rounded"
+                variant="outline"
+                size="sm"
                 onClick={() => setOnboardingStep((s) => (s === null ? 1 : s === 4 ? null : (s ?? 1) + 1))}
               >
                 {onboardingStep === null ? "Start guide" : onboardingStep === 4 ? "Complete guide" : "Next step"}
-              </button>
+              </Button>
             </div>
           </div>
         </section>
@@ -352,13 +357,14 @@ export default function AdminObservability() {
             </div>
           </div>
           <div className="p-5">
-            <button
-              className="app-btn-primary px-4 py-2 text-sm"
+            <Button
+              variant="default"
+              size="sm"
               onClick={() => backupRunMutation.mutate()}
               disabled={backupRunMutation.isPending || !backup.enabled}
             >
               {backupRunMutation.isPending ? "Running backup…" : "Run backup now"}
-            </button>
+            </Button>
             {!backup.enabled && (
               <p className="mt-3 text-xs text-rose-600">Backup scheduler is not enabled. Set DMS_BACKUP_ENABLED=true and configure DMS_BACKUP_DATA_ROOT and DMS_BACKUP_DEST_ROOT.</p>
             )}
@@ -481,20 +487,21 @@ export default function AdminObservability() {
                               const roles = Array.from(event.currentTarget.selectedOptions, (option) => option.value).sort();
                               setRoleDrafts((current) => ({ ...current, [user.user_id]: roles }));
                             }}
-                            className="w-full rounded border border-kfl-border bg-white px-2 py-1.5 text-xs text-kfl-text"
+                            className="w-full rounded border border-kfl-border bg-kfl-surface px-2 py-1.5 text-xs text-kfl-text"
                           >
                             {(data?.role_matrix || []).map((profile: any) => <option key={profile.role} value={profile.role}>{profile.role.replace(/_/g, " ")}</option>)}
                           </select>
                           <div className="text-[10px] text-kfl-muted">Default role: {user.role}</div>
-                          <button
+                          <Button
                             type="button"
-                            className="app-btn-secondary px-3 py-1.5 text-xs"
+                            variant="outline"
+                            size="sm"
                             disabled={savingUserId !== null}
                             aria-label={`Save roles for ${user.full_name}`}
                             onClick={() => void saveRoles(user)}
                           >
                             {savingUserId === user.user_id ? "Saving…" : "Save roles"}
-                          </button>
+                          </Button>
                         </div>
                       ) : (
                         <span className="font-mono">{assignedRoles.join(", ")}</span>
@@ -511,18 +518,19 @@ export default function AdminObservability() {
                             onChange={(event) => {
                               setInviteEmails((prev) => ({ ...prev, [user.user_id]: event.target.value }));
                             }}
-                            className="w-full rounded border border-kfl-border bg-white px-2 py-1 text-xs text-kfl-text"
+                            className="w-full rounded border border-kfl-border bg-kfl-surface px-2 py-1 text-xs text-kfl-text"
                           />
                           <div className="text-[10px] text-kfl-muted">Roles: {assignedRoles.map((r: string) => r.replace(/_/g, " ")).join(", ")}</div>
-                          <button
+                          <Button
                             type="button"
-                            className="app-btn-secondary px-3 py-1.5 text-xs"
+                            variant="outline"
+                            size="sm"
                             disabled={invitingUserId === user.user_id}
                             aria-label={`Issue invite for ${user.full_name}`}
                             onClick={() => void handleInvite(user.user_id, selectedRoles)}
                           >
                             {invitingUserId === user.user_id ? "Sending…" : "Issue invite"}
-                          </button>
+                          </Button>
                         </div>
                       ) : (
                         <span className="font-mono">{user.has_password ? "Password set" : "Inactive"}</span>

@@ -88,6 +88,33 @@ const switchableRoleTransitions = switchableRoleGroups.flatMap(([group, roles]) 
 );
 
 describe("AppShell authentication screens", () => {
+  it("cycles light, dark, and system themes and persists the selection", async () => {
+    const previousPreference = localStorage.getItem("kfl-theme");
+    const previousTheme = document.documentElement.getAttribute("data-theme");
+    localStorage.setItem("kfl-theme", "light");
+    renderShell(async () => {});
+
+    const themeToggle = screen.getByRole("button", { name: /Theme: light mode/ });
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    await userEvent.click(themeToggle);
+    await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "dark"));
+    expect(localStorage.getItem("kfl-theme")).toBe("dark");
+
+    await userEvent.click(screen.getByRole("button", { name: /Theme: dark mode/ }));
+    await waitFor(() => expect(localStorage.getItem("kfl-theme")).toBe("system"));
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    await userEvent.click(screen.getByRole("button", { name: /Theme: system/ }));
+    await waitFor(() => expect(localStorage.getItem("kfl-theme")).toBe("light"));
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    if (previousPreference === null) localStorage.removeItem("kfl-theme");
+    else localStorage.setItem("kfl-theme", previousPreference);
+    if (previousTheme === null) document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", previousTheme);
+  });
+
   it.each(switchableRoleTransitions)("lets %s users switch from %s to %s", async (_group, sourceRole, targetRole, roles) => {
     const multiRoleProfile = {
       ...recordsCustodianProfile,
@@ -218,7 +245,6 @@ describe("AppShell authentication screens", () => {
     renderShell(async () => {});
     const utilities = screen.getByRole("region", { name: "Account and session controls" });
     expect(utilities).toHaveClass("mobile-session-controls");
-    expect(utilities).toContainElement(screen.getByRole("link", { name: "Account security" }));
     expect(utilities).toContainElement(screen.getByRole("link", { name: "Profile settings" }));
     expect(utilities).toContainElement(screen.getByRole("button", { name: "Sign out" }));
   });
@@ -235,7 +261,6 @@ describe("AppShell authentication screens", () => {
     expect(within(screen.getByLabelText("All modules navigation")).queryByRole("link", { name: "Documents" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Notifications/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Account security" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 

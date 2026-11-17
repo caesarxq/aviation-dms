@@ -3,6 +3,8 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { getPostLoginPath } from "../auth/permissions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type BootstrapStatus = { setup_required: boolean; bootstrap_configured: boolean; bootstrap_token_required: boolean };
 
@@ -86,14 +88,10 @@ export function PasswordSetupPage() {
         <div className="app-surface p-10 text-center">
           {error ? (
             <>
-              <p role="alert" className="text-sm text-rose-800">{error}</p>
-              <button
-                type="button"
-                onClick={() => { setError(""); setStatus(null); setStatusRetry((attempt) => attempt + 1); }}
-                className="app-btn-secondary mt-4"
-              >
+              <p role="alert" className="text-sm text-kfl-status-danger">{error}</p>
+              <Button variant="outline" size="sm" type="button" onClick={() => { setError(""); setStatus(null); setStatusRetry((attempt) => attempt + 1); }}>
                 Retry
-              </button>
+              </Button>
             </>
           ) : (
             <div role="status">Checking account setup…</div>
@@ -117,33 +115,33 @@ export function PasswordSetupPage() {
             ? "Create the first administrator password using the one-time deployment token."
             : "Use the one-time setup token supplied by your administrator."}
         </p>
-        {error && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-        {message && <div role="status" className="mb-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}
-        {initialSetup && !status?.bootstrap_configured && <p role="alert" className="mb-4 text-sm text-rose-800">Bootstrap is disabled. Configure the server-side KFL_BOOTSTRAP_TOKEN first.</p>}
+        {error && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">{error}</div>}
+        {message && <div role="status" className="mb-4 rounded-md border border-kfl-status-success-bg bg-kfl-status-success-bg/20 text-kfl-status-success p-3 text-sm">{message}</div>}
+        {initialSetup && !status?.bootstrap_configured && <p role="alert" className="mb-4 text-sm text-kfl-status-danger">Bootstrap is disabled. Configure the server-side KFL_BOOTSTRAP_TOKEN first.</p>}
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isInviteMode && !initialSetup && !status?.setup_required && (
             <div>
               <label htmlFor="setup-username" className="mb-1 block text-sm font-medium">Assigned username</label>
-              <input id="setup-username" name="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="app-input w-full" />
+              <Input id="setup-username" name="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="w-full" />
             </div>
           )}
           {!isInviteMode && (
             <div>
               <label htmlFor="setup-token" className="mb-1 block text-sm font-medium">{initialSetup ? "Bootstrap token" : "One-time setup token"}</label>
-              <input id="setup-token" name="setup_token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required={initialSetup ? status?.bootstrap_token_required : true} className="app-input w-full" />
+              <Input id="setup-token" name="setup_token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required={initialSetup ? status?.bootstrap_token_required : true} className="w-full" />
             </div>
           )}
           <div>
             <label htmlFor="setup-password" className="mb-1 block text-sm font-medium">New password</label>
-            <input id="setup-password" name="new_password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} className="app-input w-full" />
+            <Input id="setup-password" name="new_password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} className="w-full" />
           </div>
           <div>
             <label htmlFor="setup-password-confirm" className="mb-1 block text-sm font-medium">Confirm new password</label>
-            <input id="setup-password-confirm" name="confirm_password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={12} className="app-input w-full" />
+            <Input id="setup-password-confirm" name="confirm_password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={12} className="w-full" />
           </div>
-          <button type="submit" disabled={submitting || (initialSetup && !status?.bootstrap_configured)} className="app-btn-primary w-full disabled:opacity-60">
+          <Button type="submit" disabled={submitting || (initialSetup && !status?.bootstrap_configured)} variant="default" size="sm" className="w-full disabled:opacity-60">
             {submitting ? "Saving…" : "Set password"}
-          </button>
+          </Button>
         </form>
         <p className="mt-5 text-center text-sm"><Link to="/login" className="text-kfl-blue underline underline-offset-2">Return to sign in</Link></p>
       </section>

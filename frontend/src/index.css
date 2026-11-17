@@ -3,22 +3,77 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+  /* Brand — preserved exactly per spec */
   --color-brand-blue: #1b7abf;
-  --color-brand-blue-deep: #0b2942;
-  --color-brand-blue-ink: #123b5d;
-  --color-sky-tint: #eaf4fb;
-  --color-canvas: #f4f7fa;
+  --color-brand-hover: #166aa8;
+  --color-brand-active: #125b91;
+  --color-brand-soft: #e5f1f9;
+  --color-brand-subtle: #f2f8fc;
+  --color-aviation-deep: #123653;
+  --color-aviation-navy: #0d2235;
+  --color-steel-blue: #46677f;
+
+  /* Surfaces */
+  --color-canvas: #f5f7fa;
   --color-surface: #ffffff;
   --color-surface-subtle: #f8fafc;
+  --color-surface-hover: #edf2f7;
+
+  /* Borders */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  /* Typography */
+  --color-text-primary: #172b3a;
+  --color-text-secondary: #526579;
+  --color-text-muted: #718096;
+  --color-text-disabled: #a0aec0;
+
+  /* Existing brand aliases (preserved for compatibility) */
+  --color-brand-blue-deep: #0b2942;
+  --color-brand-blue-ink: #123b5d;
+  --color-sidebar-bg: #0d2235;
+  --color-sky-tint: #eaf4fb;
   --color-border: #d9e2ec;
   --color-text-primary: #102a43;
   --color-text-secondary: #52606d;
   --color-text-muted: #7b8794;
+
+  /* Semantic status colors (spec) */
+  --color-status-success: #16845b;
+  --color-status-success-bg: #e7f5ee;
+  --color-status-warning: #b7791f;
+  --color-status-warning-bg: #fff5df;
+  --color-status-danger: #c83d46;
+  --color-status-danger-bg: #fcebec;
+  --color-status-info: #2674b8;
+  --color-status-info-bg: #eaf3fb;
+  --color-status-neutral: #64748b;
+  --color-status-neutral-bg: #f1f4f7;
+
+  /* Existing status aliases (preserved for compatibility) */
   --color-status-healthy: #0f6b4c;
   --color-status-warning: #8a5a00;
   --color-status-critical: #c53030;
   --color-status-info: #2b6cb0;
+
+  /* Focus */
   --color-focus: #63b3ed;
+
+  /* Spacing — 4px scale per spec */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Existing spacing aliases (preserved for compatibility) */
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;
@@ -26,14 +81,265 @@
   --space-xl: 24px;
   --space-2xl: 32px;
   --space-3xl: 48px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  /* Existing radius aliases (preserved for compatibility) */
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
   --radius-pill: 999px;
+
+  /* Shadows */
   --shadow-card: 0 1px 2px rgba(16, 42, 67, 0.04), 0 8px 24px rgba(16, 42, 67, 0.06);
   --shadow-popover: 0 12px 32px rgba(16, 42, 67, 0.14);
+
+  /* Typography */
   --font-primary: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-mono: "IBM Plex Mono", SFMono-Regular, Consolas, "Liberation Mono", monospace;
+
+  /* Typography scale */
+  --text-title-main: 28px;
+  --text-title-main-weight: 650;
+  --text-title-secondary: 24px;
+  --text-title-secondary-weight: 600;
+  --text-section: 20px;
+  --text-section-weight: 600;
+  --text-card-heading: 16px;
+  --text-card-heading-weight: 600;
+  --text-body: 14px;
+  --text-body-weight: 400;
+  --text-table: 13px;
+  --text-table-weight: 400;
+  --text-supporting: 12px;
+  --text-supporting-weight: 400;
+  --text-technical: 12px;
+  --text-technical-weight: 500;
+
+  /* Motion tokens */
+  --motion-instant: 100ms;
+  --motion-fast: 140ms;
+  --motion-normal: 200ms;
+  --motion-medium: 240ms;
+  --motion-slow: 280ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #0d2235;
+  --color-surface: #183b56;
+  --color-surface-subtle: #123653;
+  --color-surface-hover: #214b68;
+  --color-sidebar-bg: #0d2235;
+  --color-border: #31546b;
+  --color-border-strong: #46677f;
+  --color-text-primary: #f2f6fa;
+  --color-text-secondary: #b7c8d7;
+  --color-text-muted: #a5b8c8;
+  --color-text-disabled: #8ca3b5;
+  --color-brand-soft: #214b68;
+  --color-brand-subtle: #123653;
+  --color-brand-blue-deep: #0d2235;
+  --color-brand-blue-ink: #63b3ed;
+  --color-sky-tint: #123653;
+  --color-status-success: #4ade80;
+  --color-status-success-bg: #123b2b;
+  --color-status-warning: #fbbf24;
+  --color-status-warning-bg: #3d3118;
+  --color-status-danger: #fda4af;
+  --color-status-danger-bg: #3d2026;
+  --color-status-info: #7dd3fc;
+  --color-status-info-bg: #102f45;
+  --color-status-neutral: #cbd5e1;
+  --color-status-neutral-bg: #263b4d;
+  --color-status-healthy: #4ade80;
+  --color-status-critical: #fda4af;
+  --color-focus: #7dd3fc;
+}
+
+/* Sidebar theme adaptation */
+[data-theme="light"] .app-sidebar {
+  background-color: var(--color-surface-subtle);
+  border-right: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .app-sidebar .text-sky-200\/90,
+[data-theme="light"] .app-sidebar .text-sky-200\/95,
+[data-theme="light"] .app-sidebar .text-sky-200\/70,
+[data-theme="light"] .app-sidebar .text-slate-400,
+[data-theme="light"] .app-sidebar .text-slate-300,
+[data-theme="light"] .app-sidebar .text-slate-500,
+[data-theme="light"] .app-sidebar .text-slate-100 {
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="light"] .app-sidebar .hover\:bg-white\/15:hover {
+  background-color: rgba(16, 42, 67, 0.08) !important;
+}
+
+[data-theme="light"] .app-sidebar .bg-kfl-blue\/20 {
+  background-color: rgba(27, 122, 191, 0.15) !important;
+}
+
+[data-theme="light"] .app-sidebar a.text-white {
+  color: #125b91 !important;
+}
+
+[data-theme="light"] .app-sidebar select {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text-primary) !important;
+}
+
+[data-theme="light"] .app-sidebar select option {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .app-sidebar .border-white\/10,
+[data-theme="light"] .app-sidebar .border-white\/5 {
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="light"] .app-sidebar .shadow-xl {
+  box-shadow: var(--shadow-card) !important;
+}
+
+[data-theme="light"] .mobile-session-controls {
+  background: var(--color-surface);
+  border-top-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Preserve semantic status meaning while adapting status surfaces for dark mode. */
+[data-theme="dark"] :is(.bg-emerald-50, .bg-emerald-100, .bg-green-50, .bg-green-100) {
+  background-color: var(--color-status-success-bg) !important;
+}
+[data-theme="dark"] :is(.text-emerald-600, .text-emerald-700, .text-emerald-800, .text-green-500, .text-green-600, .text-green-700) {
+  color: var(--color-status-success) !important;
+}
+[data-theme="dark"] :is(.border-emerald-200, .border-green-200) {
+  border-color: #2d6a4f !important;
+}
+[data-theme="dark"] :is(.bg-amber-50, .bg-amber-100, .bg-yellow-50, .bg-yellow-100) {
+  background-color: var(--color-status-warning-bg) !important;
+}
+[data-theme="dark"] :is(.text-amber-500, .text-amber-600, .text-amber-700, .text-amber-900, .text-yellow-600, .text-yellow-700) {
+  color: var(--color-status-warning) !important;
+}
+[data-theme="dark"] :is(.border-amber-200, .border-yellow-200) {
+  border-color: #80651d !important;
+}
+[data-theme="dark"] :is(.bg-rose-50, .bg-rose-100, .bg-red-50, .bg-red-100) {
+  background-color: var(--color-status-danger-bg) !important;
+}
+[data-theme="dark"] :is(.text-rose-600, .text-rose-700, .text-rose-800, .text-red-500, .text-red-600, .text-red-700) {
+  color: var(--color-status-danger) !important;
+}
+[data-theme="dark"] :is(.border-rose-200, .border-red-200) {
+  border-color: #7c3541 !important;
+}
+[data-theme="dark"] :is(.bg-blue-50, .bg-blue-100) {
+  background-color: var(--color-status-info-bg) !important;
+}
+[data-theme="dark"] :is(.text-blue-600, .text-blue-700, .text-blue-800) {
+  color: var(--color-status-info) !important;
+}
+[data-theme="dark"] :is(.border-blue-200) {
+  border-color: #285d78 !important;
+}
+[data-theme="dark"] :is(.bg-gray-50, .bg-gray-100, .bg-slate-50, .bg-slate-100) {
+  background-color: var(--color-status-neutral-bg) !important;
+}
+[data-theme="dark"] :is(.text-gray-600, .text-gray-700, .text-gray-800, .text-gray-900, .text-slate-600, .text-slate-700, .text-slate-800, .text-slate-900) {
+  color: var(--color-text-secondary) !important;
+}
+[data-theme="dark"] :is(.border-gray-200, .border-slate-200) {
+  border-color: var(--color-border) !important;
+}
+
+/* Keep the transparent KFL wordmark at identical geometry in both themes. */
+img[alt="Kenya Flying Labs"] {
+  box-sizing: border-box;
+  background-color: #f5f7fa;
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+[data-theme="dark"] .text-kfl-blue {
+  color: #63b3ed !important;
+}
+
+/* shadcn/ui base CSS variables (HSL format for hsl() usage) */
+:root {
+  --background: 213 33% 97%;
+  --foreground: 210 43% 16%;
+  --card: 0 0% 100%;
+  --card-foreground: 210 43% 16%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 210 43% 16%;
+  --primary: 202 75% 43%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 356 62% 52%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214 31% 91%;
+  --input: 214 31% 91%;
+  --ring: 202 75% 43%;
+  --radius: 0.5rem;
+}
+
+[data-theme="dark"] {
+  --background: 207 60% 13%;
+  --foreground: 210 40% 98%;
+  --card: 205 52% 22%;
+  --card-foreground: 210 40% 98%;
+  --popover: 205 52% 22%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 202 75% 43%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 204 65% 20%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 204 65% 20%;
+  --muted-foreground: 210 25% 76%;
+  --accent: 205 39% 28%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 350 75% 68%;
+  --destructive-foreground: 207 60% 13%;
+  --border: 202 37% 31%;
+  --input: 202 37% 31%;
+  --ring: 199 92% 73%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* prefers-reduced-motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer base {
@@ -197,12 +503,18 @@
     padding-left: 0;
     padding-right: 0;
   }
-  .app-sidebar .mb-7 {
+  .app-sidebar-header {
+    flex-direction: column;
+    align-items: center;
     justify-content: center;
+    gap: 6px;
+    margin-bottom: 16px;
     padding-left: 0;
     padding-right: 0;
   }
-  .app-sidebar img { width: 40px; height: 40px; object-fit: cover; object-position: left; }
+  .app-sidebar-brand { width: 40px; height: 40px; flex: none; justify-content: center; }
+  .app-sidebar-logo { width: 40px; height: 40px; object-fit: cover; object-position: left; }
+  .app-sidebar-header-actions { flex-direction: column; gap: 2px; }
   .app-sidebar nav { margin-top: 8px; }
   .mobile-session-controls {
     position: fixed;

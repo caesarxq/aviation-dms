@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from "react";
 import api from "../api/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -48,22 +50,22 @@ export default function ChangePasswordPage() {
         </div>
       </header>
       <section className="app-surface p-6">
-        {error && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-        {message && <div role="status" className="mb-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}
+        {error && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">{error}</div>}
+        {message && <div role="status" className="mb-4 rounded-md border border-kfl-status-success-bg bg-kfl-status-success-bg/20 text-kfl-status-success p-3 text-sm">{message}</div>}
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label htmlFor="current-password" className="mb-1 block text-sm font-medium">Current password</label>
-            <input id="current-password" name="current_password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required className="app-input w-full" />
+            <Input id="current-password" name="current_password" type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required className="w-full" />
           </div>
           <div>
             <label htmlFor="new-password" className="mb-1 block text-sm font-medium">New password</label>
-            <input id="new-password" name="new_password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required className="app-input w-full" />
+            <Input id="new-password" name="new_password" type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required className="w-full" />
           </div>
           <div>
             <label htmlFor="confirm-new-password" className="mb-1 block text-sm font-medium">Confirm new password</label>
-            <input id="confirm-new-password" name="confirm_new_password" type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required className="app-input w-full" />
+            <Input id="confirm-new-password" name="confirm_new_password" type="password" autoComplete="new-password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required className="w-full" />
           </div>
-          <button type="submit" disabled={saving} className="app-btn-primary disabled:opacity-60">{saving ? "Saving…" : "Change password"}</button>
+          <Button type="submit" disabled={saving} className="w-full disabled:opacity-60">{saving ? "Saving…" : "Change password"}</Button>
         </form>
       </section>
     </div>

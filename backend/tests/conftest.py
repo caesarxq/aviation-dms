@@ -8,7 +8,8 @@ import asyncio
 import uvicorn
 
 # Set test DB path before importing app
-TEST_DB = tempfile.mktemp(suffix=".db")
+TEST_DB_DIR = tempfile.TemporaryDirectory(prefix="aviation-dms-tests-")
+TEST_DB = os.path.join(TEST_DB_DIR.name, "test.db")
 os.environ["DMS_DB_PATH"] = TEST_DB
 os.environ["DEV_MODE"] = "true"
 os.environ["FLIGHT_RELEASE_ENABLED"] = "true"
@@ -65,6 +66,7 @@ def setup_db():
             os.remove(TEST_DB)
         except FileNotFoundError:
             pass
+        TEST_DB_DIR.cleanup()
 
 
 @pytest.fixture(autouse=True)

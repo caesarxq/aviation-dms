@@ -1,0 +1,230 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title | default("KFL Aviation DMS — Document Proposal Summary") }}</title>
+  <!--[if mso]>
+  <style>
+    .fallback-text { mso-hide: all; }
+  </style>
+  <![endif]-->
+  <style>
+    body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      background-color: #f5f7fa;
+      font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: #172b3a;
+      line-height: 1.5;
+      -webkit-text-size-adjust: none;
+    }
+    table { border-collapse: collapse !important; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    td, th { padding: 0; margin: 0; }
+    img { border: 0; display: block; line-height: 100%; outline: none; text-decoration: none; }
+
+    .wrapper { width: 100%; background-color: #f5f7fa; padding: 24px 0; }
+    .content { max-width: 600px; margin: 0 auto; border: 1px solid #d9e2ec; border-radius: 10px; overflow: hidden; background-color: #ffffff; box-shadow: 0 1px 2px rgba(16, 42, 67, 0.04), 0 8px 24px rgba(16, 42, 67, 0.06); }
+
+    /* Header */
+    .header { background-color: #0d2235; padding: 20px 24px; text-align: left; }
+    .logo-cell { vertical-align: middle; }
+    .brand-cell { vertical-align: middle; padding-left: 16px; }
+    .brand-name { font-size: 16px; font-weight: 700; color: #ffffff; line-height: 1.2; margin: 0; }
+    .brand-tagline { font-size: 9px; color: #b7c8d7; line-height: 1.2; margin: 2px 0 0; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    .doc-id-cell { font-family: "IBM Plex Mono", SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 700; color: #3b82f6; margin: 8px 0 0; }
+
+    /* Body */
+    .body-cell { padding: 24px; }
+    .intro { font-size: 13px; color: #172b3a; margin: 0 0 16px; line-height: 1.6; }
+
+    /* Meta grid — table-based for email */
+    .meta-grid { width: 100%; margin: 16px 0; border-collapse: separate; border-spacing: 0; }
+    .meta-row { border-bottom: 1px solid #e2e8f0; }
+    .meta-cell { padding: 10px 0; width: 50%; }
+    .meta-cell.label-cell { font-size: 9px; font-weight: 700; color: #526579; text-transform: uppercase; letter-spacing: 0.08em; padding-right: 12px; border-right: 1px solid #e2e8f0; }
+    .meta-cell.value-cell { font-size: 13px; font-weight: 600; color: #172b3a; padding-left: 12px; }
+    .meta-row:last-child { border-bottom: none; }
+    .meta-cell:last-child { border-right: none; }
+
+    .divider { height: 1px; background: #d9e2ec; margin: 20px 0; }
+
+    /* Change box */
+    .change-box { border: 1px solid #d9e2ec; border-radius: 6px; overflow: hidden; margin: 20px 0; }
+    .change-box-header { background-color: #f1f4f7; padding: 10px 16px; border-bottom: 1px solid #cbd5e1; font-size: 10px; font-weight: 700; color: #0d2235; text-transform: uppercase; letter-spacing: 0.08em; }
+    .change-box-body { padding: 16px; }
+
+    .change-col { width: 50%; vertical-align: top; padding: 0 16px; }
+    .change-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .change-label.original { color: #c83d46; }
+    .change-label.proposed { color: #16845b; }
+    .change-content { font-family: "IBM Plex Mono", SFMono-Regular, Consolas, monospace; font-size: 11px; color: #172b3a; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; line-height: 1.5; }
+    .change-content.original { background: #fcebec; border-color: #f5c6c7; }
+    .change-content.proposed { background: #e7f5ee; border-color: #c3e6cb; }
+
+    /* Severity badge */
+    .severity-badge { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 8px; border-radius: 6px; }
+    .sev-minor { background: #e7f5ee; color: #16845b; }
+    .sev-major { background: #fff5df; color: #b7791f; }
+    .sev-critical { background: #fcebec; color: #c83d46; }
+
+    /* Rationale box */
+    .rationale-box { background: #fff5df; border: 1px solid #fde68a; border-radius: 6px; padding: 16px; margin: 20px 0; }
+    .rationale-box h3 { margin: 0 0 8px; font-size: 11px; color: #8a5a00; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    .rationale-box p { margin: 0; color: #5c4000; font-size: 13px; line-height: 1.6; }
+
+    .footer-disclaimer { font-size: 10px; color: #718096; margin: 0 0 8px; line-height: 1.4; }
+
+    /* Footer */
+    .footer { background-color: #f1f4f7; padding: 16px 24px; border-top: 1px solid #cbd5e1; }
+    .footer-org { font-size: 9px; font-weight: 700; color: #0d2235; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 4px; }
+    .footer-address { font-size: 8px; color: #718096; line-height: 1.4; margin: 0; }
+
+    /* Preheader */
+    .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; font-size: 1px; line-height: 1px; max-height: 0; max-width: 0; overflow: hidden; mso-hide: all; }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      .wrapper { background-color: #0d2235 !important; }
+      .content { border-color: #31546b !important; background-color: #183b56 !important; }
+      .header { background-color: #0d2235 !important; }
+      .body-cell, .intro { color: #f2f6fa !important; }
+      .meta-cell.value-cell { color: #f2f6fa !important; }
+      .meta-cell.label-cell { color: #b7c8d7 !important; }
+      .meta-row { border-bottom-color: #31546b !important; }
+      .meta-cell { border-right-color: #31546b !important; }
+      .change-box { border-color: #31546b !important; }
+      .change-box-header { background: #123653 !important; border-bottom-color: #31546b !important; color: #f2f6fa !important; }
+      .change-content { background: #0d2235 !important; border-color: #31546b !important; color: #f2f6fa !important; }
+      .change-content.original { background: #1a1314 !important; border-color: #3a2326 !important; }
+      .change-content.proposed { background: #142a1c !important; border-color: #2d5a3b !important; }
+      .change-label.original { color: #fca5a5 !important; }
+      .change-label.proposed { color: #86efac !important; }
+      .severity-badge.sev-minor { background: #166534 !important; color: #ffffff !important; }
+      .severity-badge.sev-major { background: #92400e !important; color: #ffffff !important; }
+      .severity-badge.sev-critical { background: #991b1b !important; color: #ffffff !important; }
+      .rationale-box { background: #1a2e13 !important; border-color: #3a5a26 !important; }
+      .rationale-box h3 { color: #d97706 !important; }
+      .rationale-box p { color: #f2f6fa !important; }
+      .footer-disclaimer { color: #8ca3b5 !important; }
+      .footer { background-color: #123653 !important; border-top-color: #31546b !important; }
+      .footer-org { color: #ffffff !important; }
+      .footer-address { color: #8ca3b5 !important; }
+    }
+
+    /* Mobile */
+    @media only screen and (max-width: 480px) {
+      .wrapper { padding: 12px 0 !important; }
+      .body-cell { padding: 16px !important; }
+      .meta-cell { display: block !important; width: 100% !important; border-right: none !important; padding: 4px 0 !important; }
+      .meta-cell.label-cell { border-bottom: 1px solid #e2e8f0 !important; padding-bottom: 4px !important; }
+      .meta-row:last-child .meta-cell.label-cell { border-bottom: none !important; }
+      .change-col { display: block !important; width: 100% !important; padding: 8px 0 !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Preheader text for inbox preview -->
+  <span class="preheader">{{ title | default("Document Proposal Summary") }} — {{ document_id | default("DOC-") }} — severity: {{ severity | default("minor") }} — requires document controller review.</span>
+
+  <table class="wrapper" role="presentation" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center">
+        <table class="content" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600">
+          <!-- Header -->
+          <tr>
+            <td class="header">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td class="logo-cell" width="60">
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNTAiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCAxNTAgNDgiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0ia2ZsLXdpbmctZ3JhZGllbnQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWI3YWJmIiBzdG9wLW9wYWNpdHk9IjEiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTY2YWE4IiBzdG9wLW9wYWNpdHk9IjEiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBhdGggZD0iTSAxMiA2IEwgMTIgMzggTCA0NiAzOCBMIDQ2IDE0IEwgODAgMTQgTCA4MCA2IFYiIGZpbGw9IiAwZDIyMzUiIC8+PHBhdGggZD0iTSAxMiAzOCBMIDQ2IDM4IEwgNDYgMTQgTCAxMiAxNCBaIiBmaWxsPSIjMWI3YWJmIiAvPjxwYXRoIGQ9Ik0gNDYgMTQgTCA4MCAxNCBMIDgwIDYgTCA0NiA2IFYiIGZpbGw9IiAxNjZhYTgiIC8+PGNpcmNsZSBjeD0iMjkiIGN5PSIyMiIgcj0iMyIgZmlsbD0iI2ZmZmZmIiAvPjxjaXJjbGUgY3g9IjM1IiBjeT0iMjIiIHI9IjMiIGZpbGw9IiNmZmZmZiIgLz48Y2lyY2xlIGN4PSI0MSIgY3k9IjIyIiByPSIzIiBmaWxsPSIjZmZmZmYiIC8+PHRleHQgeD0iOTAiIHk9IjMxIiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMGQyMjM1IiBsZXR0ZXItc3BhY2luZz0iMC41Ij5LRkw8L3RleHQ+PHRleHQgeD0iOTAiIHk9IjQ0IiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjciIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM0NjY3N2YiIGxldHRlci1zcGFjaW5nPSIwLjMiPkFWSUFOQVRJT04gRE1TPC90ZXh0Pjwvc3ZnPg==" alt="KFL Aviation DMS" width="24" height="8" style="display: block; width: 24px; height: 8px;" />
+                  </td>
+                  <td class="brand-cell">
+                    <h1 class="brand-name">KFL Aviation DMS</h1>
+                    <p class="brand-tagline">Document Management System &bull; Change Proposal</p>
+                    <p class="doc-id-cell">{{ document_id | default("DOC-") }}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="body-cell">
+              <p class="intro">A document change proposal has been submitted for <strong>{{ document_title | default("the document") }}</strong>. The proposed change requires review by an authorized document controller before adoption.</p>
+
+              <table class="meta-grid" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Document</td>
+                  <td class="meta-cell value-cell">{{ document_title | default("—") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Proposal ID</td>
+                  <td class="meta-cell value-cell">{{ proposal_id | default("—") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Proposed By</td>
+                  <td class="meta-cell value-cell">{{ proposed_by | default("—") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Date Submitted</td>
+                  <td class="meta-cell value-cell">{{ submitted_at | default("—") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Severity</td>
+                  <td class="meta-cell value-cell"><span class="severity-badge sev-{{ severity | default("minor") }}">{{ severity | default("minor") | title }}</span></td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Status</td>
+                  <td class="meta-cell value-cell">{{ status | default("pending_review") }}</td>
+                </tr>
+              </table>
+
+              <div class="change-box">
+                <div class="change-box-header">Proposed Change</div>
+                <div class="change-box-body">
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                    <tr>
+                      <td class="change-col">
+                        <div class="change-label original">Original</div>
+                        <div class="change-content original">{{ original_text | default("—") }}</div>
+                      </td>
+                      <td class="change-col">
+                        <div class="change-label proposed">Proposed</div>
+                        <div class="change-content proposed">{{ proposed_text | default("—") }}</div>
+                      </td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+
+              <div class="rationale-box">
+                <h3>Rationale</h3>
+                <p>{{ rationale | default("No rationale provided.") }}</p>
+              </div>
+
+              <div class="divider"></div>
+
+              <p class="footer-disclaimer">
+                This is an automated summary from the KFL Aviation DMS. All proposals require review by an authorized document controller before adoption.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="footer">
+              <p class="footer-org">KFL Aviation DMS</p>
+              <p class="footer-address">KFL Aviation &bull; Nairobi, Kenya &bull; Document Management System &bull; Confidential</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

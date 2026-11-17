@@ -3,15 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { TrainingRecord } from "../types";
 import { GraduationCap, Plus, Trash2 } from "lucide-react";
-
-function statusClass(status: string) {
-  switch (status.toLowerCase()) {
-    case "valid": return "app-status app-status-healthy";
-    case "expired": return "app-status app-status-critical";
-    case "pending": return "app-status app-status-warning";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function TrainingManagement() {
   const qc = useQueryClient();
@@ -71,9 +66,9 @@ export function TrainingManagement() {
           <h1 className="app-title">Training Management</h1>
           <p className="app-subtitle">Track personnel training, certifications, and expiry.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <Plus size={16} /> New Record
-        </button>
+        </Button>
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -95,29 +90,20 @@ export function TrainingManagement() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Training Records</div>
           <div className="flex gap-2">
-            <select
-              id="training_category_filter"
-              name="category"
-              aria-label="Filter by category"
-              className="app-input w-full md:w-auto"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            >
-              <option value="">All categories</option>
-              <option value="general">General</option>
-              <option value="dg">Dangerous Goods</option>
-              <option value="security">Security</option>
-              <option value="safety">Safety</option>
-              <option value="maintenance">Maintenance</option>
-            </select>
-            <input
-              id="training_person_filter"
-              name="person_id"
-              placeholder="Person ID"
-              className="app-input w-full md:w-auto"
-              value={personFilter}
-              onChange={(e) => setPersonFilter(e.target.value)}
-            />
+            <Select onValueChange={(e) => setCategoryFilter(e)}>
+              <SelectTrigger id="training_category_filter" name="category" aria-label="Filter by category">
+                <SelectValue placeholder={categoryFilter || "All categories"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All categories</SelectItem>
+                <SelectItem value="general">General</SelectItem>
+                <SelectItem value="dg">Dangerous Goods</SelectItem>
+                <SelectItem value="security">Security</SelectItem>
+                <SelectItem value="safety">Safety</SelectItem>
+                <SelectItem value="maintenance">Maintenance</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input id="training_person_filter" name="person_id" placeholder="Person ID" value={personFilter} onChange={(e) => setPersonFilter(e.target.value)} className="w-full md:w-auto" />
           </div>
         </div>
 
@@ -153,36 +139,27 @@ export function TrainingManagement() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.training_type}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.training_date}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.expiry_date || "—"}</td>
-                    <td className="px-4 py-4"><span className={statusClass(record.status)}>{record.status}</span></td>
+                    <td className="px-4 py-4"><Badge variant={record.status === "valid" ? "default" : record.status === "expired" ? "destructive" : "secondary"} className={`badge ${record.status === "valid" ? "bg-kfl-status-info-bg text-kfl-status-info" : record.status === "expired" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>{record.status}</Badge></td>
                     <td className="px-4 py-4 text-right">
-                      <button
-                        id={`edit_training_${record.record_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          setEditingId(record.record_id);
-                          setForm({
-                            person_id: record.person_id,
-                            training_category: record.training_category,
-                            training_type: record.training_type,
-                            training_date: record.training_date,
-                            expiry_date: record.expiry_date || "",
-                            certificate_number: record.certificate_number || "",
-                            notes: record.notes || "",
-                          });
-                        }}
-                      >
+                      <Button variant="outline" size="sm" id={`edit_training_${record.record_id}`} onClick={() => {
+                        setEditingId(record.record_id);
+                        setForm({
+                          person_id: record.person_id,
+                          training_category: record.training_category,
+                          training_type: record.training_type,
+                          training_date: record.training_date,
+                          expiry_date: record.expiry_date || "",
+                          certificate_number: record.certificate_number || "",
+                          notes: record.notes || "",
+                        });
+                      }}>
                         Edit
-                      </button>
-                      <button
-                        id={`delete_training_${record.record_id}`}
-                        aria-label={`Delete training record ${record.record_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          if (confirm("Delete this training record?")) deleteMutation.mutate(record.record_id);
-                        }}
-                      >
+                      </Button>
+                      <Button variant="destructive" size="sm" aria-label={`Delete training record ${record.record_id}`} id={`delete_training_${record.record_id}`} onClick={() => {
+                        if (confirm("Delete this training record?")) deleteMutation.mutate(record.record_id);
+                      }}>
                         <Trash2 size={14} />
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -202,93 +179,51 @@ export function TrainingManagement() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Person ID</span>
-                <input
-                  id="training_person_id"
-                  name="person_id"
-                  className="app-input"
-                  value={form.person_id}
-                  onChange={(e) => setForm({ ...form, person_id: e.target.value })}
-                />
+                <Input id="training_person_id" name="person_id" value={form.person_id} onChange={(e) => setForm({ ...form, person_id: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Category</span>
-                <select
-                  id="training_category"
-                  name="training_category"
-                  className="app-input"
-                  value={form.training_category}
-                  onChange={(e) => setForm({ ...form, training_category: e.target.value })}
-                >
-                  <option value="general">General</option>
-                  <option value="dg">Dangerous Goods</option>
-                  <option value="security">Security</option>
-                  <option value="safety">Safety</option>
-                  <option value="maintenance">Maintenance</option>
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, training_category: e })}>
+                  <SelectTrigger id="training_category" name="training_category">
+                    <SelectValue placeholder={form.training_category} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="general">General</SelectItem>
+                    <SelectItem value="dg">Dangerous Goods</SelectItem>
+                    <SelectItem value="security">Security</SelectItem>
+                    <SelectItem value="safety">Safety</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Training Type</span>
-                <input
-                  id="training_type"
-                  name="training_type"
-                  className="app-input"
-                  value={form.training_type}
-                  onChange={(e) => setForm({ ...form, training_type: e.target.value })}
-                />
+                <Input id="training_type" name="training_type" value={form.training_type} onChange={(e) => setForm({ ...form, training_type: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Training Date</span>
-                <input
-                  id="training_date"
-                  name="training_date"
-                  type="date"
-                  className="app-input"
-                  value={form.training_date}
-                  onChange={(e) => setForm({ ...form, training_date: e.target.value })}
-                />
+                <Input id="training_date" name="training_date" type="date" value={form.training_date} onChange={(e) => setForm({ ...form, training_date: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Expiry Date</span>
-                <input
-                  id="training_expiry"
-                  name="expiry_date"
-                  type="date"
-                  className="app-input"
-                  value={form.expiry_date}
-                  onChange={(e) => setForm({ ...form, expiry_date: e.target.value })}
-                />
+                <Input id="training_expiry" name="expiry_date" type="date" value={form.expiry_date} onChange={(e) => setForm({ ...form, expiry_date: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Certificate Number</span>
-                <input
-                  id="training_certificate"
-                  name="certificate_number"
-                  className="app-input"
-                  value={form.certificate_number}
-                  onChange={(e) => setForm({ ...form, certificate_number: e.target.value })}
-                />
+                <Input id="training_certificate" name="certificate_number" value={form.certificate_number} onChange={(e) => setForm({ ...form, certificate_number: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Notes</span>
-                <textarea
-                  id="training_notes"
-                  name="notes"
-                  className="app-input"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
+                <textarea id="training_notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="flex-1 min-h-[80px]" />
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => { setIsCreating(false); setEditingId(null); }}>Cancel</button>
-              <button
-                id="training_submit"
-                className="app-btn"
-                disabled={!form.person_id || !form.training_type || !form.training_date}
-                onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}
-              >
+              <Button variant="outline" size="sm" onClick={() => { setIsCreating(false); setEditingId(null); }}>
+                Cancel
+              </Button>
+              <Button id="training_submit" variant="default" size="sm" disabled={!form.person_id || !form.training_type || !form.training_date} onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}>
                 {editingId ? (updateMutation.isPending ? "Saving…" : "Save") : (createMutation.isPending ? "Creating…" : "Create")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -54,6 +54,25 @@ describe("LoginPage role-aware routing", () => {
     vi.mocked(api.get).mockResolvedValue({ data: { setup_required: false, bootstrap_configured: false } } as any);
   });
 
+  it("toggles password visibility without changing the entered value", async () => {
+    renderLogin({ state: "unauthenticated", profile: null, login: vi.fn() });
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    await userEvent.type(password, "test-pass-123");
+
+    expect(password).toHaveAttribute("type", "password");
+    const showButton = screen.getByRole("button", { name: "Show password" });
+    expect(showButton).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(showButton);
+
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("test-pass-123");
+    expect(screen.getByRole("button", { name: "Hide password" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Hide password" }));
+
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("test-pass-123");
+  });
+
   it("sends an already-authenticated records custodian to an accessible screen", async () => {
     renderLogin({ state: "authenticated", profile: recordsCustodian, login: vi.fn() });
 

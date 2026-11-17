@@ -1,0 +1,216 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title | default("KFL Aviation DMS — Operational Notice") }}</title>
+  <!--[if mso]>
+  <style>
+    .fallback-text { mso-hide: all; }
+  </style>
+  <![endif]-->
+  <style>
+    body {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      background-color: #f5f7fa;
+      font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: #172b3a;
+      line-height: 1.5;
+      -webkit-text-size-adjust: none;
+    }
+    table { border-collapse: collapse !important; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    td, th { padding: 0; margin: 0; }
+    img { border: 0; display: block; line-height: 100%; outline: none; text-decoration: none; }
+
+    .wrapper { width: 100%; background-color: #f5f7fa; padding: 24px 0; }
+    .content { max-width: 600px; margin: 0 auto; border: 2px solid #0d2235; border-radius: 10px; overflow: hidden; background-color: #ffffff; }
+
+    /* Severity band */
+    .band { background-color: #0d2235; color: #ffffff; padding: 16px 24px; text-align: left; }
+    .band-severity-critical { background-color: #c83d46; }
+    .band-severity-high { background-color: #b7791f; }
+    .band-severity-medium { background-color: #b7791f; }
+    .band-severity-low { background-color: #1b7abf; }
+
+    .badge { display: inline-block; font-size: 9px; font-weight: 700; color: #3b82f6; background: rgba(59, 130, 246, 0.15); padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .badge-severity-critical { color: #fca5a5; background: rgba(200, 61, 70, 0.15); }
+    .badge-severity-high { color: #fcd34d; background: rgba(183, 121, 31, 0.15); }
+    .badge-severity-medium { color: #fcd34d; background: rgba(183, 121, 31, 0.15); }
+    .badge-severity-low { color: #63b3ed; background: rgba(27, 122, 191, 0.15); }
+
+    .notice-id { font-family: "IBM Plex Mono", SFMono-Regular, Consolas, monospace; font-size: 10px; color: #b7c8d7; margin-bottom: 8px; }
+    .notice-title { font-size: 20px; font-weight: 800; color: #ffffff; margin: 0; line-height: 1.2; }
+    .notice-subtitle { font-size: 10px; color: #b7c8d7; margin: 4px 0 0; }
+
+    /* Body */
+    .body-cell { padding: 24px; }
+    .intro { font-size: 13px; color: #172b3a; margin: 0 0 16px; line-height: 1.6; }
+
+    /* Meta grid — table fallback for email */
+    .meta-grid { width: 100%; margin: 16px 0; border-collapse: separate; border-spacing: 0; }
+    .meta-row { border-bottom: 1px solid #e2e8f0; }
+    .meta-cell { padding: 10px 0; width: 50%; }
+    .meta-cell.label-cell { font-size: 9px; font-weight: 700; color: #526579; text-transform: uppercase; letter-spacing: 0.08em; padding-right: 12px; border-right: 1px solid #e2e8f0; }
+    .meta-cell.value-cell { font-size: 13px; font-weight: 600; color: #172b3a; padding-left: 12px; }
+    .meta-row:last-child { border-bottom: none; }
+    .meta-cell:last-child { border-right: none; }
+
+    .divider { height: 1px; background: #d9e2ec; margin: 20px 0; }
+
+    /* Content box */
+    .content-box { border-left: 4px solid #1b7abf; background: #e5f1f9; padding: 16px; border-radius: 0 6px 6px 0; margin: 20px 0; }
+    .content-box-severity-critical { border-left-color: #c83d46; background: #fcebec; }
+    .content-box-severity-high { border-left-color: #b7791f; background: #fff5df; }
+    .content-box-severity-medium { border-left-color: #b7791f; background: #fff5df; }
+    .content-box-severity-low { border-left-color: #1b7abf; background: #e5f1f9; }
+    .content-box h3 { margin: 0 0 8px; font-size: 11px; color: #125b91; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    .content-box h3.severity-critical { color: #c83d46; }
+    .content-box h3.severity-high { color: #b7791f; }
+    .content-box h3.severity-medium { color: #b7791f; }
+    .content-box h3.severity-low { color: #1b7abf; }
+    .content-box p { margin: 0; color: #172b3a; font-size: 13px; line-height: 1.6; }
+
+    /* Action list */
+    .actions { margin: 20px 0; }
+    .actions h3 { margin: 0 0 10px; font-size: 11px; color: #0d2235; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    .actions ul { margin: 0; padding-left: 0; list-style: none; }
+    .actions li { margin: 0 0 8px; font-size: 13px; color: #172b3a; line-height: 1.5; position: relative; padding-left: 20px; }
+    .actions li:before { content: ""; position: absolute; left: 0; top: 3px; width: 6px; height: 6px; background: #1b7abf; border-radius: 50%; }
+    .actions li strong { color: #1b7abf; }
+
+    .footer-disclaimer { font-size: 10px; color: #526579; margin: 0 0 8px; line-height: 1.4; }
+
+    /* Footer */
+    .footer { background-color: #f1f4f7; padding: 16px 24px; border-top: 1px solid #cbd5e1; }
+    .footer-org { font-size: 9px; font-weight: 700; color: #0d2235; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 4px; }
+    .footer-address { font-size: 8px; color: #718096; line-height: 1.4; margin: 0; }
+
+    /* Preheader */
+    .preheader { display: none !important; visibility: hidden; opacity: 0; color: transparent; height: 0; width: 0; font-size: 1px; line-height: 1px; max-height: 0; max-width: 0; overflow: hidden; mso-hide: all; }
+
+    /* Bulletproof button */
+    .btn { display: inline-block; background: #1b7abf; color: #ffffff; text-decoration: none; border-radius: 6px; padding: 10px 16px; font-size: 13px; font-weight: 700; border: 1px solid #1b7abf; }
+    .btn:hover { background: #125b91; border-color: #125b91; }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      .wrapper { background-color: #0d2235 !important; }
+      .content { border-color: #31546b !important; background-color: #183b56 !important; }
+      .band { color: #ffffff !important; }
+      .badge { color: #3b82f6 !important; background: rgba(59, 130, 246, 0.15) !important; }
+      .notice-title, .notice-id { color: #ffffff !important; }
+      .notice-subtitle { color: #b7c8d7 !important; }
+      .body-cell, .intro, .meta-cell.value-cell { color: #f2f6fa !important; }
+      .meta-cell.label-cell { color: #b7c8d7 !important; }
+      .meta-row { border-bottom-color: #31546b !important; }
+      .meta-cell { border-right-color: #31546b !important; }
+      .content-box { color: #f2f6fa !important; }
+      .content-box h3 { color: #63b3ed !important; }
+      .content-box p { color: #f2f6fa !important; }
+      .actions li { color: #f2f6fa !important; }
+      .actions li strong { color: #63b3ed !important; }
+      .actions li:before { background: #63b3ed !important; }
+      .footer-disclaimer { color: #8ca3b5 !important; }
+      .footer { background-color: #123653 !important; border-top-color: #31546b !important; }
+      .footer-org { color: #ffffff !important; }
+      .footer-address { color: #8ca3b5 !important; }
+    }
+
+    /* Mobile */
+    @media only screen and (max-width: 480px) {
+      .wrapper { padding: 12px 0 !important; }
+      .body-cell { padding: 16px !important; }
+      .meta-cell { display: block !important; width: 100% !important; border-right: none !important; padding: 4px 0 !important; }
+      .meta-cell.label-cell { border-bottom: 1px solid #e2e8f0 !important; padding-bottom: 4px !important; }
+      .meta-row:last-child .meta-cell.label-cell { border-bottom: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Preheader text for inbox preview -->
+  <span class="preheader">{{ title | default("Operational Notice") }} — {{ severity | default("medium") | title }} severity. {{ body | default("") | truncate(80) }}</span>
+
+  <table class="wrapper" role="presentation" cellspacing="0" cellpadding="0" border="0">
+    <tr>
+      <td align="center">
+        <table class="content" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600">
+          <!-- Header band -->
+          <tr>
+            <td class="band band-severity-{{ severity | default("medium") }}">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td width="40">
+                    <!-- Logo -->
+                    <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNTAiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCAxNTAgNDgiPjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0ia2ZsLXdpbmctZ3JhZGllbnQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMWI3YWJmIiBzdG9wLW9wYWNpdHk9IjEiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTY2YWE4IiBzdG9wLW9wYWNpdHk9IjEiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHBhdGggZD0iTSAxMiA2IEwgMTIgMzggTCA0NiAzOCBMIDQ2IDE0IEwgODAgMTQgTCA4MCA2IFYiIGZpbGw9IiAwZDIyMzUiIC8+PHBhdGggZD0iTSAxMiAzOCBMIDQ2IDM4IEwgNDYgMTQgTCAxMiAxNCBaIiBmaWxsPSIjMWI3YWJmIiAvPjxwYXRoIGQ9Ik0gNDYgMTQgTCA4MCAxNCBMIDgwIDYgTCA0NiA2IFYiIGZpbGw9IiAxNjZhYTgiIC8+PGNpcmNsZSBjeD0iMjkiIGN5PSIyMiIgcj0iMyIgZmlsbD0iI2ZmZmZmIiAvPjxjaXJjbGUgY3g9IjM1IiBjeT0iMjIiIHI9IjMiIGZpbGw9IiNmZmZmZiIgLz48Y2lyY2xlIGN4PSI0MSIgY3k9IjIyIiByPSIzIiBmaWxsPSIjZmZmZmYiIC8+PHRleHQgeD0iOTAiIHk9IjMxIiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjMGQyMjM1IiBsZXR0ZXItc3BhY2luZz0iMC41Ij5LRkw8L3RleHQ+PHRleHQgeD0iOTAiIHk9IjQ0IiBmb250LWZhbWlseT0iJ0ludGVyJywgJ0hlbHZldGljZU5ld2UnLCBoZWx2ZXRpY2EsIEFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjciIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiM0NjY3N2YiIGxldHRlci1zcGFjaW5nPSIwLjMiPkFWSUFOQVRJT04gRE1TPC90ZXh0Pjwvc3ZnPg==" alt="KFL Aviation DMS" width="24" height="8" style="display: block; width: 24px; height: 8px;" />
+                  </td>
+                  <td>
+                    <p class="badge badge-severity-{{ severity | default("medium") }}">{{ badge_text | default("OPERATIONAL NOTICE") }}</p>
+                    <p class="notice-id">{{ poster_id | default("NTF-") }}</p>
+                    <h1 class="notice-title">{{ title | default("Operational Notice") }}</h1>
+                    <p class="notice-subtitle">{{ subtitle | default("KFL Aviation DMS") }}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="body-cell">
+              <p class="intro">{{ body | default("No details provided.") }}</p>
+
+              <table class="meta-grid" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Issued By</td>
+                  <td class="meta-cell value-cell">{{ issued_by | default("System") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Date Issued</td>
+                  <td class="meta-cell value-cell">{{ issued_at | default("—") }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Severity</td>
+                  <td class="meta-cell value-cell">{{ severity | default("medium") | title }}</td>
+                </tr>
+                <tr class="meta-row">
+                  <td class="meta-cell label-cell">Audience</td>
+                  <td class="meta-cell value-cell">{{ audience | default("All staff") }}</td>
+                </tr>
+              </table>
+
+              <div class="divider"></div>
+
+              {% if action_items %}
+              <div class="actions">
+                <h3>Required Actions</h3>
+                <ul>
+                  {% for item in action_items %}
+                  <li><strong>{{ item }}</strong></li>
+                  {% endfor %}
+                </ul>
+              </div>
+              <div class="divider"></div>
+              {% endif %}
+
+              <p class="footer-disclaimer">
+                This is an automated notice from the KFL Aviation DMS. For questions, contact your accountable manager.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td class="footer">
+              <p class="footer-org">KFL Aviation DMS</p>
+              <p class="footer-address">KFL Aviation &bull; Nairobi, Kenya &bull; Document Management System &bull; Confidential</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

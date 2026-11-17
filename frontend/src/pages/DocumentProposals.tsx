@@ -10,11 +10,15 @@ import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 function ProposalExcerpt({ label, html, fallback, tone }: { label: string; html?: string; fallback?: string; tone: "removed" | "added" }) {
   const safeHtml = html ? DOMPurify.sanitize(html) : "";
   return (
-    <div className={`rounded p-2 text-sm ${tone === "removed" ? "bg-red-50 text-red-800" : "bg-emerald-50 text-emerald-800"}`}>
+    <div className={`rounded-md p-2 text-sm ${tone === "removed" ? "bg-kfl-status-danger-bg/20 text-kfl-status-danger" : "bg-kfl-status-success-bg/20 text-kfl-status-success"}`}>
       <strong>{label}:</strong>
       {safeHtml ? <div className="mt-1 leading-6" dangerouslySetInnerHTML={{ __html: safeHtml }} /> : <span className="ml-1">{fallback || "—"}</span>}
     </div>
@@ -96,17 +100,17 @@ export function DocumentProposals() {
   });
 
   const statusColor = (s: string) => {
-    if (s === "approved") return "bg-green-100 text-green-800";
-    if (s === "rejected") return "bg-red-100 text-red-800";
-    if (s === "submitted" || s === "under_review") return "bg-blue-100 text-blue-800";
-    if (s === "applied") return "bg-purple-100 text-purple-800";
-    return "bg-gray-100 text-gray-800";
+    if (s === "approved") return "bg-kfl-status-info-bg text-kfl-status-info";
+    if (s === "rejected") return "bg-kfl-status-danger-bg text-kfl-status-danger";
+    if (s === "submitted" || s === "under_review") return "bg-kfl-status-warning-bg text-kfl-status-warning";
+    if (s === "applied") return "bg-kfl-status-info-bg text-kfl-status-info";
+    return "bg-kfl-surface-subtle text-kfl-muted";
   };
 
   const severityColor = (s: string) => {
-    if (s === "critical") return "text-red-600 font-bold";
-    if (s === "major") return "text-orange-600";
-    return "text-gray-600";
+    if (s === "critical") return "text-kfl-status-danger font-bold";
+    if (s === "major") return "text-kfl-status-warning font-semibold";
+    return "text-kfl-muted";
   };
 
   const handleCreate = () => {
@@ -141,57 +145,75 @@ export function DocumentProposals() {
         <>
           <div className="flex gap-2 mb-4">
             {canPropose && (
-              <button onClick={() => setShowForm(true)} className="app-btn-primary flex items-center gap-1 text-sm">
+              <Button onClick={() => setShowForm(true)} variant="default" size="sm" className="flex items-center gap-1 text-sm">
                 <Plus size={14} /> New Proposal
-              </button>
+              </Button>
             )}
             {["", "draft", "submitted", "approved", "rejected", "applied"].map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)} className={`px-3 py-1 text-sm rounded ${filterStatus === s ? "bg-kfl-primary text-white" : "bg-kfl-surface text-kfl-muted"}`}>
+              <Button key={s} variant={filterStatus === s ? "default" : "outline"} size="sm" onClick={() => setFilterStatus(s)}>
                 {s || "All"}
-              </button>
+              </Button>
             ))}
           </div>
 
           {/* Proposal Modal */}
           <Modal open={showForm && canPropose} onClose={() => setShowForm(false)} title="Create Proposal" description="Describe one controlled-document change. Target the exact section or block, show the original and proposed text, and explain why the change is needed before submitting it for review.">
             {proposalError && (
-              <div className="mb-3 p-3 rounded bg-rose-50/60 border border-rose-200 text-rose-800 text-sm">
+              <div role="alert" className="mb-3 p-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
                 {proposalError}
               </div>
             )}
             <div className="grid grid-cols-2 gap-3">
               <FormField htmlFor="proposal_type_142" label="Proposal type" hint="Select the smallest affected document unit.">
-                <select id="proposal_type_142" name="proposal_type" className="border border-kfl-border rounded p-2 text-sm w-full" value={form.proposal_type} onChange={e => setForm({ ...form, proposal_type: e.target.value })}>
-                  <option value="word">Word</option><option value="line">Line</option><option value="section">Section</option><option value="illustration">Illustration</option><option value="table">Table</option>
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, proposal_type: e })}>
+                  <SelectTrigger id="proposal_type_142" name="proposal_type">
+                    <SelectValue placeholder={form.proposal_type} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="word">Word</SelectItem>
+                    <SelectItem value="line">Line</SelectItem>
+                    <SelectItem value="section">Section</SelectItem>
+                    <SelectItem value="illustration">Illustration</SelectItem>
+                    <SelectItem value="table">Table</SelectItem>
+                  </SelectContent>
+                </Select>
               </FormField>
               <FormField htmlFor="severity_145" label="Severity" required>
-                <select id="severity_145" name="severity" aria-describedby="severity_145-error" aria-invalid={!!proposalFieldErrors.severity} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.severity ? "border-rose-400" : ""}`} value={form.severity} onChange={e => { setForm({ ...form, severity: e.target.value }); setDirty(true); }}>
-                  <option value="minor">Minor</option><option value="major">Major</option><option value="critical">Critical</option>
-                </select>
-                {proposalFieldErrors.severity && <p id="severity_145-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.severity}</p>}
+                <Select onValueChange={(e) => { setForm({ ...form, severity: e }); setDirty(true); }}>
+                  <SelectTrigger id="severity_145" name="severity" aria-describedby="severity_145-error">
+                    <SelectValue placeholder={form.severity} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minor">Minor</SelectItem>
+                    <SelectItem value="major">Major</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+                {proposalFieldErrors.severity && <p id="severity_145-error" className="text-[11px] text-kfl-status-danger mt-1">{proposalFieldErrors.severity}</p>}
               </FormField>
               <FormField htmlFor="target_ref_148" label="Target reference" hint="Identify the section, block, line, or illustration affected." required>
-                <input id="target_ref_148" name="target_ref" aria-describedby="target_ref_148-error" aria-invalid={!!proposalFieldErrors.target_ref} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.target_ref ? "border-rose-400" : ""}`} placeholder="Section 3.2, line 45" value={form.target_ref} onChange={e => { setForm({ ...form, target_ref: e.target.value }); setDirty(true); }} />
-                {proposalFieldErrors.target_ref && <p id="target_ref_148-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.target_ref}</p>}
+                <Input id="target_ref_148" name="target_ref" aria-describedby="target_ref_148-error" aria-invalid={!!proposalFieldErrors.target_ref} className={proposalFieldErrors.target_ref ? "border-rose-400" : ""} placeholder="Section 3.2, line 45" value={form.target_ref} onChange={e => { setForm({ ...form, target_ref: e.target.value }); setDirty(true); }} />
+                {proposalFieldErrors.target_ref && <p id="target_ref_148-error" className="text-[11px] text-kfl-status-danger mt-1">{proposalFieldErrors.target_ref}</p>}
               </FormField>
               <FormField htmlFor="original_text_149" label="Original text" hint="Paste the exact current wording.">
-                <input id="original_text_149" name="original_text" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Current wording" value={form.original_text} onChange={e => { setForm({ ...form, original_text: e.target.value }); setDirty(true); }} />
+                <Input id="original_text_149" name="original_text" placeholder="Current wording" value={form.original_text} onChange={e => { setForm({ ...form, original_text: e.target.value }); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="proposed_text_150" label="Proposed text" hint="Enter the replacement wording.">
-                <input id="proposed_text_150" name="proposed_text" aria-describedby="proposed_text_150-error" aria-invalid={!!proposalFieldErrors.proposed_text} className={`border border-kfl-border rounded p-2 text-sm w-full ${proposalFieldErrors.proposed_text ? "border-rose-400" : ""}`} placeholder="Replacement wording" value={form.proposed_text} onChange={e => { setForm({ ...form, proposed_text: e.target.value }); setDirty(true); }} />
-                {proposalFieldErrors.proposed_text && <p id="proposed_text_150-error" className="text-[11px] text-rose-700 mt-1">{proposalFieldErrors.proposed_text}</p>}
+                <Input id="proposed_text_150" name="proposed_text" aria-describedby="proposed_text_150-error" aria-invalid={!!proposalFieldErrors.proposed_text} className={proposalFieldErrors.proposed_text ? "border-rose-400" : ""} placeholder="Replacement wording" value={form.proposed_text} onChange={e => { setForm({ ...form, proposed_text: e.target.value }); setDirty(true); }} />
+                {proposalFieldErrors.proposed_text && <p id="proposed_text_150-error" className="text-[11px] text-kfl-status-danger mt-1">{proposalFieldErrors.proposed_text}</p>}
               </FormField>
               <FormField htmlFor="rationale_151" label="Rationale" hint="Explain the compliance, safety, or operational reason for the change.">
-                <input id="rationale_151" name="rationale" className="border border-kfl-border rounded p-2 text-sm w-full" placeholder="Why is this change needed?" value={form.rationale} onChange={e => { setForm({ ...form, rationale: e.target.value }); setDirty(true); }} />
+                <Input id="rationale_151" name="rationale" placeholder="Why is this change needed?" value={form.rationale} onChange={e => { setForm({ ...form, rationale: e.target.value }); setDirty(true); }} />
               </FormField>
             </div>
             <div className="mt-4 flex gap-2 justify-end">
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
               {canPropose && (
-                <button onClick={handleCreate} className="app-btn-primary px-4 py-2 text-sm" disabled={createMutation.isPending}>
+                <Button onClick={handleCreate} variant="default" size="sm" disabled={createMutation.isPending}>
                   {createMutation.isPending ? "Saving…" : "Submit Proposal"}
-                </button>
+                </Button>
               )}
             </div>
           </Modal>
@@ -206,7 +228,7 @@ export function DocumentProposals() {
                 <div key={p.proposal_id} className="app-surface p-4">
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${statusColor(p.status)}`}>{p.status}</span>
+                      <Badge variant={p.status === "approved" ? "default" : p.status === "rejected" ? "destructive" : p.status === "submitted" || p.status === "under_review" ? "secondary" : "outline"} className={`badge ${statusColor(p.status)}`}>{p.status}</Badge>
                       <span className={`ml-2 text-xs ${severityColor(p.severity)}`}>{p.severity}</span>
                       <span className="ml-2 text-xs text-kfl-muted">{p.proposal_type}</span>
                     </div>
@@ -225,16 +247,24 @@ export function DocumentProposals() {
                   </div>
                   <div className="mt-2 flex gap-2">
                     {canPropose && p.status === "draft" && (
-                      <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "submitted" } })} className="app-btn-primary text-xs px-3 py-1">Submit</button>
+                      <Button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "submitted" } })} variant="default" size="sm" className="text-xs">
+                        Submit
+                      </Button>
                     )}
                     {canApproveOrReject && p.status === "submitted" && (
                       <>
-                        <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "approved" } })} className="app-btn-primary text-xs px-3 py-1 flex items-center gap-1"><Check size={12} /> Approve</button>
-                        <button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "rejected" } })} className="app-btn-secondary text-xs px-3 py-1 flex items-center gap-1"><X size={12} /> Reject</button>
+                        <Button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "approved" } })} variant="default" size="sm" className="text-xs flex items-center gap-1">
+                          <Check size={12} /> Approve
+                        </Button>
+                        <Button onClick={() => updateMutation.mutate({ id: p.proposal_id, data: { status: "rejected" } })} variant="outline" size="sm" className="text-xs flex items-center gap-1">
+                          <X size={12} /> Reject
+                        </Button>
                       </>
                     )}
                     {canPublish && p.status === "approved" && (
-                      <button onClick={() => applyMutation.mutate(p.proposal_id)} className="app-btn-primary text-xs px-3 py-1 flex items-center gap-1"><ArrowUpRight size={12} /> Apply to New Version</button>
+                      <Button onClick={() => applyMutation.mutate(p.proposal_id)} variant="default" size="sm" className="text-xs flex items-center gap-1">
+                        <ArrowUpRight size={12} /> Apply to New Version
+                      </Button>
                     )}
                   </div>
                 </div>

@@ -8,26 +8,9 @@ import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useToast } from "../components/ui/Toast";
 import { useAuth } from "../auth/AuthContext";
 import type { RiskAssessment } from "../types";
-
-function riskClass(risk: string) {
-  switch (risk) {
-    case "critical": return "app-status app-status-critical";
-    case "high": return "app-status app-status-warning";
-    case "medium": return "app-status app-status-info";
-    case "low": return "app-status app-status-healthy";
-    default: return "app-status app-status-info";
-  }
-}
-
-function statusClass(status: string) {
-  switch (status) {
-    case "draft": return "app-status app-status-info";
-    case "scrutiny_required": return "app-status app-status-warning";
-    case "approved": return "app-status app-status-healthy";
-    case "cancelled": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 function getErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -186,21 +169,22 @@ export function RiskAssessments() {
           <h1 className="app-title">Risk Assessments</h1>
           <p className="app-subtitle">Assess hazards and occurrences, define mitigations, and track residual risk.</p>
         </div>
-        {canCreate && <button
+        {canCreate && <Button
           type="button"
           onClick={() => {
             setShowForm(!showForm);
             setCreateError("");
             setLastCreated(null);
           }}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <Plus size={16} /> {showForm ? "Cancel" : "New Assessment"}
-        </button>}
+        </Button>}
       </header>
 
       {lastCreated && (
-        <div role="alert" className={`mb-4 rounded border p-3 text-sm ${lastCreated.flight_cancelled ? "border-rose-300 bg-rose-50 text-rose-900" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
+        <div role="alert" className={`mb-4 rounded-md border p-3 text-sm ${lastCreated.flight_cancelled ? "border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger" : "border-kfl-status-success-bg bg-kfl-status-success-bg/20 text-kfl-status-success"}`}>
           <strong>Assessment recorded: {lastCreated.assessment_id}</strong>
           <p className="mt-1">
             Server-calculated {riskModelLabel(lastCreated.risk_model)} result: risk score {lastCreated.risk_score ?? "—"}, {lastCreated.risk_level}.
@@ -211,8 +195,10 @@ export function RiskAssessments() {
         </div>
       )}
 
-      {summaryError && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-        Unable to load risk assessment metrics. <button type="button" className="font-semibold underline" onClick={() => void refetchSummary()}>Retry metrics</button>
+      {summaryError && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
+        Unable to load risk assessment metrics. <Button variant="outline" size="sm" type="button" onClick={() => void refetchSummary()}>
+          Retry metrics
+        </Button>
       </div>}
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="app-surface p-4">
@@ -221,15 +207,15 @@ export function RiskAssessments() {
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Awaiting Approval</div>
-          <div className="mt-2 text-2xl font-bold text-amber-700">{summaryLoading ? "…" : summaryError ? "—" : (summary?.draft ?? 0) + (summary?.scrutiny_required ?? 0)}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-warning">{summaryLoading ? "…" : summaryError ? "—" : (summary?.draft ?? 0) + (summary?.scrutiny_required ?? 0)}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">High / Critical</div>
-          <div className="mt-2 text-2xl font-bold text-red-700">{summaryLoading ? "…" : summaryError ? "—" : summary?.high_or_critical ?? 0}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-danger">{summaryLoading ? "…" : summaryError ? "—" : summary?.high_or_critical ?? 0}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Approved</div>
-          <div className="mt-2 text-2xl font-bold text-emerald-700">{summaryLoading ? "…" : summaryError ? "—" : summary?.approved ?? 0}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-success">{summaryLoading ? "…" : summaryError ? "—" : summary?.approved ?? 0}</div>
         </div>
       </section>
 
@@ -240,9 +226,11 @@ export function RiskAssessments() {
               <div className="app-label mb-1">New Risk Assessment</div>
               <p className="text-xs text-kfl-muted">Select the applicable risk model. The server calculates the result and keeps approval separate from assessment.</p>
             </div>
-            <button type="button" onClick={() => { setShowForm(false); setDirty(false); setCreateError(""); }} className="app-btn-secondary px-4 py-2 text-sm">Cancel</button>
+            <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); setCreateError(""); }}>
+              Cancel
+            </Button>
           </div>
-          {createError && <div role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{createError}</div>}
+          {createError && <div role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{createError}</div>}
           <div className="space-y-3 mb-4">
             <FormField htmlFor="ra_model" label="Risk model" hint="Choose the model required for this assessment." required>
               <select id="ra_model" name="risk_model" className="app-input" value={riskModel} onChange={(e) => { setRiskModel(e.target.value); setDirty(true); }}>
@@ -251,11 +239,11 @@ export function RiskAssessments() {
               </select>
             </FormField>
             <FormField htmlFor="ra_title" label="Assessment title" hint="Summarize the risk being assessed." required>
-              <input id="ra_title" name="title" aria-describedby="ra_title-error" aria-invalid={!!raErrors.title} className={`app-input ${raErrors.title ? "border-rose-400" : ""}`} placeholder="Assessment title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              <Input id="ra_title" name="title" aria-describedby="ra_title-error" aria-invalid={!!raErrors.title} className={raErrors.title ? "border-rose-400" : ""} placeholder="Assessment title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {raErrors.title && <p id="ra_title-error" className="text-[11px] text-rose-700 mt-1">{raErrors.title}</p>}
             </FormField>
             <FormField htmlFor="ra_description" label="Description" hint="Describe the scenario, exposure, and potential consequences." required>
-              <textarea id="ra_description" name="description" aria-describedby="ra_description-error" aria-invalid={!!raErrors.description} className={`app-input ${raErrors.description ? "border-rose-400" : ""}`} placeholder="Describe the risk scenario" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} rows={3} />
+              <textarea id="ra_description" name="description" aria-describedby="ra_description-error" aria-invalid={!!raErrors.description} className={raErrors.description ? "border-rose-400" : ""} placeholder="Describe the risk scenario" value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} rows={3} />
               {raErrors.description && <p id="ra_description-error" className="text-[11px] text-rose-700 mt-1">{raErrors.description}</p>}
             </FormField>
           </div>
@@ -263,40 +251,19 @@ export function RiskAssessments() {
             <div className="space-y-2">
               <FormField htmlFor="ra_hazard" label="Hazard IDs" hint="Add one or more existing hazard records.">
                 <div className="flex gap-2">
-                  <input
-                    id="ra_hazard"
-                    name="hazard_id"
-                    className="app-input flex-1"
-                    placeholder="e.g. HAZ-001"
-                    value={newHazardId}
-                    onChange={(e) => setNewHazardId(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addHazard()}
-                  />
-                  <button
-                    type="button"
-                    onClick={addHazard}
-                    className="app-btn-secondary px-3"
-                    disabled={!newHazardId.trim() || hazardIds.includes(newHazardId.trim())}
-                  >
+                  <Input id="ra_hazard" name="hazard_id" className="flex-1" placeholder="e.g. HAZ-001" value={newHazardId} onChange={(e) => setNewHazardId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHazard()} />
+                  <Button type="button" onClick={addHazard} variant="outline" size="sm" disabled={!newHazardId.trim() || hazardIds.includes(newHazardId.trim())}>
                     Add
-                  </button>
+                  </Button>
                 </div>
                 {hazardIds.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {hazardIds.map((hid) => (
-                      <span
-                        key={hid}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-kfl-border bg-kfl-surface-subtle px-2.5 py-1.5 text-xs text-kfl-text"
-                      >
+                      <span key={hid} className="inline-flex items-center gap-1.5 rounded-md border border-kfl-border bg-kfl-surface-subtle px-2.5 py-1.5 text-xs text-kfl-text">
                         <span className="font-mono">{hid}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeHazard(hid)}
-                          className="rounded-md p-1 text-kfl-muted hover:text-rose-600 hover:bg-rose-50"
-                          aria-label={`Remove hazard ${hid}`}
-                        >
+                        <Button type="button" onClick={() => removeHazard(hid)} variant="ghost" size="sm" className="p-1 text-kfl-muted hover:text-kfl-status-danger hover:bg-kfl-status-danger-bg/20" aria-label={`Remove hazard ${hid}`}>
                           ×
-                        </button>
+                        </Button>
                       </span>
                     ))}
                   </div>
@@ -308,16 +275,10 @@ export function RiskAssessments() {
             </div>
             <div className="space-y-3">
               <FormField htmlFor="ra_occurrence" label="Occurrence ID" hint="Optional link to an existing occurrence.">
-                <input id="ra_occurrence" name="occurrence_id" className="app-input" placeholder="e.g. OCC-..." value={occurrenceId} onChange={(e) => { setOccurrenceId(e.target.value); setDirty(true); }} />
+                <Input id="ra_occurrence" name="occurrence_id" placeholder="e.g. OCC-..." value={occurrenceId} onChange={(e) => { setOccurrenceId(e.target.value); setDirty(true); }} />
               </FormField>
               <FormField htmlFor="ra_mission_search" label="Search planned missions" hint="Search by mission ID, title, or location.">
-                <input
-                  id="ra_mission_search"
-                  name="mission_search"
-                  className="app-input"
-                  value={missionSearch}
-                  onChange={(e) => setMissionSearch(e.target.value)}
-                />
+                <Input id="ra_mission_search" name="mission_search" value={missionSearch} onChange={(e) => setMissionSearch(e.target.value)} />
               </FormField>
               <FormField htmlFor="ra_mission" label="Mission" hint="Optional. This assessment becomes the mission's active risk assessment.">
                 <select id="ra_mission" name="mission_id" className="app-input" value={missionId} onChange={(e) => { setMissionId(e.target.value); setDirty(true); }}>
@@ -389,13 +350,13 @@ export function RiskAssessments() {
           </div>
           <div className="space-y-3 mb-4">
             <FormField htmlFor="ra_mitigation" label="Mitigation measures" hint="Controls or actions to reduce likelihood or severity.">
-              <textarea id="ra_mitigation" name="mitigation_measures" className="app-input" placeholder="Mitigation measures" value={mitigationMeasures} onChange={(e) => { setMitigationMeasures(e.target.value); setDirty(true); }} rows={2} />
+              <textarea id="ra_mitigation" name="mitigation_measures" placeholder="Mitigation measures" value={mitigationMeasures} onChange={(e) => { setMitigationMeasures(e.target.value); setDirty(true); }} rows={2} />
             </FormField>
             <FormField htmlFor="ra_residual" label="Residual risk" hint="Remaining risk after mitigations are applied.">
-              <input id="ra_residual" name="residual_risk" className="app-input" placeholder="Residual risk statement" value={residualRisk} onChange={(e) => { setResidualRisk(e.target.value); setDirty(true); }} />
+              <Input id="ra_residual" name="residual_risk" placeholder="Residual risk statement" value={residualRisk} onChange={(e) => { setResidualRisk(e.target.value); setDirty(true); }} />
             </FormField>
           </div>
-          <button
+          <Button
             type="button"
             disabled={!raIsValid || createMutation.isPending}
             onClick={() => {
@@ -414,10 +375,12 @@ export function RiskAssessments() {
                 residual_risk: residualRisk.trim() || null,
               });
             }}
-            className="app-btn-primary w-full"
+            variant="default"
+            size="sm"
+            className="w-full disabled:opacity-60"
           >
             {createMutation.isPending ? "Submitting…" : "Submit Assessment"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -445,20 +408,24 @@ export function RiskAssessments() {
           </div>
         </div>
 
-        {actionError && <div role="alert" className="m-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{actionError}</div>}
+        {actionError && <div role="alert" className="m-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{actionError}</div>}
         {isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">Loading risk assessments…</div>
         ) : isError ? (
           <div className="p-10 text-center" role="alert">
-            <p className="text-sm font-semibold text-rose-800">Unable to load risk assessments: {getErrorMessage(error, "Please try again.")}</p>
-            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry risk assessments</button>
+            <p className="text-sm font-semibold text-kfl-status-danger">Unable to load risk assessments: {getErrorMessage(error, "Please try again.")}</p>
+            <Button variant="outline" size="sm" type="button" onClick={() => void refetch()}>
+              Retry risk assessments
+            </Button>
           </div>
         ) : assessments.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
             <ShieldCheck size={26} className="mx-auto mb-2 text-kfl-muted" />
             <p className="text-sm font-bold text-kfl-text">{statusFilter || riskFilter ? "No assessments match these filters." : "No risk assessments recorded."}</p>
             {!statusFilter && !riskFilter && <p className="mt-1 text-xs text-kfl-muted">Create an assessment to begin risk tracking.</p>}
-            {(statusFilter || riskFilter) && <button type="button" className="app-btn-secondary mt-3" onClick={() => { setStatusFilter(""); setRiskFilter(""); setPage(0); }}>Clear filters</button>}
+            {(statusFilter || riskFilter) && <Button variant="outline" size="sm" type="button" onClick={() => { setStatusFilter(""); setRiskFilter(""); setPage(0); }}>
+              Clear filters
+            </Button>}
           </div>
         ) : (
           <>
@@ -478,7 +445,7 @@ export function RiskAssessments() {
                 <tbody className="divide-y divide-kfl-border">
                   {assessments.map((r) => {
                     const links = [
-                      ...(r.hazard_ids ?? []).map((hazardId) => `Hazard ${hazardId}`),
+                      ...(r.hazard_ids ?? []).map((hazardId: string) => `Hazard ${hazardId}`),
                       ...(r.occurrence_id ? [`Occurrence ${r.occurrence_id}`] : []),
                       ...(r.mission_id ? [`Mission ${r.mission_id}`] : []),
                     ];
@@ -497,13 +464,13 @@ export function RiskAssessments() {
                           <div>{riskModelLabel(r.risk_model)}</div>
                           <div className="mt-1 text-xs text-kfl-muted">Score {r.risk_score ?? "—"}{r.exposure ? ` · Exposure ${r.exposure}` : ""}</div>
                         </td>
-                        <td className="px-4 py-4"><span className={riskClass(r.risk_level)}>{r.risk_level}</span></td>
-                        <td className="px-4 py-4"><span className={statusClass(r.status)}>{r.status.replace(/_/g, " ")}</span></td>
+                        <td className="px-4 py-4"><Badge variant={r.risk_level === "critical" || r.risk_level === "high" ? "destructive" : r.risk_level === "medium" ? "secondary" : "default"} className={`badge ${r.risk_level === "critical" || r.risk_level === "high" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : r.risk_level === "medium" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{r.risk_level}</Badge></td>
+                        <td className="px-4 py-4"><Badge variant={r.status === "approved" ? "default" : r.status === "scrutiny_required" ? "secondary" : r.status === "cancelled" ? "destructive" : "outline"} className={`badge ${r.status === "approved" ? "bg-kfl-status-info-bg text-kfl-status-info" : r.status === "scrutiny_required" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : r.status === "cancelled" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{r.status.replace(/_/g, " ")}</Badge></td>
                         <td className="px-4 py-4 text-right text-sm">
                           {canApproveThis ? (
-                            <button type="button" aria-label={`Approve ${r.assessment_id}`} disabled={approveMutation.isPending} onClick={() => approveMutation.mutate(r.assessment_id)} className="app-btn-secondary inline-flex items-center gap-1 text-xs">
+                            <Button type="button" aria-label={`Approve ${r.assessment_id}`} disabled={approveMutation.isPending} variant="outline" size="sm" onClick={() => approveMutation.mutate(r.assessment_id)} className="inline-flex items-center gap-1">
                               <CheckCircle size={13} /> Approve
-                            </button>
+                            </Button>
                           ) : canApprove && approvalPending && r.can_approve_for_current_user !== true ? (
                             <span className="text-xs text-kfl-muted">Independent reviewer required</span>
                           ) : <span className="text-xs text-kfl-muted">—</span>}
@@ -517,8 +484,12 @@ export function RiskAssessments() {
             <div className="flex items-center justify-between border-t border-kfl-border p-4">
               <span className="text-sm text-kfl-muted">Page {page + 1}</span>
               <div className="flex gap-2">
-                <button type="button" className="app-btn-secondary" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>
-                <button type="button" className="app-btn-secondary" disabled={!hasNextPage || isLoading} onClick={() => setPage((current) => current + 1)}>Next page</button>
+                <Button variant="outline" size="sm" type="button" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>
+                  Previous page
+                </Button>
+                <Button variant="outline" size="sm" type="button" disabled={!hasNextPage || isLoading} onClick={() => setPage((current) => current + 1)}>
+                  Next page
+                </Button>
               </div>
             </div>
           </>

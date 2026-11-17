@@ -3,16 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { p2Api } from "../api/p2";
 import { Distribution } from "../types";
 import { MailOpen, Plus, Send } from "lucide-react";
-
-function statusClass(status: string) {
-  switch (status.toLowerCase()) {
-    case "pending": return "app-status app-status-warning";
-    case "acknowledged": return "app-status app-status-healthy";
-    case "sent": return "app-status app-status-info";
-    case "failed": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function DocumentDistributions() {
   const qc = useQueryClient();
@@ -54,9 +48,9 @@ export function DocumentDistributions() {
           <h1 className="app-title">Document Distributions</h1>
           <p className="app-subtitle">Track issuance and acknowledgement of controlled document versions.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <Plus size={16} /> New Distribution
-        </button>
+        </Button>
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -78,28 +72,19 @@ export function DocumentDistributions() {
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Distributions</div>
           <div className="flex gap-2">
-            <input
-              id="distribution_version_id"
-              name="version_id"
-              placeholder="Version ID"
-              className="app-input w-full md:w-auto"
-              value={versionId}
-              onChange={(e) => setVersionId(e.target.value)}
-            />
-            <select
-              id="distribution_status"
-              name="status"
-              aria-label="Filter by status"
-              className="app-input w-full md:w-auto"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="acknowledged">Acknowledged</option>
-              <option value="sent">Sent</option>
-              <option value="failed">Failed</option>
-            </select>
+            <Input id="distribution_version_id" name="version_id" placeholder="Version ID" value={versionId} onChange={(e) => setVersionId(e.target.value)} className="w-full md:w-auto" />
+            <Select onValueChange={(e) => setStatusFilter(e)}>
+              <SelectTrigger id="distribution_status" name="status" aria-label="Filter by status">
+                <SelectValue placeholder={statusFilter || "All statuses"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="acknowledged">Acknowledged</SelectItem>
+                <SelectItem value="sent">Sent</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -132,19 +117,20 @@ export function DocumentDistributions() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.version_id}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.recipient_id}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.channel}</td>
-                    <td className="px-4 py-4"><span className={statusClass(d.status)}>{d.status}</span></td>
+                    <td className="px-4 py-4"><Badge variant={d.status === "acknowledged" ? "default" : d.status === "pending" ? "secondary" : d.status === "failed" ? "destructive" : "outline"} className={`badge ${d.status === "acknowledged" ? "bg-kfl-status-info-bg text-kfl-status-info" : d.status === "pending" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : d.status === "failed" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{d.status}</Badge></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">
                       {d.acknowledged_at ? new Date(d.acknowledged_at).toLocaleString() : "—"}
                     </td>
                     <td className="px-4 py-4 text-right">
                       {d.status !== "acknowledged" && (
-                        <button
+                        <Button
                           id={`ack_${d.distribution_id}`}
-                          className="app-btn"
+                          variant="outline"
+                          size="sm"
                           onClick={() => ackMutation.mutate(d.distribution_id)}
                         >
                           <Send size={14} /> Acknowledge
-                        </button>
+                        </Button>
                       )}
                     </td>
                   </tr>
@@ -165,49 +151,39 @@ export function DocumentDistributions() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Version ID</span>
-                <input
-                  id="distribution_create_version"
-                  name="version_id"
-                  className="app-input"
-                  value={form.version_id}
-                  onChange={(e) => setForm({ ...form, version_id: e.target.value })}
-                />
+                <Input id="distribution_create_version" name="version_id" value={form.version_id} onChange={(e) => setForm({ ...form, version_id: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Recipient ID</span>
-                <input
-                  id="distribution_create_recipient"
-                  name="recipient_id"
-                  className="app-input"
-                  value={form.recipient_id}
-                  onChange={(e) => setForm({ ...form, recipient_id: e.target.value })}
-                />
+                <Input id="distribution_create_recipient" name="recipient_id" value={form.recipient_id} onChange={(e) => setForm({ ...form, recipient_id: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Channel</span>
-                <select
-                  id="distribution_create_channel"
-                  name="channel"
-                  className="app-input"
-                  value={form.channel}
-                  onChange={(e) => setForm({ ...form, channel: e.target.value })}
-                >
-                  <option value="email">Email</option>
-                  <option value="print">Print</option>
-                  <option value="portal">Portal</option>
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, channel: e })}>
+                  <SelectTrigger id="distribution_create_channel" name="channel">
+                    <SelectValue placeholder={form.channel} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="email">Email</SelectItem>
+                    <SelectItem value="print">Print</SelectItem>
+                    <SelectItem value="portal">Portal</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => setIsCreating(false)}>Cancel</button>
-              <button
+              <Button variant="outline" size="sm" onClick={() => setIsCreating(false)}>
+                Cancel
+              </Button>
+              <Button
                 id="create_distribution_submit"
-                className="app-btn"
+                variant="default"
+                size="sm"
                 disabled={!form.version_id || !form.recipient_id || createMutation.isPending}
                 onClick={() => createMutation.mutate(form)}
               >
                 {createMutation.isPending ? "Creating…" : "Create"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

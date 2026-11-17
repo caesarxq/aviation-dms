@@ -3,14 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { CrewMember } from "../types";
 import { UserPlus, Trash2 } from "lucide-react";
-
-function statusClass(status: string) {
-  switch (status.toLowerCase()) {
-    case "active": return "app-status app-status-healthy";
-    case "inactive": return "app-status app-status-critical";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function CrewManagement() {
   const qc = useQueryClient();
@@ -61,35 +57,26 @@ export function CrewManagement() {
           <h1 className="app-title">Crew Management</h1>
           <p className="app-subtitle">Manage crew directory, duty time logs, and qualification currency.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <UserPlus size={16} /> Add Crew
-        </button>
+        </Button>
       </header>
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Crew Directory</div>
           <div className="flex gap-2">
-            <input
-              id="crew_role_filter"
-              name="role"
-              placeholder="Filter by role"
-              className="app-input w-full md:w-auto"
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-            />
-            <select
-              id="crew_status_filter"
-              name="status"
-              aria-label="Filter by status"
-              className="app-input w-full md:w-auto"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+            <Input id="crew_role_filter" name="role" placeholder="Filter by role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="w-full md:w-auto" />
+            <Select onValueChange={(e) => setStatusFilter(e)}>
+              <SelectTrigger id="crew_status_filter" name="status" aria-label="Filter by status">
+                <SelectValue placeholder={statusFilter || "All statuses"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -120,28 +107,19 @@ export function CrewManagement() {
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{c.full_name}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{c.role}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{c.base}</td>
-                    <td className="px-4 py-4"><span className={statusClass(c.status)}>{c.status}</span></td>
+                    <td className="px-4 py-4"><Badge variant={c.status === "active" ? "default" : "destructive"} className={`badge ${c.status === "active" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{c.status}</Badge></td>
                     <td className="px-4 py-4 text-right">
-                      <button
-                        id={`edit_crew_${c.crew_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          setEditingId(c.crew_id);
-                          setForm({ full_name: c.full_name, role: c.role, base: c.base, status: c.status });
-                        }}
-                      >
+                      <Button variant="outline" size="sm" id={`edit_crew_${c.crew_id}`} onClick={() => {
+                        setEditingId(c.crew_id);
+                        setForm({ full_name: c.full_name, role: c.role, base: c.base, status: c.status });
+                      }}>
                         Edit
-                      </button>
-                      <button
-                        id={`delete_crew_${c.crew_id}`}
-                        aria-label={`Delete crew member ${c.crew_id}`}
-                        className="app-btn app-btn-ghost"
-                        onClick={() => {
-                          if (confirm("Delete this crew member?")) deleteMutation.mutate(c.crew_id);
-                        }}
-                      >
+                      </Button>
+                      <Button variant="destructive" size="sm" aria-label={`Delete crew member ${c.crew_id}`} id={`delete_crew_${c.crew_id}`} onClick={() => {
+                        if (confirm("Delete this crew member?")) deleteMutation.mutate(c.crew_id);
+                      }}>
                         <Trash2 size={14} />
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -161,58 +139,36 @@ export function CrewManagement() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Full Name</span>
-                <input
-                  id="crew_full_name"
-                  name="full_name"
-                  className="app-input"
-                  value={form.full_name}
-                  onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-                />
+                <Input id="crew_full_name" name="full_name" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Role</span>
-                <input
-                  id="crew_role"
-                  name="role"
-                  className="app-input"
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                />
+                <Input id="crew_role" name="role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Base</span>
-                <input
-                  id="crew_base"
-                  name="base"
-                  className="app-input"
-                  value={form.base}
-                  onChange={(e) => setForm({ ...form, base: e.target.value })}
-                />
+                <Input id="crew_base" name="base" value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Status</span>
-                <select
-                  id="crew_status"
-                  name="status"
-                  className="app-input"
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value })}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, status: e })}>
+                  <SelectTrigger id="crew_status" name="status">
+                    <SelectValue placeholder={form.status} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => { setIsCreating(false); setEditingId(null); }}>Cancel</button>
-              <button
-                id="crew_submit"
-                className="app-btn"
-                disabled={!form.full_name || !form.role}
-                onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}
-              >
+              <Button variant="outline" size="sm" onClick={() => { setIsCreating(false); setEditingId(null); }}>
+                Cancel
+              </Button>
+              <Button id="crew_submit" variant="default" size="sm" disabled={!form.full_name || !form.role} onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}>
                 {editingId ? (updateMutation.isPending ? "Saving…" : "Save") : (createMutation.isPending ? "Creating…" : "Create")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -3,6 +3,8 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { getPostLoginPath } from "../auth/permissions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -60,42 +62,47 @@ export function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-kfl-canvas px-4 py-10">
       <section className="app-surface w-full max-w-md p-8 shadow-xl" aria-labelledby="login-title">
         <div className="mb-6 text-center">
-          <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="mx-auto mb-5 h-12 w-auto object-contain" />
+          <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="mx-auto mb-5 h-14 w-auto object-contain" />
           <h1 id="login-title" className="text-2xl font-bold text-kfl-text">Secure sign in</h1>
           <p className="mt-2 text-sm text-kfl-muted">Use your assigned KFL Aviation DMS account.</p>
         </div>
 
-        {error && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
+        {error && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-3 text-sm">{error}</div>}
 
         <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
           <div>
             <label htmlFor="login-username" className="mb-1 block text-sm font-medium text-kfl-text">Username</label>
-            <input id="login-username" name="username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="app-input w-full" />
+            <Input id="login-username" name="username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required className="w-full" />
           </div>
-          <div className="relative">
+          <div>
             <label htmlFor="login-password" className="mb-1 block text-sm font-medium text-kfl-text">Password</label>
-            <input
-              id="login-password"
-              name="password"
-              type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              className="app-input w-full pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-2 top-1/2 -mt-2 text-kfl-muted hover:text-kfl-text"
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
+            <div className="relative">
+              <Input
+                id="login-password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                className="w-full pr-14"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                className="absolute inset-y-0 right-1 inline-flex min-w-[3.25rem] items-center justify-center rounded px-2 text-xs font-medium text-kfl-secondary transition-colors hover:bg-kfl-surface-subtle hover:text-kfl-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-kfl-blue"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-controls="login-password"
+                aria-pressed={showPassword}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </div>
-          <button type="submit" disabled={submitting || !username.trim() || !password} className="app-btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60">
+          <Button type="submit" disabled={submitting || !username.trim() || !password} variant="default" size="sm" className="w-full disabled:cursor-not-allowed disabled:opacity-60">
             {submitting ? "Signing in…" : "Sign in"}
-          </button>
+          </Button>
         </form>
         <p className="mt-3 text-center text-sm"><Link to="/forgot-password" className="text-kfl-blue underline underline-offset-2">Forgot password?</Link></p>
 
@@ -113,4 +120,3 @@ export function LoginPage() {
     </main>
   );
 }
-

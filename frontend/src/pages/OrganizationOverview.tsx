@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUpRight, CalendarClock, CheckCircle2, ClipboardList, Plane, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { safetyApi, OrganizationOverviewData } from "../api/safety";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 type ActionPrompt = { text: string; to: string; link: string };
 
@@ -93,16 +95,18 @@ export function OrganizationOverview() {
         <header className="app-page-header">
           <div><div className="app-eyebrow">Organization-wide view</div><h1 className="app-title">Organization overview</h1></div>
         </header>
-        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        <div role="alert" className="rounded-lg border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger p-4 text-sm">
           Unable to load organization overview data. No status should be inferred from unavailable data.
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="app-btn-secondary mt-3"
+            className="mt-3 disabled:opacity-60"
           >
             {isFetching ? "Retrying…" : "Retry loading overview"}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -120,7 +124,7 @@ export function OrganizationOverview() {
           <h1 className="app-title">Organization overview</h1>
           <p className="app-subtitle">Organization-wide trends, tracked commitments, operations, and fleet records. These summaries are not operational or regulatory approvals.</p>
         </div>
-        <span className="app-status app-status-info">Summary data loaded</span>
+        <Badge variant="outline" className="badge">Summary data loaded</Badge>
       </header>
 
       <section className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Organization metrics">
@@ -230,9 +234,9 @@ export function OrganizationOverview() {
       </section>
 
       <div className="flex flex-wrap gap-3 text-sm">
-        <Link to="/missions" className="app-btn-secondary">Operations <ArrowUpRight size={14} /></Link>
-        <Link to="/roc" className="app-btn-secondary">ROC and OpSpec records <ArrowUpRight size={14} /></Link>
-        <Link to="/audit-reports" className="app-btn-secondary">Audit reports <ArrowUpRight size={14} /></Link>
+        <Button asChild variant="outline" size="sm"><Link to="/missions">Operations <ArrowUpRight size={14} /></Link></Button>
+        <Button asChild variant="outline" size="sm"><Link to="/roc">ROC and OpSpec records <ArrowUpRight size={14} /></Link></Button>
+        <Button asChild variant="outline" size="sm"><Link to="/audit-reports">Audit reports <ArrowUpRight size={14} /></Link></Button>
       </div>
     </div>
   );

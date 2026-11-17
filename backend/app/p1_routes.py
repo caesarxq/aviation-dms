@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 from typing import Optional, List
 from datetime import datetime, timedelta
+import asyncio
 import os
 import uuid
 import json
@@ -15,6 +16,7 @@ from .rbac import has_permission
 from .p0_auth import same_principal
 from .p1_models import *
 from .p1_models import _validate_canonical_date
+from .asset_service import render_html_template, render_asset_png, get_template_info, list_templates
 
 router = APIRouter()
 FLIGHT_RELEASE_ENABLED = os.getenv("FLIGHT_RELEASE_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
@@ -3987,7 +3989,7 @@ async def trigger_notification_check(request: Request):
 async def send_notification(request: Request, to: str, subject: str, body: str):
     """Send a manual notification."""
     _check(request, "compliance:manage")
-    success = send_email(to, subject, body)
+    success = await asyncio.to_thread(send_email, to, subject, body)
     return {"success": success, "to": to, "subject": subject}
 
 
@@ -4045,3 +4047,82 @@ async def update_notification_preferences(request: Request, email_enabled: bool 
         return {"status": "updated", "user_id": actor}
     finally:
         await db.close()
+
+
+# ==================== NOTIFICATION ASSET RENDERING ====================
+
+@router.get("/notifications/assets/templates")
+async def list_notification_asset_templates(request: Request):
+    """List supported notification asset templates.
+
+    Returns metadata for each template including required and optional fields.
+    """
+    _check(request, "compliance:read")
+    return {
+        "templates": [
+            {
+                "name": name,
+                "description": info["description"],
+                "required_fields": info["required_fields"],
+                "optional_fields": info["optional_fields"],
+            }
+            for name, info in sorted(get_template_info.__globals__["SUPPORTED_TEMPLATES"].items())
+        ]
+    }
+
+
+@router.post("/notifications/assets/render")
+async def render_notification_asset(request: Request, template_name: str, context: dict = {}):
+    """Render a notification template to a base64-encoded PNG image.
+
+    Body:
+        template_name: one of 'invitation_memo', 'notice_poster', 'document_proposal_summary'
+        context: template context data (recipient_name, title, body, etc.)
+
+    Returns:
+        data:image/png;base64,<base64> — embeddable as a CID attachment in SMTP emails.
+    """
+    _check(request, "compliance:manage")
+
+    info = get_template_info(template_name)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"Unknown template: {template_name}")
+
+    # Validate required fields
+    missing = [f for f in info["required_fields"] if f not in context]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required fields for template '{template_name}': {', '.join(missing)}",
+        )
+
+    data_url = render_asset_png(template_name, context)
+    return {"template": template_name, "data_url": data_url, "format": "png"}
+
+
+@router.post("/notifications/assets/html")
+async def render_notification_asset_html(request: Request, template_name: str, context: dict = {}):
+    """Render a notification template to an HTML string.
+
+    Body:
+        template_name: one of 'invitation_memo', 'notice_poster', 'document_proposal_summary'
+        context: template context data
+
+    Returns:
+        Rendered HTML suitable for use as an email text/html body.
+    """
+    _check(request, "compliance:manage")
+
+    info = get_template_info(template_name)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"Unknown template: {template_name}")
+
+    missing = [f for f in info["required_fields"] if f not in context]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required fields for template '{template_name}': {', '.join(missing)}",
+        )
+
+    html = render_html_template(f"{template_name}.html", context)
+    return {"template": template_name, "html": html, "format": "html"}

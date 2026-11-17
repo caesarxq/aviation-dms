@@ -6,34 +6,8 @@ import type { AuditFinding, AuditFindingStatus, AuditReport } from "../api/audit
 import { AlertTriangle, Plus, RefreshCw } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useAuth } from "../auth/AuthContext";
-
-function levelClass(level: number | undefined) {
-  switch (level) {
-    case 3:
-      return "app-status app-status-critical";
-    case 2:
-      return "app-status app-status-warning";
-    case 1:
-      return "app-status app-status-info";
-    default:
-      return "app-status app-status-info";
-  }
-}
-
-function statusClass(status: string) {
-  switch (status) {
-    case "open":
-      return "app-status app-status-warning";
-    case "in_progress":
-      return "app-status app-status-info";
-    case "verified":
-      return "app-status app-status-healthy";
-    case "closed":
-      return "app-status app-status-healthy";
-    default:
-      return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export function AuditFindings() {
   const qc = useQueryClient();
@@ -140,16 +114,17 @@ export function AuditFindings() {
                 Record a new audit finding and link it to a corrective action.
               </p>
             </div>
-            <button
+            <Button
               type="button"
               onClick={() => { setShowForm(false); setMutationError(""); }}
-              className="app-btn-secondary px-4 py-2 text-sm"
+              variant="outline"
+              size="sm"
             >
               Cancel
-            </button>
+            </Button>
           </div>
-          {mutationError && <p role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{mutationError}</p>}
-          {auditsError && <div role="alert" className="mb-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Unable to load audit engagements. <button type="button" className="font-semibold underline" onClick={() => void refetchAudits()}>Retry</button></div>}
+          {mutationError && <p role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{mutationError}</p>}
+          {auditsError && <div role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">Unable to load audit engagements. <Button onClick={() => void refetchAudits()} variant="link" size="sm">Retry</Button></div>}
           <div className="space-y-3 mb-4">
             <FormField htmlFor="audit_engagement" label="Audit engagement" required>
               <select id="audit_engagement" name="audit_id" aria-label="Audit engagement" className="app-input" value={auditId} onChange={(event) => setAuditId(event.target.value)} disabled={auditsLoading || auditsError}>
@@ -227,7 +202,7 @@ export function AuditFindings() {
               />
             </FormField>
           </div>
-          <button
+          <Button
             type="button"
             disabled={
               createMutation.isPending || !auditId || auditsLoading || auditsError ||
@@ -247,10 +222,12 @@ export function AuditFindings() {
                 description,
               })
             }
-            className="app-btn-primary w-full disabled:opacity-60"
+            variant="default"
+            size="sm"
+            className="w-full disabled:opacity-60"
           >
             {createMutation.isPending ? "Creating…" : "Create Finding"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -330,15 +307,17 @@ export function AuditFindings() {
                       {f.area}
                     </td>
                     <td className="px-4 py-4">
-                      <span className={levelClass(f.level)}>{`Level ${f.level}`}</span>
+                      <Badge variant={f.level === 3 ? "destructive" : f.level === 2 ? "secondary" : "outline"} className={`badge ${f.level === 3 ? "bg-kfl-status-danger-bg text-kfl-status-danger" : f.level === 2 ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>
+                        Level {f.level}
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-[12px] text-kfl-text line-clamp-1">
                       {f.title}
                     </td>
                     <td className="px-4 py-4">
-                      <span className={statusClass(f.status)}>
+                      <Badge variant={f.status === "open" ? "secondary" : f.status === "in_progress" ? "outline" : "default"} className={`badge ${f.status === "open" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : f.status === "in_progress" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>
                         {f.status.replace(/_/g, " ").toUpperCase()}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-right text-sm">
                       <button

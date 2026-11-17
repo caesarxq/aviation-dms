@@ -8,16 +8,9 @@ import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunc
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
-
-function incidentSeverityClass(severity: string) {
-  switch (severity) {
-    case "critical": return "app-status app-status-critical";
-    case "high": return "app-status app-status-warning";
-    case "medium": return "app-status app-status-info";
-    case "low": return "app-status app-status-healthy";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 export function SecurityManagement() {
   const qc = useQueryClient();
@@ -89,27 +82,33 @@ export function SecurityManagement() {
           <h1 className="app-title">Security Incidents</h1>
           <p className="app-subtitle">Report, track, and manage security incidents and assessments.</p>
         </div>
-        {canManage && <button
+        {canManage && <Button
           onClick={() => setShowForm(!showForm)}
-          className="app-btn-primary"
+          variant="default"
+          size="sm"
         >
           <AlertTriangle size={16} /> {showForm ? "Cancel" : "Report Incident"}
-        </button>}
-        {hasPermission("safety:create") && <button
+        </Button>}
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowSecurityReviewModal(true)}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
         >
           <Calendar size={16} /> Schedule Review
-        </button>}
-        {hasPermission("safety:create") && <button
+        </Button>}
+        {hasPermission("safety:create") && <Button
           onClick={() => setShowOutsourcedModal(true)}
-          className="app-btn-secondary"
+          variant="outline"
+          size="sm"
         >
           <Users size={16} /> Register Outsourced Function
-        </button>}
+        </Button>}
       </header>
 
-      {canReadSensitive && summaryError && <div role="alert" className="mb-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Unable to load security incident metrics. <button type="button" className="font-semibold underline" onClick={() => void refetchSummary()}>Retry</button></div>}
+      {canReadSensitive && summaryError && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">Unable to load security incident metrics. <Button variant="outline" size="sm" type="button" onClick={() => void refetchSummary()}>
+        Retry
+      </Button>
+      </div>}
       {canReadSensitive && <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="app-surface p-4">
           <div className="app-label">Total Incidents</div>
@@ -117,11 +116,11 @@ export function SecurityManagement() {
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Critical / High</div>
-          <div className="mt-2 text-2xl font-bold text-red-700">{summaryLoading ? "…" : summaryError ? "—" : incidentSummary?.critical_high ?? "—"}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-danger">{summaryLoading ? "…" : summaryError ? "—" : incidentSummary?.critical_high ?? "—"}</div>
         </div>
         <div className="app-surface p-4">
           <div className="app-label">Open</div>
-          <div className="mt-2 text-2xl font-bold text-amber-700">{summaryLoading ? "…" : summaryError ? "—" : incidentSummary?.open ?? "—"}</div>
+          <div className="mt-2 text-2xl font-bold text-kfl-status-warning">{summaryLoading ? "…" : summaryError ? "—" : incidentSummary?.open ?? "—"}</div>
         </div>
       </section>}
 
@@ -129,16 +128,9 @@ export function SecurityManagement() {
         {canReadSensitive && <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <ShieldAlert size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <input id="search_incidents_85" name="search_incidents"
-              value={search}
-              type="search"
-              aria-label="Search security incidents"
-              onChange={(e) => { setPage(0); setSearch(e.target.value); }}
-              placeholder="Search incidents…"
-              className="app-input pl-9 relative z-10"
-            />
+            <Input id="search_incidents_85" name="search_incidents" type="search" aria-label="Search security incidents" value={search} onChange={(e) => { setPage(0); setSearch(e.target.value); }} placeholder="Search incidents…" className="pl-9 relative z-10" />
           </div>
-          <select id="select_field_92" name="status" aria-label="Filter security incidents by status" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }} className="app-input w-full md:w-auto">
+          <select id="select_field_92" name="status" aria-label="Filter security incidents by status" value={statusFilter} onChange={(e) => { setPage(0); setStatusFilter(e.target.value); }} className="w-full md:w-auto">
             <option value="">All statuses</option>
             <option value="reported">Reported</option>
             <option value="investigating">Investigating</option>
@@ -159,20 +151,24 @@ export function SecurityManagement() {
                 <div className="app-label mb-1">New Security Incident</div>
                 <p className="text-xs text-kfl-muted">Report a security incident for investigation.</p>
               </div>
-              <button onClick={() => { setShowForm(false); setDirty(false); }} className="app-btn-secondary px-3 py-2">Cancel</button>
+              <Button variant="outline" size="sm" onClick={() => { setShowForm(false); setDirty(false); }}>
+                Cancel
+              </Button>
             </div>
             <FormField htmlFor="incident_title_109" label="Incident title" hint="Summarize the security event without including sensitive credentials or secrets." required>
-              <input id="incident_title_109" name="incident_title" aria-describedby="incident_title_109-error" aria-invalid={!!smFieldErrors.title} className={`app-input ${smFieldErrors.title ? "border-rose-400" : ""}`} placeholder="Security incident title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
+              <Input id="incident_title_109" name="incident_title" aria-describedby="incident_title_109-error" aria-invalid={!!smFieldErrors.title} className={smFieldErrors.title ? "border-rose-400" : ""} placeholder="Security incident title" value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} />
               {smFieldErrors.title && <p id="incident_title_109-error" className="text-[11px] text-rose-700 mt-1">{smFieldErrors.title}</p>}
             </FormField>
-            <button
+            <Button
               disabled={!smIsValid || createMutation.isPending}
               onClick={() => createMutation.mutate({ title, description: "Security incident", incident_type: "unauthorized_access" })}
-              className="app-btn-primary w-full"
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
             >
               {createMutation.isPending ? "Submitting…" : "Report Incident"}
-            </button>
-            {createMutation.isError && <p role="alert" className="mt-3 text-sm text-rose-800">Unable to report security incident. {createMutation.error instanceof Error ? createMutation.error.message : "Please try again."}</p>}
+            </Button>
+            {createMutation.isError && <p role="alert" className="mt-3 text-sm text-kfl-status-danger">Unable to report security incident. {createMutation.error instanceof Error ? createMutation.error.message : "Please try again."}</p>}
           </div>
         ) : null}
 
@@ -180,8 +176,10 @@ export function SecurityManagement() {
           <div className="p-10 text-center text-sm text-kfl-muted">Loading incidents…</div>
         ) : canReadSensitive && isError ? (
           <div className="p-10 text-center" role="alert">
-            <p className="text-sm font-semibold text-rose-800">Unable to load security incidents.</p>
-            <button type="button" onClick={() => void refetch()} className="app-btn-secondary mt-3">Retry</button>
+            <p className="text-sm font-semibold text-kfl-status-danger">Unable to load security incidents.</p>
+            <Button variant="outline" size="sm" type="button" onClick={() => void refetch()}>
+              Retry
+            </Button>
           </div>
         ) : canReadSensitive && incidents.length === 0 && page === 0 && !trimmedSearch && !requestedStatus ? (
           <div className="app-surface border-dashed p-10 text-center">
@@ -192,7 +190,9 @@ export function SecurityManagement() {
         ) : canReadSensitive && incidents.length === 0 ? (
           <div className="p-10 text-center text-sm text-kfl-muted">
             <p>{page > 0 ? "No incidents on this page." : "No incidents match these filters."}</p>
-            {page > 0 && <button type="button" className="app-btn-secondary mt-3" disabled={isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>}
+            {page > 0 && <Button variant="outline" size="sm" type="button" disabled={isLoading} onClick={() => setPage((current) => current - 1)}>
+              Previous page
+            </Button>}
           </div>
         ) : canReadSensitive ? (
           <>
@@ -213,9 +213,7 @@ export function SecurityManagement() {
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{i.incident_id}</td>
                     <td className="px-4 py-4 text-sm font-medium text-kfl-text">{i.title}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.incident_type}</td>
-                    <td className="px-4 py-4">
-                      <span className={incidentSeverityClass(i.severity)}>{i.severity}</span>
-                    </td>
+                    <td className="px-4 py-4"><Badge variant={i.severity === "critical" || i.severity === "high" ? "destructive" : i.severity === "medium" ? "secondary" : "default"} className={`badge ${i.severity === "critical" || i.severity === "high" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : i.severity === "medium" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-info-bg text-kfl-status-info"}`}>{i.severity}</Badge></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{i.status}</td>
                   </tr>
                 ))}
@@ -225,8 +223,12 @@ export function SecurityManagement() {
           <div className="flex items-center justify-between border-t border-kfl-border p-4">
             <span className="text-sm text-kfl-muted">Page {page + 1}</span>
             <div className="flex gap-2">
-              <button type="button" className="app-btn-secondary" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>Previous page</button>
-              <button type="button" className="app-btn-secondary" disabled={incidents.length < pageSize || isLoading} onClick={() => setPage((current) => current + 1)}>Next page</button>
+              <Button variant="outline" size="sm" type="button" disabled={page === 0 || isLoading} onClick={() => setPage((current) => current - 1)}>
+                Previous page
+              </Button>
+              <Button variant="outline" size="sm" type="button" disabled={incidents.length < pageSize || isLoading} onClick={() => setPage((current) => current + 1)}>
+                Next page
+              </Button>
             </div>
           </div>
           </>

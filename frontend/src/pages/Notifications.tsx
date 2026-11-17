@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, AlertCircle, Info, Settings, SlidersHorizontal } from "lucide-react";
 import { safetyApi } from "../api/safety";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 const defaultPreferences = {
   email_enabled: true,
@@ -55,10 +58,10 @@ export function Notifications() {
           <p className="app-subtitle">Review system alerts and tune the timing of compliance reminders.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowPrefs(!showPrefs)} className="app-btn-secondary">
+          <Button variant="outline" size="sm" onClick={() => setShowPrefs(!showPrefs)}>
             <Settings size={16} /> Preferences
-          </button>
-          <select id="statusfilter_61" name="statusfilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="app-input w-auto min-w-[120px]">
+          </Button>
+          <select id="statusfilter_61" name="statusfilter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-auto min-w-[120px]">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="sent">Sent</option>
@@ -75,9 +78,9 @@ export function Notifications() {
               <div className="flex items-center gap-2"><SlidersHorizontal size={17} className="text-kfl-blue" /><h2 className="text-base font-bold text-kfl-text">Notification preferences</h2></div>
               <p className="mt-1 text-xs text-kfl-muted">Set when reminders should reach you. Changes apply to future checks.</p>
             </div>
-            <button onClick={() => savePrefsMutation.mutate()} disabled={savePrefsMutation.isPending} className="app-btn-primary">
+            <Button onClick={() => savePrefsMutation.mutate()} disabled={savePrefsMutation.isPending} variant="default" size="sm">
               {savePrefsMutation.isPending ? "Saving…" : "Save preferences"}
-            </button>
+            </Button>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="flex min-h-10 items-center gap-2 rounded-md border border-kfl-border bg-kfl-surface-subtle px-3 text-sm font-medium text-kfl-text">
@@ -93,7 +96,7 @@ export function Notifications() {
             ].map(([key, label, suffix]) => (
               <label key={key} className="text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">{label} ({suffix})</span>
-                <input id="number_96" name="number" type="number" min={0} value={Number(prefsForm[key as keyof typeof prefsForm])} onChange={(e) => updatePref(key, Number(e.target.value))} className="app-input" />
+                <Input id="number_96" name="number" type="number" min={0} value={Number(prefsForm[key as keyof typeof prefsForm])} onChange={(e) => updatePref(key, Number(e.target.value))} />
               </label>
             ))}
           </div>
@@ -122,11 +125,11 @@ export function Notifications() {
                   <p className="mt-2 text-sm leading-6 text-kfl-secondary">{n.body}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-kfl-muted">
                     <span>To: {n.recipient}</span><span>·</span><span>{n.created_at}</span>
-                    <span className="app-status app-status-info">{n.status}</span>
+                    <Badge variant="outline" className="badge">{n.status}</Badge>
                     {n.entity_type && <span className="rounded-full bg-purple-50 px-2 py-1 font-semibold text-purple-700">{n.entity_type}: {n.entity_id}</span>}
                   </div>
                 </div>
-                {n.status !== "read" && <button onClick={() => markReadMutation.mutate(n.notification_id)} className="app-btn-secondary shrink-0 px-3 py-2 text-xs"><Check size={14} /> Mark read</button>}
+                {n.status !== "read" && <Button onClick={() => markReadMutation.mutate(n.notification_id)} variant="outline" size="sm" className="shrink-0 px-3 py-2 text-xs"><Check size={14} /> Mark read</Button>}
               </div>
             </article>
           ))}

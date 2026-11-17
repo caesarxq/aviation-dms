@@ -3,15 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { CrewQualification, CrewMember } from "../types";
 import { Award, Plus, Trash2 } from "lucide-react";
-
-function statusClass(status: string) {
-  switch (status.toLowerCase()) {
-    case "valid": return "app-status app-status-healthy";
-    case "expired": return "app-status app-status-critical";
-    case "suspended": return "app-status app-status-warning";
-    default: return "app-status app-status-info";
-  }
-}
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
 export function CrewQualifications() {
   const qc = useQueryClient();
@@ -68,28 +63,26 @@ export function CrewQualifications() {
           <h1 className="app-title">Crew Qualifications</h1>
           <p className="app-subtitle">Track licenses, type ratings, medicals, and expiry alerts.</p>
         </div>
-        <button className="app-btn" onClick={() => setIsCreating(true)}>
+        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
           <Plus size={16} /> Add Qualification
-        </button>
+        </Button>
       </header>
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm font-semibold text-kfl-text">Qualifications</div>
           <div className="flex gap-2">
-            <select
-              id="qual_crew_filter"
-              name="crew_id"
-              aria-label="Filter by crew"
-              className="app-input w-full md:w-auto"
-              value={crewFilter}
-              onChange={(e) => setCrewFilter(e.target.value)}
-            >
-              <option value="">All crew</option>
-              {crewList.map((c: CrewMember) => (
-                <option key={c.crew_id} value={c.crew_id}>{c.full_name}</option>
-              ))}
-            </select>
+            <Select onValueChange={(e) => setCrewFilter(e)}>
+              <SelectTrigger id="qual_crew_filter" name="crew_id" aria-label="Filter by crew">
+                <SelectValue placeholder={crewFilter || "All crew"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All crew</SelectItem>
+                {crewList.map((c: CrewMember) => (
+                  <SelectItem key={c.crew_id} value={c.crew_id}>{c.full_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -125,35 +118,26 @@ export function CrewQualifications() {
                       <td className="px-4 py-4 text-sm text-kfl-secondary">{q.qual_type}</td>
                       <td className="px-4 py-4 text-sm text-kfl-secondary">{q.rating || "—"}</td>
                       <td className="px-4 py-4 text-sm text-kfl-secondary">{q.expiry_date}</td>
-                      <td className="px-4 py-4"><span className={statusClass(q.status)}>{q.status}</span></td>
+                      <td className="px-4 py-4"><Badge variant={q.status === "valid" ? "default" : q.status === "expired" ? "destructive" : "secondary"} className={`badge ${q.status === "valid" ? "bg-kfl-status-info-bg text-kfl-status-info" : q.status === "expired" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>{q.status}</Badge></td>
                       <td className="px-4 py-4 text-right">
-                        <button
-                          id={`edit_qual_${q.qual_id}`}
-                          className="app-btn app-btn-ghost"
-                          onClick={() => {
-                            setEditingId(q.qual_id);
-                            setForm({
-                              crew_id: q.crew_id,
-                              qual_type: q.qual_type,
-                              rating: q.rating || "",
-                              issue_date: q.issue_date,
-                              expiry_date: q.expiry_date,
-                              notes: q.notes || "",
-                            });
-                          }}
-                        >
+                        <Button variant="outline" size="sm" id={`edit_qual_${q.qual_id}`} onClick={() => {
+                          setEditingId(q.qual_id);
+                          setForm({
+                            crew_id: q.crew_id,
+                            qual_type: q.qual_type,
+                            rating: q.rating || "",
+                            issue_date: q.issue_date,
+                            expiry_date: q.expiry_date,
+                            notes: q.notes || "",
+                          });
+                        }}>
                           Edit
-                        </button>
-                        <button
-                          id={`delete_qual_${q.qual_id}`}
-                          aria-label={`Delete qualification ${q.qual_id}`}
-                          className="app-btn app-btn-ghost"
-                          onClick={() => {
-                            if (confirm("Delete this qualification?")) deleteMutation.mutate(q.qual_id);
-                          }}
-                        >
+                        </Button>
+                        <Button variant="destructive" size="sm" aria-label={`Delete qualification ${q.qual_id}`} id={`delete_qual_${q.qual_id}`} onClick={() => {
+                          if (confirm("Delete this qualification?")) deleteMutation.mutate(q.qual_id);
+                        }}>
                           <Trash2 size={14} />
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -174,82 +158,46 @@ export function CrewQualifications() {
             <div className="space-y-3 px-5 py-4">
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Crew Member</span>
-                <select
-                  id="qual_crew_id"
-                  name="crew_id"
-                  className="app-input"
-                  value={form.crew_id}
-                  onChange={(e) => setForm({ ...form, crew_id: e.target.value })}
-                >
-                  <option value="">Select crew</option>
-                  {crewList.map((c: CrewMember) => (
-                    <option key={c.crew_id} value={c.crew_id}>{c.full_name}</option>
-                  ))}
-                </select>
+                <Select onValueChange={(e) => setForm({ ...form, crew_id: e })}>
+                  <SelectTrigger id="qual_crew_id" name="crew_id">
+                    <SelectValue placeholder="Select crew" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Select crew</SelectItem>
+                    {crewList.map((c: CrewMember) => (
+                      <SelectItem key={c.crew_id} value={c.crew_id}>{c.full_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Qualification Type</span>
-                <input
-                  id="qual_type"
-                  name="qual_type"
-                  className="app-input"
-                  value={form.qual_type}
-                  onChange={(e) => setForm({ ...form, qual_type: e.target.value })}
-                />
+                <Input id="qual_type" name="qual_type" value={form.qual_type} onChange={(e) => setForm({ ...form, qual_type: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Rating</span>
-                <input
-                  id="qual_rating"
-                  name="rating"
-                  className="app-input"
-                  value={form.rating}
-                  onChange={(e) => setForm({ ...form, rating: e.target.value })}
-                />
+                <Input id="qual_rating" name="rating" value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Issue Date</span>
-                <input
-                  id="qual_issue_date"
-                  name="issue_date"
-                  type="date"
-                  className="app-input"
-                  value={form.issue_date}
-                  onChange={(e) => setForm({ ...form, issue_date: e.target.value })}
-                />
+                <Input id="qual_issue_date" name="issue_date" type="date" value={form.issue_date} onChange={(e) => setForm({ ...form, issue_date: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Expiry Date</span>
-                <input
-                  id="qual_expiry_date"
-                  name="expiry_date"
-                  type="date"
-                  className="app-input"
-                  value={form.expiry_date}
-                  onChange={(e) => setForm({ ...form, expiry_date: e.target.value })}
-                />
+                <Input id="qual_expiry_date" name="expiry_date" type="date" value={form.expiry_date} onChange={(e) => setForm({ ...form, expiry_date: e.target.value })} />
               </label>
               <label className="block text-sm text-kfl-secondary">
                 <span className="mb-1 block text-xs font-semibold text-kfl-muted">Notes</span>
-                <textarea
-                  id="qual_notes"
-                  name="notes"
-                  className="app-input"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                />
+                <textarea id="qual_notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="flex-1 min-h-[80px]" />
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t border-kfl-border px-5 py-4">
-              <button className="app-btn app-btn-ghost" onClick={() => { setIsCreating(false); setEditingId(null); }}>Cancel</button>
-              <button
-                id="qual_submit"
-                className="app-btn"
-                disabled={!form.crew_id || !form.qual_type || !form.issue_date || !form.expiry_date}
-                onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}
-              >
+              <Button variant="outline" size="sm" onClick={() => { setIsCreating(false); setEditingId(null); }}>
+                Cancel
+              </Button>
+              <Button id="qual_submit" variant="default" size="sm" disabled={!form.crew_id || !form.qual_type || !form.issue_date || !form.expiry_date} onClick={() => editingId ? updateMutation.mutate({ id: editingId, data: form }) : createMutation.mutate(form)}>
                 {editingId ? (updateMutation.isPending ? "Saving…" : "Save") : (createMutation.isPending ? "Creating…" : "Create")}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

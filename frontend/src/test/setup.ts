@@ -19,6 +19,38 @@ if (typeof window !== 'undefined' && typeof window.localStorage?.clear !== 'func
   Object.defineProperty(window, 'localStorage', { value: globalThis.localStorage, configurable: true });
 }
 
+// Radix UI Select uses setPointerCapture/hasPointerCapture which jsdom lacks
+if (typeof HTMLElement !== 'undefined') {
+  const proto = HTMLElement.prototype;
+  if (typeof proto.setPointerCapture !== 'function') {
+    proto.setPointerCapture = () => {};
+  }
+  if (typeof proto.hasPointerCapture !== 'function') {
+    proto.hasPointerCapture = () => true;
+  }
+  if (typeof proto.releasePointerCapture !== 'function') {
+    proto.releasePointerCapture = () => {};
+  }
+}
+
+// matchMedia polyfill for jsdom (used by ThemeToggle)
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: () => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 afterEach(() => {
   cleanup();
 });
