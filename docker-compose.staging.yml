@@ -1,8 +1,8 @@
 # ============================================================================
 # Aviation DMS — Docker Compose Staging Override
 # ============================================================================
-# Use with: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
-# Staging runs on localhost with dev mode enabled.
+# Use with docker-compose.yml for cloud staging; bastion Caddy terminates TLS.
+# Local HTTPS testing is opt-in through the base compose local-https profile.
 # ============================================================================
 
 services:
@@ -37,20 +37,6 @@ services:
     ports:
       - "0.0.0.0:8081:80"
 
-  https_proxy:
-    # Staging uses Caddy with self-signed certs for local HTTPS testing
-    environment:
-      DMS_HOSTNAME: "stage.kfl.ke"
-      ACME_EMAIL: "admin@localhost.local"
-    ports:
-      - "0.0.0.0:8081:80"
-    volumes:
-      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
 volumes:
   dms_data: {}
-  caddy_data: {}
-  caddy_config: {}
   clamd_data: {}

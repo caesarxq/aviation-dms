@@ -18,6 +18,11 @@ on:
         description: 'Docker image tag to deploy (leave empty to build new)'
         required: false
         default: ''
+      approve_staging:
+        description: 'Authorize deployment to live staging'
+        required: false
+        default: false
+        type: boolean
       approve_production:
         description: 'Approve production deployment'
         required: false
@@ -183,6 +188,7 @@ jobs:
 
   deploy-staging:
     name: Deploy to staging
+    if: github.event_name == 'workflow_dispatch' && inputs.approve_staging == true
     needs: [test-backend, test-frontend, build]
     runs-on: ubuntu-latest
     environment: staging
@@ -202,20 +208,41 @@ jobs:
 
       - name: Deploy to staging
         run: |
+          REMOTE_DEPLOY_DIR="/tmp/kfl-aviation-dms-${IMAGE_TAG}"
+
           ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
-             mkdir -p ${{ env.STAGING_DIR }}/scripts"
+             mkdir -m 700 -p '${REMOTE_DEPLOY_DIR}/scripts'"
+
+          scp -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            docker-compose.yml \
+            docker-compose.staging.yml \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/
 
           scp -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             scripts/deploy-staging.sh \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${{ env.STAGING_DIR }}/scripts/deploy-staging.sh
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh
+
+          ssh -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
+            "sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${{ env.STAGING_DIR }}/docker-compose.yml' && \
+             sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${{ env.STAGING_DIR }}/docker-compose.staging.yml' && \
+             sudo install -D -o root -g root -m 0755 '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' '${{ env.STAGING_DIR }}/scripts/deploy-staging.sh' && \
+             rm -f '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' && \
+             rmdir '${REMOTE_DEPLOY_DIR}/scripts' '${REMOTE_DEPLOY_DIR}'"
 
           ssh -i ~/.ssh/id_staging \
             -o IdentitiesOnly=yes \
@@ -232,11 +259,20 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+            "backend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-backend-1) && \
+             frontend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-frontend-1) && \
+             test \"\$backend_image\" = \"kfl-aviation-dms-backend:${IMAGE_TAG}\" && \
+             test \"\$frontend_image\" = \"kfl-aviation-dms-frontend:${IMAGE_TAG}\" && \
+             sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+
+          curl --fail --silent --show-error --output /dev/null \
+            --write-out 'Staging HTTPS root HTTP %{http_code}\n' \
+            https://stage.kfl.ke/
 
   promote-to-production:
     name: Promote to production (requires approval)
-    needs: deploy-staging
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && inputs.approve_staging == true && inputs.approve_production == true
+    needs: [deploy-staging, build]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -249,7 +285,9 @@ jobs:
 
       - name: Check production approval
         run: |
-          if [ "${{ github.event.inputs.approve_production }}" != "true" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+          if [ "${{ inputs.environment }}" != "production" ] || \
+             [ "${{ inputs.approve_staging }}" != "true" ] || \
+             [ "${{ inputs.approve_production }}" != "true" ]; then
             echo "ERROR: Production deployment requires explicit approval"
             echo "Set approve_production=true in workflow_dispatch or use the production environment protection rule"
             exit 1
