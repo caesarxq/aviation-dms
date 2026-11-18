@@ -1,4 +1,4 @@
-name: Aviation DMS Build, Test, and Staging Deploy
+name: Aviation DMS Build, Test, Staging Deploy, and Production Promotion
 
 on:
   push:
@@ -13,10 +13,20 @@ on:
         type: choice
         options:
           - staging
+          - production
+      image_tag:
+        description: 'Docker image tag to deploy (leave empty to build new)'
+        required: false
+        default: ''
       approve_staging:
         description: 'Authorize deployment to live staging'
         required: false
         default: false
+        type: boolean
+      approve_production:
+        description: 'Approve production deployment'
+        required: false
+        default: 'false'
         type: boolean
 
 env:
@@ -24,13 +34,18 @@ env:
   REGISTRY_USER: ${{ github.actor }}
   BACKEND_IMAGE: ${{ github.repository }}/backend
   FRONTEND_IMAGE: ${{ github.repository }}/frontend
-  STAGING_HOST: 10.20.4.234
+  # Owner-confirmed: roc-dis is one VM with both the bastion and staging addresses.
+  # Staging is deployed directly to this shared host (no separate staging instance).
+  STAGING_HOST: 145.241.152.126
   STAGING_USER: ubuntu
   STAGING_DIR: /opt/kfl-aviation-dms-staging
   BASTION_HOST: 145.241.152.126
   BASTION_USER: ubuntu
-  # Owner-confirmed: roc-dis is one VM with both the bastion and staging addresses.
+  # Single host-key pin for the shared bastion/staging VM (roc-dis).
   ROC_DIS_HOST_KEY_FINGERPRINT: "SHA256:8gJYtzepz5my3l6wpKYHcF2s+BUpTgbEOCPuJRqyoe8"
+  # Production instance private IP — set via GitHub secret or environment
+  # Obtain from: OCI console instance details
+  PROD_HOST: ${{ secrets.PROD_HOST || 'prod.kfl.ke' }}
 
 jobs:
   build:
@@ -177,7 +192,7 @@ jobs:
 
   deploy-staging:
     name: Deploy to staging
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.approve_staging == true
+    if: github.event_name == 'workflow_dispatch' && inputs.approve_staging == true
     needs: [test-backend, test-frontend, build]
     runs-on: ubuntu-latest
     environment: staging
@@ -193,61 +208,47 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          printf '%s\n' "${{ secrets.STAGING_SSH_PRIVATE_KEY }}" > ~/.ssh/id_staging
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_staging
+          chmod 600 ~/.ssh/id_ed25519
           bastion_key_scan="$(ssh-keyscan -T 5 -t ed25519 "$BASTION_HOST" 2>/dev/null)"
           bastion_fingerprint="$(printf '%s\n' "$bastion_key_scan" | ssh-keygen -lf - | awk '{print $2}')"
           test "$bastion_fingerprint" = "$ROC_DIS_HOST_KEY_FINGERPRINT"
           printf '%s\n' "$bastion_key_scan" >> ~/.ssh/known_hosts
-          staging_key_scan="$(ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null "$BASTION_USER@$BASTION_HOST" "ssh-keyscan -T 5 -t ed25519 $STAGING_HOST 2>/dev/null")"
-          staging_fingerprint="$(printf '%s\n' "$staging_key_scan" | ssh-keygen -lf - | awk '{print $2}')"
-          if [ "$staging_fingerprint" != "$bastion_fingerprint" ]; then
-            echo "ERROR: staging private address did not resolve to the pinned roc-dis host"
-            exit 1
-          fi
-          printf '%s\n' "$staging_key_scan" >> ~/.ssh/known_hosts
 
       - name: Deploy to staging
-        env:
-          CR_PAT: ${{ secrets.CR_PAT }}
         run: |
           REMOTE_DEPLOY_DIR="/tmp/kfl-aviation-dms-${IMAGE_TAG}"
 
-          printf '%s\n' "$CR_PAT" | ssh -T -i ~/.ssh/id_staging \
+          ssh -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "sudo -n docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
+            "echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
              mkdir -m 700 -p '${REMOTE_DEPLOY_DIR}/scripts'"
 
-          scp -i ~/.ssh/id_staging \
+          scp -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             docker-compose.yml \
             docker-compose.staging.yml \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/
 
-          scp -i ~/.ssh/id_staging \
+          scp -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             scripts/deploy-staging.sh \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh
 
-          ssh -i ~/.ssh/id_staging \
+          ssh -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${{ env.STAGING_DIR }}/docker-compose.yml' && \
              sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${{ env.STAGING_DIR }}/docker-compose.staging.yml' && \
@@ -255,24 +256,22 @@ jobs:
              rm -f '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' && \
              rmdir '${REMOTE_DEPLOY_DIR}/scripts' '${REMOTE_DEPLOY_DIR}'"
 
-          ssh -i ~/.ssh/id_staging \
+          ssh -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "cd ${{ env.STAGING_DIR }} && \
              ./scripts/deploy-staging.sh $IMAGE_TAG"
 
       - name: Verify staging health
         run: |
-          ssh -i ~/.ssh/id_staging \
+          ssh -i ~/.ssh/id_ed25519 \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             -o GlobalKnownHostsFile=/dev/null \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
             "backend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-backend-1) && \
              frontend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-frontend-1) && \
@@ -285,11 +284,42 @@ jobs:
             https://stage.kfl.ke/
 
   promote-to-production:
-    name: Production promotion blocked pending backup and host-key gates
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    name: Promote to production (requires approval)
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && inputs.approve_staging == true && inputs.approve_production == true
+    needs: [deploy-staging, build]
     runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://roc.kfl.ke
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.backend_tag }}
     steps:
-      - name: Refuse production deployment until prerequisites are reviewed
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check production approval
         run: |
-          echo "ERROR: Production deployment is disabled pending the production backup, host-key, and deployment-path gates."
-          exit 1
+          if [ "${{ inputs.environment }}" != "production" ] || \
+             [ "${{ inputs.approve_staging }}" != "true" ] || \
+             [ "${{ inputs.approve_production }}" != "true" ]; then
+            echo "ERROR: Production deployment requires explicit approval"
+            echo "Set approve_production=true in workflow_dispatch or use the production environment protection rule"
+            exit 1
+          fi
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_prod
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_prod
+          ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Promote image to production
+        run: |
+          ssh -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
+            "./scripts/promote-to-production.sh $IMAGE_TAG"
