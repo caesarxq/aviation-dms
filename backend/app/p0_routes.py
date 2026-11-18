@@ -15,7 +15,7 @@ import ipaddress
 import secrets
 import asyncio
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from collections import Counter
 
 from .database import get_db, DB_PATH
@@ -516,8 +516,9 @@ async def auth_bootstrap(body: AuthBootstrapRequest, request: Request):
 
 
 @router.post("/auth/users/{user_id:path}/setup-token")
-async def issue_password_setup_token(user_id: str, request: Request):
+async def issue_password_setup_token(user_id: str, request: Request, response: Response):
     _check(request, "settings:manage")
+    response.headers["Cache-Control"] = "no-store"
     actor = _actor(request)
     raw_token = secrets.token_urlsafe(32)
     now = _auth_now()
@@ -543,6 +544,11 @@ async def issue_password_setup_token(user_id: str, request: Request):
         await db.execute(
             "UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL",
             (now.isoformat(), canonical_id),
+        )
+        await db.execute(
+            """UPDATE auth_invite_email_outbox SET status = 'superseded', updated_at = ?, updated_by = ?
+               WHERE user_id = ? AND status IN ('pending', 'sent', 'manual')""",
+            (now.isoformat(), actor, canonical_id),
         )
         await db.execute(
             "INSERT INTO auth_setup_tokens (setup_id, user_id, token_hash, issued_by, created_at, expires_at) VALUES (?,?,?,?,?,?)",
@@ -626,18 +632,200 @@ def _validate_email(email: str) -> None:
     if not _EMAIL_RE.match(email.strip()):
         raise HTTPException(status_code=400, detail="Invalid email format")
 
-def _generate_invite_code() -> str:
-    """Generate a short, human-readable invite code like KFL-ABCD-1234."""
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    part1 = "".join(secrets.choice(alphabet) for _ in range(4))
-    part2 = "".join(secrets.choice("0123456789") for _ in range(4))
-    return f"KFL-{part1}-{part2}"
+def _validated_invite_public_url() -> str:
+    public_app_url = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    try:
+        parsed_app_url = urlsplit(public_app_url)
+        hostname = parsed_app_url.hostname or ""
+        local_http = DEV_MODE and parsed_app_url.scheme == "http" and hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed_app_url.username
+            or parsed_app_url.password
+            or parsed_app_url.query
+            or parsed_app_url.fragment
+            or not hostname
+            or (parsed_app_url.scheme != "https" and not local_http)
+        ):
+            raise ValueError("invalid public application URL")
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="Invite email setup URL is not configured") from exc
+    return public_app_url
 
 
-@router.post("/auth/invites", response_model=AuthInviteResponse)
-async def issue_invite(body: AuthInviteRequest, request: Request):
-    """Issue a one-time invite code for an account to set their password."""
+async def _finalize_invite_delivery(
+    delivery_id: str,
+    setup_id: str,
+    user_id: str,
+    actor: str,
+    delivery_method: str,
+    email_sent: Optional[bool],
+) -> str:
+    """Finalize delivery without revoking an older link until replacement succeeds."""
+    completed_at = _auth_now()
+    completed_at_iso = completed_at.isoformat()
+    is_email = delivery_method == "email"
+    attempts = 1 if is_email else 0
+    updated_by = "system" if is_email else actor
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            """SELECT t.rowid AS token_order, t.expires_at, t.used_at, u.password_hash, d.status
+               FROM auth_setup_tokens t
+               JOIN users u ON u.user_id = t.user_id
+               JOIN auth_invite_email_outbox d ON d.setup_id = t.setup_id
+               WHERE t.setup_id = ? AND t.user_id = ? AND d.delivery_id = ?""",
+            (setup_id, user_id, delivery_id),
+        )
+        current = await cursor.fetchone()
+        if not current:
+            raise HTTPException(status_code=503, detail="Authentication service unavailable")
+
+        expired = datetime.fromisoformat(current["expires_at"]) <= completed_at
+        active = current["status"] == "pending" and current["used_at"] is None and not current["password_hash"] and not expired
+        if current["password_hash"]:
+            await db.execute(
+                "UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND purpose IN ('invite', 'setup') AND used_at IS NULL",
+                (completed_at_iso, user_id),
+            )
+            await db.execute(
+                """UPDATE auth_invite_email_outbox SET status = 'superseded', updated_at = ?, updated_by = ?
+                   WHERE user_id = ? AND status IN ('pending', 'sent', 'manual')""",
+                (completed_at_iso, updated_by, user_id),
+            )
+            if is_email:
+                await db.execute(
+                    """UPDATE auth_invite_email_outbox
+                       SET attempt_count = attempt_count + 1, failure_code = ?, sent_at = ?,
+                           updated_at = ?, updated_by = 'system'
+                       WHERE delivery_id = ? AND status = 'superseded'""",
+                    (
+                        None if email_sent else "smtp_or_template_failure",
+                        completed_at_iso if email_sent else None,
+                        completed_at_iso,
+                        delivery_id,
+                    ),
+                )
+            await db.commit()
+            return "superseded"
+
+        if not active:
+            if current["status"] == "pending":
+                await db.execute(
+                    "UPDATE auth_setup_tokens SET used_at = COALESCE(used_at, ?) WHERE setup_id = ?",
+                    (completed_at_iso, setup_id),
+                )
+                await db.execute(
+                    """UPDATE auth_invite_email_outbox
+                       SET status = 'superseded', attempt_count = attempt_count + ?, failure_code = ?,
+                           sent_at = ?, updated_at = ?, updated_by = ?
+                       WHERE delivery_id = ? AND status = 'pending'""",
+                    (
+                        attempts,
+                        "smtp_or_template_failure" if is_email and not email_sent else None,
+                        completed_at_iso if is_email and email_sent else None,
+                        completed_at_iso,
+                        updated_by,
+                        delivery_id,
+                    ),
+                )
+            elif current["status"] == "superseded" and is_email:
+                await db.execute(
+                    """UPDATE auth_invite_email_outbox
+                       SET attempt_count = attempt_count + 1, failure_code = ?, sent_at = ?,
+                           updated_at = ?, updated_by = 'system'
+                       WHERE delivery_id = ? AND status = 'superseded'""",
+                    (
+                        "smtp_or_template_failure" if not email_sent else None,
+                        completed_at_iso if email_sent else None,
+                        completed_at_iso,
+                        delivery_id,
+                    ),
+                )
+            await db.commit()
+            return "superseded"
+
+        if is_email and not email_sent:
+            await db.execute(
+                "UPDATE auth_setup_tokens SET used_at = ? WHERE setup_id = ? AND used_at IS NULL",
+                (completed_at_iso, setup_id),
+            )
+            await db.execute(
+                """UPDATE auth_invite_email_outbox
+                   SET status = 'failed', attempt_count = attempt_count + 1,
+                       failure_code = 'smtp_or_template_failure', sent_at = NULL,
+                       updated_at = ?, updated_by = 'system'
+                   WHERE delivery_id = ? AND status = 'pending'""",
+                (completed_at_iso, delivery_id),
+            )
+            await db.commit()
+            return "failed"
+
+        cursor = await db.execute(
+            """SELECT t.setup_id
+               FROM auth_setup_tokens t
+               WHERE t.user_id = ? AND t.purpose IN ('invite', 'setup') AND t.used_at IS NULL AND t.expires_at > ?
+                 AND t.setup_id != ? AND t.rowid < ?""",
+            (
+                user_id,
+                completed_at_iso,
+                setup_id,
+                current["token_order"],
+            ),
+        )
+        previous_setup_ids = [row["setup_id"] for row in await cursor.fetchall()]
+        if previous_setup_ids:
+            for previous_setup_id in previous_setup_ids:
+                await db.execute(
+                    "UPDATE auth_setup_tokens SET used_at = ? WHERE setup_id = ? AND used_at IS NULL",
+                    (completed_at_iso, previous_setup_id),
+                )
+                await db.execute(
+                    """UPDATE auth_invite_email_outbox
+                       SET status = 'superseded', updated_at = ?, updated_by = ?
+                       WHERE setup_id = ? AND status IN ('pending', 'sent', 'manual')""",
+                    (completed_at_iso, updated_by, previous_setup_id),
+                )
+
+        final_status = "sent" if is_email else "manual"
+        cursor = await db.execute(
+            """UPDATE auth_invite_email_outbox
+               SET status = ?, attempt_count = attempt_count + ?, failure_code = NULL, sent_at = ?,
+                   updated_at = ?, updated_by = ?
+               WHERE delivery_id = ? AND status = 'pending'""",
+            (
+                final_status,
+                attempts,
+                completed_at_iso if is_email else None,
+                completed_at_iso,
+                updated_by,
+                delivery_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=503, detail="Authentication service unavailable")
+        await db.commit()
+        return final_status
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="Authentication service unavailable")
+    finally:
+        await db.close()
+
+
+@router.post("/auth/invites", response_model=AuthInviteResponse, response_model_exclude_none=True)
+async def issue_invite(body: AuthInviteRequest, request: Request, response: Response):
+    """Issue a one-time setup token and send it to the account's registered address."""
     _check(request, "settings:manage")
+    response.headers["Cache-Control"] = "no-store"
+    from . import notifications
+
+    if body.delivery_method == "email" and notifications.invite_email_configuration_error():
+        raise HTTPException(status_code=503, detail="Invite email delivery is disabled or not configured")
+    public_app_url = _validated_invite_public_url()
     actor = _actor(request)
     client_host = _client_ip(request)
 
@@ -646,6 +834,7 @@ async def issue_invite(body: AuthInviteRequest, request: Request):
     now = _auth_now()
     db = await get_db()
     try:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute("SELECT * FROM auth_login_attempts WHERE attempt_key = ?", (attempt_key,))
         attempt = await cursor.fetchone()
         if attempt:
@@ -664,17 +853,18 @@ async def issue_invite(body: AuthInviteRequest, request: Request):
                 (locked, attempt_key),
             )
             await db.commit()
-            await db.close()
             raise HTTPException(status_code=429, detail="Invite requests temporarily unavailable; try again later")
 
-        # Validate email format if provided
         if body.email is not None:
             _validate_email(body.email)
 
-        cursor = await db.execute("SELECT user_id, username, email, full_name, is_active FROM users WHERE lower(username) = ?", (body.username.strip().lower(),))
+        cursor = await db.execute(
+            "SELECT user_id, username, email, full_name, role, department, is_active, password_hash "
+            "FROM users WHERE lower(username) = ? AND merged_into_user_id IS NULL",
+            (body.username.strip().lower(),),
+        )
         user = await cursor.fetchone()
         if not user or not user["is_active"]:
-            # Record failed attempt for rate limiting
             failures = (attempt["failure_count"] + 1) if attempt else 1
             window_started = attempt["window_started_at"] if attempt else now.isoformat()
             locked = (now + timedelta(minutes=15)).isoformat() if failures >= 5 else None
@@ -686,43 +876,191 @@ async def issue_invite(body: AuthInviteRequest, request: Request):
                 (attempt_key, failures, window_started, locked),
             )
             await db.commit()
-            await db.close()
             raise HTTPException(status_code=404, detail="Active user not found")
+        if user["password_hash"]:
+            raise HTTPException(status_code=409, detail="This account already has a password")
 
-        # Record successful invite (reset failure count)
+        recipient = (user["email"] or "").strip()
+        if not recipient:
+            raise HTTPException(status_code=409, detail="The account must have a registered email address before invitation")
+        _validate_email(recipient)
+        if body.email is not None and body.email.strip().casefold() != recipient.casefold():
+            raise HTTPException(status_code=409, detail="Invitation address must match the account's registered email")
+
+        cursor = await db.execute(
+            """SELECT d.delivery_id, d.status, d.recipient_email, d.created_at, t.expires_at
+               FROM auth_setup_tokens t
+               JOIN auth_invite_email_outbox d ON d.setup_id = t.setup_id
+               WHERE t.user_id = ? AND t.purpose = 'invite' AND t.used_at IS NULL AND t.expires_at > ?
+                 AND d.status IN ('pending', 'sent', 'manual')
+               ORDER BY t.created_at DESC LIMIT 1""",
+            (user["user_id"], now.isoformat()),
+        )
+        active_delivery = await cursor.fetchone()
+        pending_in_progress = bool(
+            active_delivery
+            and active_delivery["status"] == "pending"
+            and now - datetime.fromisoformat(active_delivery["created_at"]) <= timedelta(minutes=2)
+        )
+        if active_delivery and (not body.resend or pending_in_progress):
+            await db.rollback()
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "An active invitation already exists. Reissue only when a fresh link is required.",
+                    "delivery_id": active_delivery["delivery_id"],
+                    "delivery_status": active_delivery["status"],
+                    "recipient_email": active_delivery["recipient_email"],
+                    "expires_at": active_delivery["expires_at"],
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+
+        invite_request_count = (attempt["failure_count"] + 1) if attempt else 1
+        window_started_at = attempt["window_started_at"] if attempt else now.isoformat()
         await db.execute(
             """INSERT INTO auth_login_attempts (attempt_key, failure_count, window_started_at, locked_until)
-               VALUES (?, 0, ?, NULL)
-               ON CONFLICT(attempt_key) DO UPDATE SET failure_count = 0,
+               VALUES (?, ?, ?, NULL)
+               ON CONFLICT(attempt_key) DO UPDATE SET failure_count = excluded.failure_count,
                window_started_at = excluded.window_started_at, locked_until = NULL""",
-            (attempt_key, now.isoformat()),
+            (attempt_key, invite_request_count, window_started_at),
         )
 
-        raw_code = _generate_invite_code()
-        raw_token = secrets.token_urlsafe(32)
+        raw_token = secrets.token_hex(32)
+        setup_id = str(uuid.uuid4())
+        delivery_id = str(uuid.uuid4())
         expires = now + timedelta(hours=24)
-        try:
-            # Mark any existing unused invite tokens for this user as used
-            await db.execute("UPDATE auth_setup_tokens SET used_at = ? WHERE user_id = ? AND purpose = 'invite' AND used_at IS NULL", (now.isoformat(), user["user_id"]))
-            await db.execute(
-                """INSERT INTO auth_setup_tokens
-                   (setup_id, user_id, token_hash, invite_code, purpose, issued_by, created_at, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (str(uuid.uuid4()), user["user_id"], _token_hash(raw_token), raw_code, "invite", actor, now.isoformat(), expires.isoformat()),
-            )
-            await db.commit()
-        finally:
-            await db.close()
+        await db.execute(
+            """INSERT INTO auth_setup_tokens
+               (setup_id, user_id, token_hash, invite_code, purpose, issued_by, created_at, expires_at)
+               VALUES (?, ?, ?, NULL, 'invite', ?, ?, ?)""",
+            (setup_id, user["user_id"], _token_hash(raw_token), actor, now.isoformat(), expires.isoformat()),
+        )
+        await db.execute(
+            """INSERT INTO auth_invite_email_outbox
+               (delivery_id, setup_id, user_id, recipient_email, status, attempt_count, created_at, updated_at,
+                created_by, updated_by)
+               VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)""",
+            (delivery_id, setup_id, user["user_id"], recipient, now.isoformat(), now.isoformat(), actor, actor),
+        )
+        await db.commit()
     except HTTPException:
+        await db.rollback()
         raise
     except Exception:
         await db.rollback()
-        await db.close()
         raise HTTPException(status_code=503, detail="Authentication service unavailable")
-    await log_audit_event("user_auth", user["user_id"], "invite_issued", actor, {"expires_at": expires.isoformat()})
+    finally:
+        await db.close()
+
+    setup_url = f"{public_app_url}/setup?username={quote(user['username'], safe='')}#setup_token={raw_token}"
+    if body.delivery_method == "manual":
+        delivery_status = await _finalize_invite_delivery(
+            delivery_id,
+            setup_id,
+            user["user_id"],
+            actor,
+            "manual",
+            None,
+        )
+        if delivery_status != "manual":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "A newer invitation superseded this manual link. Reissue to generate a current link.",
+                    "delivery_id": delivery_id,
+                    "delivery_status": "superseded",
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+        await log_audit_event(
+            "user_auth",
+            user["user_id"],
+            "invite_manual_link_issued",
+            actor,
+            {"delivery_id": delivery_id, "expires_at": expires.isoformat()},
+        )
+        return AuthInviteResponse(
+            delivery_id=delivery_id,
+            recipient_email=recipient,
+            delivery_status=delivery_status,
+            expires_at=expires.isoformat(),
+            setup_url=setup_url,
+        )
+
+    try:
+        from .asset_service import get_logo_context, render_html_template
+
+        email_context = get_logo_context()
+        email_context.update({
+            "title": "KFL Aviation DMS account invitation",
+            "recipient_name": user["full_name"],
+            "recipient_email": recipient,
+            "role": user["role"],
+            "department": user["department"] or "—",
+            "issued_by": actor,
+            "issued_at": now.isoformat(),
+            "expires_at": expires.isoformat(),
+            "setup_url": setup_url,
+        })
+        html_body = render_html_template("invitation_memo.html", email_context)
+        text_body = (
+            f"Hello {user['full_name']},\n\n"
+            "You have been invited to the KFL Aviation Document Management System.\n"
+            "Use this one-time link to set your password:\n"
+            f"{setup_url}\n\n"
+            f"The link expires at {expires.isoformat()}. If you did not expect this invitation, contact your system administrator.\n"
+        )
+        email_sent = await asyncio.to_thread(
+            notifications.send_invitation_email,
+            recipient,
+            "KFL Aviation DMS account invitation",
+            text_body,
+            html_body,
+        )
+    except Exception:
+        email_sent = False
+
+    delivery_status = await _finalize_invite_delivery(
+        delivery_id,
+        setup_id,
+        user["user_id"],
+        actor,
+        "email",
+        email_sent,
+    )
+
+    await log_audit_event(
+        "user_auth",
+        user["user_id"],
+        f"invite_email_{delivery_status}",
+        actor,
+        {"delivery_id": delivery_id, "expires_at": expires.isoformat()},
+    )
+    if delivery_status == "failed":
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": "Invite email delivery failed; the new link was revoked. Any previously delivered invitation remains valid.",
+                "delivery_id": delivery_id,
+                "delivery_status": delivery_status,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    if delivery_status == "superseded":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "A newer invitation superseded this delivery. Use the current delivery status.",
+                "delivery_id": delivery_id,
+                "delivery_status": delivery_status,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     return AuthInviteResponse(
-        invite_code=raw_code,
-        setup_url=f"/setup/invite/{raw_code}",
+        delivery_id=delivery_id,
+        recipient_email=recipient,
+        delivery_status=delivery_status,
         expires_at=expires.isoformat(),
     )
 

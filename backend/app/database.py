@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS auth_setup_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_setup_user ON auth_setup_tokens(user_id);
 
+CREATE TABLE IF NOT EXISTS auth_invite_email_outbox (
+    delivery_id TEXT PRIMARY KEY,
+    setup_id TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL,
+    recipient_email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'manual', 'superseded')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sent_at TEXT,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (setup_id) REFERENCES auth_setup_tokens(setup_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_auth_invite_outbox_user ON auth_invite_email_outbox(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auth_invite_outbox_status ON auth_invite_email_outbox(status, created_at);
+
 CREATE TABLE IF NOT EXISTS auth_login_attempts (
     attempt_key TEXT PRIMARY KEY,
     failure_count INTEGER NOT NULL DEFAULT 0,

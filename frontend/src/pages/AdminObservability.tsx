@@ -26,11 +26,19 @@ export default function AdminObservability() {
   const queryClient = useQueryClient();
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string[]>>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
-  const [inviteEmails, setInviteEmails] = useState<Record<string, string>>({});
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
-  const [issuedInvites, setIssuedInvites] = useState<{ user_id: string; full_name: string; invite_code: string; setup_url: string }[]>([]);
+  const [issuedInvites, setIssuedInvites] = useState<{
+    user_id: string;
+    full_name: string;
+    delivery_id: string;
+    recipient_email: string;
+    delivery_status: string;
+    delivery_method: "email" | "manual";
+    expires_at: string;
+    setup_url: string;
+  }[]>([]);
   const [onboardingStep, setOnboardingStep] = useState<number | null>(null);
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -106,32 +114,65 @@ export default function AdminObservability() {
     }
   }
 
-  async function handleInvite(userId: string, roles: string[]) {
+  async function handleInvite(user: any, deliveryMethod: "email" | "manual") {
     setInviteError("");
     setInviteNotice("");
-    const email = inviteEmails[userId]?.trim() || "";
+    const email = (user.email || "").trim();
     if (!email) {
-      setInviteError("Enter an email address.");
+      setInviteError("This account has no registered email address. Update and verify it against the approved roster first.");
       return;
     }
     if (!EMAIL_REGEX.test(email)) {
-      setInviteError("Enter a valid email address.");
+      setInviteError("The registered email address is invalid. Correct the account record before inviting.");
       return;
     }
-    setInvitingUserId(userId);
+    setInvitingUserId(user.user_id);
     try {
-      const user = data?.user_profiles?.find((u: any) => u.user_id === userId);
-      const inviteResponse = await api.post("/p0/auth/invites", { username: user?.username || userId, email, roles });
-      setIssuedInvites((prev) => [...prev, {
-        user_id: inviteResponse.data?.user_id || userId,
-        full_name: inviteResponse.data?.full_name || user?.full_name || userId,
-        invite_code: inviteResponse.data.invite_code,
-        setup_url: inviteResponse.data.setup_url,
-      }]);
-      setInviteNotice(`Invite issued for ${email}. Share the code securely with the user.`);
-      setInviteEmails((prev) => ({ ...prev, [userId]: "" }));
+      const resend = issuedInvites.some((invite) => invite.user_id === user.user_id);
+      const inviteResponse = await api.post("/p0/auth/invites", {
+        username: user.username,
+        delivery_method: deliveryMethod,
+        resend,
+      });
+      const delivery = {
+        user_id: user.user_id,
+        full_name: user.full_name || user.username,
+        delivery_id: inviteResponse.data.delivery_id,
+        recipient_email: inviteResponse.data.recipient_email,
+        delivery_status: inviteResponse.data.delivery_status,
+        delivery_method: deliveryMethod,
+        expires_at: inviteResponse.data.expires_at,
+        setup_url: inviteResponse.data.setup_url || "",
+      };
+      setIssuedInvites((previous) => [
+        ...previous.filter((invite) => invite.user_id !== user.user_id),
+        delivery,
+      ]);
+      setInviteNotice(deliveryMethod === "manual"
+        ? `Manual setup link generated for ${delivery.recipient_email}. Share it only through the approved secure channel; it expires within 24 hours.`
+        : `Email accepted by SMTP for ${delivery.recipient_email}. The one-time setup link expires within 24 hours.`);
       await queryClient.invalidateQueries({ queryKey: ["admin-observability"] });
     } catch (cause: any) {
+      const failedDelivery = cause?.response?.data;
+      if (failedDelivery?.delivery_id) {
+        setIssuedInvites((previous) => [
+          ...previous.filter((invite) => invite.user_id !== user.user_id),
+          {
+            user_id: user.user_id,
+            full_name: user.full_name || user.username,
+            delivery_id: failedDelivery.delivery_id,
+            recipient_email: failedDelivery.recipient_email || email,
+            delivery_status: failedDelivery.delivery_status || "failed",
+            delivery_method: failedDelivery.delivery_status === "manual"
+              ? "manual"
+              : failedDelivery.delivery_status === "sent" || failedDelivery.delivery_status === "pending"
+                ? "email"
+                : deliveryMethod,
+            expires_at: failedDelivery.expires_at || "",
+            setup_url: failedDelivery.setup_url || "",
+          },
+        ]);
+      }
       setInviteError(cause?.response?.data?.detail || "Unable to issue invite. Retry or check administrator access.");
     } finally {
       setInvitingUserId(null);
@@ -279,8 +320,8 @@ export default function AdminObservability() {
                 <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 1 ? "1. Invite the user" : "1. Invite the user ✓"}</div>
                 <div className="text-xs text-kfl-muted">
                   {onboardingStep !== null && onboardingStep <= 1
-                    ? "Enter the user's email address in the invitation form below and select their roles. Click Issue invite to generate a one-time setup code."
-                    : "Enter the user's email address and select their roles, then click Issue invite."}
+                    ? "Confirm the account's registered email against the approved roster. Send the invitation to that address; role assignments are managed separately."
+                    : "Confirm the registered email against the approved roster, then send the invitation email."}
                 </div>
               </div>
             </div>
@@ -293,11 +334,11 @@ export default function AdminObservability() {
                 )}
               </div>
               <div>
-                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 2 ? "2. Share the invite code" : "2. Share the invite code"}</div>
+                <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 2 ? "2. Confirm email status" : "2. Confirm email status"}</div>
                 <div className="text-xs text-kfl-muted">
                   {onboardingStep !== null && onboardingStep <= 2
-                    ? "Copy the generated invite code and setup URL. Share them securely with the new user (separate channels recommended)."
-                    : "Copy the invite code and setup URL from the issued invites table."}
+                    ? "A successful request means SMTP accepted the message, not that it reached the inbox. Check the delivery reference; reissuing creates a fresh link and invalidates the prior one."
+                    : "Review the delivery status and reference. Reissue only when needed; a new link invalidates the previous invitation."}
                 </div>
               </div>
             </div>
@@ -313,8 +354,8 @@ export default function AdminObservability() {
                 <div className="font-semibold text-kfl-text">{onboardingStep !== null && onboardingStep <= 3 ? "3. User completes password setup" : "3. User completes password setup"}</div>
                 <div className="text-xs text-kfl-muted">
                   {onboardingStep !== null && onboardingStep <= 3
-                    ? "The user opens the setup URL, enters the invite code, and creates their password. Their account is then active."
-                    : "The user opens the setup URL and creates their password using the invite code."}
+                    ? "The user follows the secure one-time link in the email and creates a password within 24 hours."
+                    : "The user follows the secure one-time email link and creates a password within 24 hours."}
                 </div>
               </div>
             </div>
@@ -440,7 +481,7 @@ export default function AdminObservability() {
       </section>
 
       <section className="app-surface overflow-hidden">
-        <div className="border-b border-kfl-border px-5 py-4"><h2 className="font-bold text-kfl-text">Bulk user invitations</h2><p className="mt-1 text-xs text-kfl-muted">Issue one-time invite codes so users can set their own passwords.</p></div>
+        <div className="border-b border-kfl-border px-5 py-4"><h2 className="font-bold text-kfl-text">User invitations</h2><p className="mt-1 text-xs text-kfl-muted">Email one-time account setup links to registered addresses; use manual-link fallback only through an approved secure channel.</p></div>
         {inviteError && <div role="alert" className="m-4 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{inviteError}</div>}
         {inviteNotice && <div role="status" className="m-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{inviteNotice}</div>}
         <div className="overflow-x-auto">
@@ -449,8 +490,8 @@ export default function AdminObservability() {
               <tr>
                 <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Username</th>
                 <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Assigned roles</th>
-                <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Invite code</th>
-                <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Setup URL</th>
+                <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Invite email</th>
+                <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Department</th>
                 <th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Status</th>
               </tr>
             </thead>
@@ -510,35 +551,52 @@ export default function AdminObservability() {
                     <td className="px-5 py-3 text-xs text-kfl-text">
                       {!user.has_password && user.is_active ? (
                         <div className="space-y-2">
-                          <label htmlFor={`invite-email-${controlKey}`} className="block font-semibold">Email for invite</label>
-                          <input
-                            id={`invite-email-${controlKey}`}
-                            type="email"
-                            value={inviteEmails[user.user_id] ?? (user.email || user.username)}
-                            onChange={(event) => {
-                              setInviteEmails((prev) => ({ ...prev, [user.user_id]: event.target.value }));
-                            }}
-                            className="w-full rounded border border-kfl-border bg-kfl-surface px-2 py-1 text-xs text-kfl-text"
-                          />
+                          <div className="font-semibold">{user.email || "No registered email"}</div>
+                          <p className="text-[10px] text-kfl-muted">Confirm this address against the approved roster before sending. The recipient cannot be changed here.</p>
                           <div className="text-[10px] text-kfl-muted">Roles: {assignedRoles.map((r: string) => r.replace(/_/g, " ")).join(", ")}</div>
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            disabled={invitingUserId === user.user_id}
-                            aria-label={`Issue invite for ${user.full_name}`}
-                            onClick={() => void handleInvite(user.user_id, selectedRoles)}
+                            disabled={invitingUserId !== null || !EMAIL_REGEX.test(user.email || "")}
+                            aria-label={`${existingInvite?.delivery_method === "email" ? "Reissue" : "Send"} invite email for ${user.full_name}`}
+                            onClick={() => void handleInvite(user, "email")}
                           >
-                            {invitingUserId === user.user_id ? "Sending…" : "Issue invite"}
+                            {invitingUserId === user.user_id ? "Sending…" : existingInvite?.delivery_method === "email" ? "Reissue invite email" : "Send invite email"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={invitingUserId !== null || !EMAIL_REGEX.test(user.email || "")}
+                            aria-label={`${existingInvite?.delivery_method === "manual" ? "Reissue" : "Generate"} manual invite for ${user.full_name}`}
+                            onClick={() => void handleInvite(user, "manual")}
+                          >
+                            {invitingUserId === user.user_id ? "Preparing…" : existingInvite?.delivery_method === "manual" ? "Reissue manual invite" : "Generate manual invite"}
                           </Button>
                         </div>
                       ) : (
                         <span className="font-mono">{user.has_password ? "Password set" : "Inactive"}</span>
                       )}
                       {existingInvite && (
-                        <div className="mt-2">
-                          <span className="font-mono text-xs text-kfl-text">{existingInvite.invite_code}</span>
-                          <div className="text-[10px] text-kfl-muted truncate" title={existingInvite.setup_url}>{existingInvite.setup_url}</div>
+                        <div className="mt-2 space-y-1" aria-label={`Latest invite delivery for ${user.full_name}`}>
+                          <div className="text-[10px] text-kfl-muted">Delivery: {existingInvite.delivery_status}</div>
+                          <div className="font-mono text-[10px] text-kfl-muted">Reference: {existingInvite.delivery_id}</div>
+                          {existingInvite.expires_at && <div className="text-[10px] text-kfl-muted">Expires: {existingInvite.expires_at}</div>}
+                          {existingInvite.delivery_method === "manual" && existingInvite.setup_url && (
+                            <div className="space-y-1">
+                              <label htmlFor={`manual-invite-link-${controlKey}`} className="block text-[10px] font-semibold">Manual link — share securely; shown once</label>
+                              <textarea
+                                id={`manual-invite-link-${controlKey}`}
+                                aria-label={`Manual setup link for ${user.full_name}`}
+                                readOnly
+                                rows={2}
+                                value={existingInvite.setup_url}
+                                onFocus={(event) => event.currentTarget.select()}
+                                className="w-full rounded border border-kfl-border bg-kfl-surface px-2 py-1 font-mono text-[10px] text-kfl-text"
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </td>

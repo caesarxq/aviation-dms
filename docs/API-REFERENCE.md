@@ -27,7 +27,7 @@ All API routes are prefixed with `/api/p0`, `/api/p1`, `/api/p2`, or `/api/p3`. 
 | `/api/p0/auth/users` | GET | List canonical active accounts with roles and password status | `settings:manage` |
 | `/api/p0/auth/users/{user_id}/roles` | PUT | Replace a user's role assignments; revokes active sessions | `settings:manage` |
 | `/api/p0/auth/users/{user_id}/setup-token` | POST | Issue a one-time password setup token for an active canonical account | `settings:manage` |
-| `/api/p0/auth/invites` | POST | Issue a one-time invite code (max 5 per actor per 15 min) | `settings:manage` |
+| `/api/p0/auth/invites` | POST | Email a one-time setup link to the account's registered address; `delivery_method: "manual"` explicitly returns a one-time link for secure transfer, duplicate active requests return existing status, and `resend: true` reissues (max 5 per actor per 15 min) | `settings:manage` |
 
 For the literal canonical ID `u-safety/security`, URL-encode the slash as `%2F` in `{user_id}` path segments (for example, `/api/p0/auth/users/u-safety%2Fsecurity/roles`). API profile payloads retain the exact canonical ID. Owner-confirmed legacy IDs continue to resolve through the account-alias table for role administration, setup-token issuance, and personnel upload/license ownership and filtering.
 

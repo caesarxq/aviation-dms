@@ -9,22 +9,33 @@ import { Input } from "@/components/ui/input";
 type BootstrapStatus = { setup_required: boolean; bootstrap_configured: boolean; bootstrap_token_required: boolean };
 
 export function PasswordSetupPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const initialEmailToken = new URLSearchParams(location.hash.replace(/^#/, "")).get("setup_token") || "";
+  const initialEmailUsername = new URLSearchParams(location.search).get("username") || "";
+  const [emailSetupToken, setEmailSetupToken] = useState(initialEmailToken);
+  const [emailInviteUsername, setEmailInviteUsername] = useState(initialEmailUsername);
+  const [isEmailInvite] = useState(Boolean(initialEmailToken && initialEmailUsername));
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
-  const [username, setUsername] = useState("");
-  const [token, setToken] = useState("");
+  const [username, setUsername] = useState(initialEmailUsername);
+  const [token, setToken] = useState(initialEmailToken);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [statusRetry, setStatusRetry] = useState(0);
-  const navigate = useNavigate();
-  const location = useLocation();
   const { state: authState, profile, refreshProfile } = useAuth();
 
   const inviteFromUrl = (location.pathname.match(/\/setup\/invite\/([A-Za-z0-9-]+)/) || [])[1];
-  const isInviteMode = Boolean(inviteFromUrl);
+  const isInviteMode = Boolean(inviteFromUrl || isEmailInvite);
   const initialSetup = Boolean(status?.setup_required);
+
+  useEffect(() => {
+    if (isEmailInvite) {
+      navigate(location.pathname, { replace: true });
+    }
+  }, [isEmailInvite, location.pathname, navigate]);
 
   useEffect(() => {
     let active = true;
@@ -60,7 +71,17 @@ export function PasswordSetupPage() {
     setSubmitting(true);
     try {
       if (isInviteMode) {
-        await api.post("/p0/auth/password-setup", { invite_code: inviteFromUrl, password });
+        if (isEmailInvite) {
+          await api.post("/p0/auth/password-setup", {
+            username: emailInviteUsername,
+            setup_token: emailSetupToken,
+            password,
+          });
+          setEmailSetupToken("");
+          setEmailInviteUsername("");
+        } else {
+          await api.post("/p0/auth/password-setup", { invite_code: inviteFromUrl, password });
+        }
         setMessage("Password set. Sign in with your assigned username and new password.");
         setPassword("");
         setConfirmPassword("");
@@ -110,7 +131,9 @@ export function PasswordSetupPage() {
         </h1>
         <p className="mb-5 mt-2 text-center text-sm text-kfl-muted">
           {isInviteMode
-            ? "Use your invite code to set your password. Your username is already filled in."
+            ? isEmailInvite
+              ? "Use the secure invitation link to set your password. The link expires in 24 hours and can be used once."
+              : "Use your invite code to set your password. Your username is already filled in."
             : initialSetup
             ? "Create the first administrator password using the one-time deployment token."
             : "Use the one-time setup token supplied by your administrator."}
@@ -139,8 +162,8 @@ export function PasswordSetupPage() {
             <label htmlFor="setup-password-confirm" className="mb-1 block text-sm font-medium">Confirm new password</label>
             <Input id="setup-password-confirm" name="confirm_password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={12} className="w-full" />
           </div>
-          <Button type="submit" disabled={submitting || (initialSetup && !status?.bootstrap_configured)} variant="default" size="sm" className="w-full disabled:opacity-60">
-            {submitting ? "Saving…" : "Set password"}
+          <Button type="submit" disabled={submitting || (initialSetup && !status?.bootstrap_configured) || (isEmailInvite && !emailSetupToken)} variant="default" size="sm" className="w-full disabled:opacity-60">
+            {submitting ? "Saving…" : isEmailInvite && !emailSetupToken ? "Password set" : "Set password"}
           </Button>
         </form>
         <p className="mt-5 text-center text-sm"><Link to="/login" className="text-kfl-blue underline underline-offset-2">Return to sign in</Link></p>

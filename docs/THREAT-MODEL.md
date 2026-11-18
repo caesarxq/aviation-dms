@@ -42,7 +42,7 @@ The Aviation DMS is a FastAPI + React document management system for KCAA-regula
 |----|--------|-------|--------|------------|------------|
 | T-01 | Attacker spoofs `X-Forwarded-For` to bypass IP-based trust | Backend | High — unauthorized access via trusted-IP path | Low | `X-Forwarded-For` only honored from bastion IP `145.241.152.126/32`; backend uses peer address otherwise |
 | T-02 | Attacker impersonates a user via stolen session cookie | User sessions | High — account takeover | Medium | HTTP-only, SameSite=Strict, Secure cookies; CSRF double-submit; 8h sliding / 24h absolute session TTL |
-| T-03 | Attacker reuses a revoked setup token or invite code | Auth system | Medium — unauthorized account creation | Low | Single-use tokens, 24-hour expiry, rate limiting (5/actor/15min) |
+| T-03 | Attacker reuses or guesses an invitation setup token | Auth system | Medium — unauthorized account creation | Low | 256-bit random token; only token hash stored; URL fragment; single-use, 24-hour expiry, failed-delivery revocation, rate limiting (5/actor/15min); manual link only returned to explicitly authorized admin; raw token is not stored server-side |
 | T-04 | Attacker spoofs source auditor identity in P3 provenance import | Audit reports | High — false attribution of audit findings | Low | Alias-aware separation: source auditor, auditee, importer, verifier must be four distinct principals; verifier permission unavailable to `system_admin` |
 
 ### Tampering

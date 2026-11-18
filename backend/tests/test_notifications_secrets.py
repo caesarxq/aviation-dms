@@ -39,6 +39,7 @@ def test_smtp_starttls_uses_a_certificate_verifying_context(monkeypatch):
     from app import notifications
 
     smtp_client = MagicMock()
+    smtp_client.send_message.return_value = {}
     smtp_factory = MagicMock()
     smtp_factory.return_value.__enter__.return_value = smtp_client
     monkeypatch.setattr(notifications.smtplib, "SMTP", smtp_factory)
@@ -55,3 +56,81 @@ def test_smtp_starttls_uses_a_certificate_verifying_context(monkeypatch):
     assert isinstance(tls_context, ssl.SSLContext)
     assert tls_context.verify_mode == ssl.CERT_REQUIRED
     assert tls_context.check_hostname is True
+
+
+def test_invitation_email_uses_its_own_flag_and_does_not_persist_the_bearer_link(monkeypatch):
+    from app import notifications
+
+    smtp_client = MagicMock()
+    smtp_client.send_message.return_value = {}
+    smtp_factory = MagicMock()
+    smtp_factory.return_value.__enter__.return_value = smtp_client
+    monkeypatch.setattr(notifications.smtplib, "SMTP", smtp_factory)
+    monkeypatch.setattr(notifications, "INVITE_EMAIL_ENABLED", True)
+    monkeypatch.setattr(notifications, "NOTIFICATION_ENABLED", False)
+    monkeypatch.setattr(notifications, "SMTP_HOST", "smtp.example.test")
+    monkeypatch.setattr(notifications, "SMTP_PORT", 587)
+    monkeypatch.setattr(notifications, "SMTP_USER", "mailer@example.test")
+    monkeypatch.setattr(notifications, "SMTP_PASS", "test-password")
+    monkeypatch.setattr(notifications, "SMTP_FROM", "no-reply@example.test")
+    monkeypatch.setattr(notifications, "SMTP_FROM_CONFIGURED", True)
+    monkeypatch.setattr(
+        notifications,
+        "persist_notification",
+        lambda *args, **kwargs: pytest.fail("invite body must not be persisted in notifications"),
+    )
+
+    assert notifications.send_invitation_email(
+        "recipient@example.test",
+        "Invitation",
+        "Plain body with one-time link",
+        "<a href=\"https://dms.example.test/setup#setup_token=test-token\">Complete setup</a>",
+    )
+
+    smtp_client.starttls.assert_called_once()
+    smtp_client.login.assert_called_once_with("mailer@example.test", "test-password")
+    message = smtp_client.send_message.call_args.args[0]
+    assert message["To"] == "recipient@example.test"
+    assert message.get_content_subtype() == "alternative"
+    assert len(message.get_payload()) == 2
+
+
+def test_invitation_email_requires_feature_flag_and_complete_smtp_configuration(monkeypatch):
+    from app import notifications
+
+    monkeypatch.setattr(notifications, "INVITE_EMAIL_ENABLED", False)
+    with pytest.raises(RuntimeError, match="Invite email is disabled"):
+        notifications.send_invitation_email("recipient@example.test", "Invitation", "Text", "<p>HTML</p>")
+
+    monkeypatch.setattr(notifications, "INVITE_EMAIL_ENABLED", True)
+    monkeypatch.setattr(notifications, "SMTP_HOST", "smtp.example.test")
+    monkeypatch.setattr(notifications, "SMTP_USER", "mailer@example.test")
+    monkeypatch.setattr(notifications, "SMTP_PASS", "test-password")
+    monkeypatch.setattr(notifications, "SMTP_FROM_CONFIGURED", False)
+    with pytest.raises(RuntimeError, match="SMTP is not configured"):
+        notifications.send_invitation_email("recipient@example.test", "Invitation", "Text", "<p>HTML</p>")
+
+
+def test_invitation_email_raises_when_smtp_refuses_the_recipient(monkeypatch):
+    from app import notifications
+
+    smtp_client = MagicMock()
+    smtp_client.send_message.return_value = {"recipient@example.test": (550, b"recipient refused")}
+    smtp_factory = MagicMock()
+    smtp_factory.return_value.__enter__.return_value = smtp_client
+    monkeypatch.setattr(notifications.smtplib, "SMTP", smtp_factory)
+    monkeypatch.setattr(notifications, "INVITE_EMAIL_ENABLED", True)
+    monkeypatch.setattr(notifications, "SMTP_HOST", "smtp.example.test")
+    monkeypatch.setattr(notifications, "SMTP_PORT", 587)
+    monkeypatch.setattr(notifications, "SMTP_USER", "mailer@example.test")
+    monkeypatch.setattr(notifications, "SMTP_PASS", "test-password")
+    monkeypatch.setattr(notifications, "SMTP_FROM", "no-reply@example.test")
+    monkeypatch.setattr(notifications, "SMTP_FROM_CONFIGURED", True)
+
+    with pytest.raises(RuntimeError, match="SMTP refused one or more recipients"):
+        notifications.send_invitation_email(
+            "recipient@example.test",
+            "Invitation",
+            "Text with a setup link",
+            "<p>Invitation</p>",
+        )
