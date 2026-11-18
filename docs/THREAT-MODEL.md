@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Date:** 2026-11-12
-**Scope:** Aviation DMS production deployment (staging `10.20.4.234`, production `10.20.1.69`, bastion `145.241.152.126`)
+**Scope:** Aviation DMS production deployment (staging on shared bastion/staging VM `145.241.152.126`, production `10.20.1.69`, bastion `145.241.152.126`)
 **Classification:** Internal — not a controlled manual, not an operational release
 
 ---
@@ -26,8 +26,9 @@ The Aviation DMS is a FastAPI + React document management system for KCAA-regula
 | Boundary | Description | Controls |
 |----------|-------------|----------|
 | **Browser → Caddy** | Public HTTPS to bastion | TLS 1.2+, HSTS, security headers, Caddy rate limits |
-| **Caddy → Backend** | Bastion to production backend (private IP) | `X-Forwarded-For` only honored from bastion IP `145.241.152.126/32` |
-| **Backend → Upload-validator** | Internal Compose network | Isolated `upload_validator` network, no host port, backend fails closed if unreachable |
+|| **Caddy → Production Backend** | Bastion to production backend (private IP `10.20.1.69:8000`) | `X-Forwarded-For` only honored from bastion IP `145.241.152.126/32` ||
+|| **Caddy → Staging Backend** | Bastion (Caddy) to staging backend on same VM (`127.0.0.1:8000`) | Localhost-only binding; staging not directly accessible from public internet ||
+|| **Backend → Upload-validator** | Internal Compose network | Isolated `upload_validator` network, no host port, backend fails closed if unreachable ||
 | **Backend → Clamd** | Internal Compose network | Clamd on port 3310, not published to host, INSTREAM scan only |
 | **Backend → SQLite** | Local filesystem | Database file read/write by backend UID 10001 only |
 | **Admin → Bastion** | SSH via key | `ssh-key-2026-11-06-2.key` / `ssh-key-2026-11-11-2.key`, bastion proxy to instances |
