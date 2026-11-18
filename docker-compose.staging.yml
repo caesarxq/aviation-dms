@@ -7,8 +7,6 @@
 
 services:
   backend:
-    ports:
-      - "0.0.0.0:8001:8000"
     environment:
       DEV_MODE: "true"
       FLIGHT_RELEASE_ENABLED: "false"
@@ -33,10 +31,6 @@ services:
   clamd:
     expose:
       - "3310"
-
-  frontend:
-    ports:
-      - "0.0.0.0:8081:80"
 
 volumes:
   dms_data: {}
