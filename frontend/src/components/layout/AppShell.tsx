@@ -334,7 +334,7 @@ export function AppShell() {
             aria-label={homeLabel}
             className="app-sidebar-brand h-auto min-w-0 flex-1 justify-start overflow-hidden p-0 hover:bg-transparent"
           >
-            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="app-sidebar-logo h-11 w-auto max-w-[124px] object-contain object-left" />
+            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="app-sidebar-logo h-11 w-auto max-w-[124px] object-contain object-left rounded-md" />
           </Button>
           <div className="app-sidebar-header-actions flex shrink-0 items-center gap-0.5">
             <ThemeToggle />
@@ -440,7 +440,7 @@ export function AppShell() {
               {roleSwitchError && <p role="alert" className="mt-1 text-[10px] text-rose-300">{roleSwitchError}</p>}
             </div>
           )}
-          <div className="mt-2 text-slate-300">{profile?.user.full_name} · {profile?.active_role}</div>
+          <div className="mt-2 text-slate-300 truncate">{profile?.user.full_name} · {profile?.active_role}</div>
           <div className="mt-3 flex items-center justify-between gap-2">
             <NavLink to="/account/profile" className="rounded px-2 py-1 text-slate-300 hover:bg-white/10 hover:text-white">Profile settings</NavLink>
             <Button
