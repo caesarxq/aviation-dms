@@ -7,8 +7,6 @@
 
 services:
   backend:
-    ports:
-      - "8000:8000"
     environment:
       DEV_MODE: "false"
       FLIGHT_RELEASE_ENABLED: "false"
@@ -58,11 +56,6 @@ services:
       nproc:
         soft: 128
         hard: 128
-
-  frontend:
-    ports:
-      - "8080:80"
-
 
 volumes:
   dms_data: {}

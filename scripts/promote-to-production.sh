@@ -45,8 +45,10 @@ echo "Images verified in registry"
 # --- Deploy to production via SSH through bastion ---
 echo "--- Deploying validated image to production ---"
 ssh -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=no \
-    -o ProxyCommand="ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${BASTION_USER}@${BASTION_HOST}" \
+    -o StrictHostKeyChecking=yes \
+    -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
+    -o GlobalKnownHostsFile=/dev/null \
+    -o ProxyCommand="ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${HOME}/.ssh/known_hosts -o GlobalKnownHostsFile=/dev/null -W %h:%p ${BASTION_USER}@${BASTION_HOST}" \
     "${PROD_USER}@${PROD_HOST}" \
     "/opt/kfl-aviation-dms-prod/scripts/deploy-prod.sh ${IMAGE_TAG}"
 
