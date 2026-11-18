@@ -2,7 +2,7 @@
 
 ## Overview
 
-Staging (cloud instance `10.20.4.234`) → Production (new OCI instance).
+Staging (shared `roc-dis` VM — bastion and staging are the same host) → Production (new OCI instance).
 
 The pipeline builds and tests images on pushes to `main`; it does not deploy to a live environment on a code push. Staging deployment requires an explicit workflow dispatch approval. Production promotion requires separate staging and production approvals.
 
@@ -13,9 +13,10 @@ The pipeline builds and tests images on pushes to `main`; it does not deploy to 
 | Secret | Description |
 |--------|-------------|
 | `CR_PAT` | Container registry personal access token (ghcr.io) |
-| `STAGING_SSH_PRIVATE_KEY` | SSH key for staging instance (`10.20.4.234`) |
+| `BASTION_SSH_PRIVATE_KEY` | SSH key for the shared bastion/staging host (`roc-dis`, `145.241.152.126`) |
 | `PRODUCTION_SSH_PRIVATE_KEY` | SSH key for production OCI instance |
-| `BASTION_SSH_PRIVATE_KEY` | SSH key for bastion (`145.241.152.126`) |
+
+The workflow pins the single `roc-dis` ED25519 fingerprint (`ROC_DIS_HOST_KEY_FINGERPRINT`) and verifies it against the bastion/staging host key before deploying. Since bastion and staging are the same VM, no separate staging host key or jump host is required.
 
 ### Environments
 
@@ -72,7 +73,7 @@ python3 -m backup_validation verify --data-root <candidate> --confirm-isolated-c
 
 ## Staging / Production Data Separation
 
-- Staging uses `dms_data` volume on `10.20.4.234`
+- Staging uses `dms_data` volume on the shared `roc-dis` VM (bastion + staging)
 - Production uses separate `dms_data` volume on OCI instance
 - **Never share volumes between environments**
 - Staging database contains test data; production database is independent
