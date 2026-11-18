@@ -1,11 +1,12 @@
 #!/bin/bash
 # ============================================================================
-# Aviation DMS — Deploy to Staging (Cloud Instance)
+# Aviation DMS — Deploy to Staging (Shared Bastion/Staging VM)
 # ============================================================================
 # Usage: ./scripts/deploy-staging.sh <IMAGE_TAG>
 #
-# Deploys the specified image tag to the staging instance (10.20.4.234).
-# Staging is deployed via bastion (145.241.152.126).
+# Deploys the specified image tag to the staging host (roc-dis, 145.241.152.126).
+# Staging shares the bastion VM; backend and frontend bind to localhost only.
+# Caddy on the same host reverse-proxies stage.kfl.ke to local services.
 #
 # FAIL-CLOSED: exits non-zero on any error.
 # ============================================================================
@@ -21,17 +22,17 @@ echo "Aviation DMS Staging Deployment"
 echo "Image tag: ${IMAGE_TAG}"
 echo "Registry: ${REGISTRY}"
 echo "Repository: ${REPO_NAME}"
-echo "Target: 10.20.4.234 (via bastion 145.241.152.126)"
+echo "Target: roc-dis / bastion (145.241.152.126)"
 echo "============================================================"
 
 # --- Export environment variables for compose ---
 export DMS_RELEASE_TAG="${IMAGE_TAG}"
 export DMS_GIT_SHA="${DMS_GIT_SHA:-}"
 export DMS_HOSTNAME="stage.kfl.ke"
-export DMS_BACKEND_BIND_IP="10.20.4.234"
-export DMS_BACKEND_HOST_PORT="8001"
-export DMS_FRONTEND_BIND_IP="10.20.4.234"
-export DMS_FRONTEND_HOST_PORT="8081"
+export DMS_BACKEND_BIND_IP="127.0.0.1"
+export DMS_BACKEND_HOST_PORT="8000"
+export DMS_FRONTEND_BIND_IP="127.0.0.1"
+export DMS_FRONTEND_HOST_PORT="80"
 export DMS_CLAMD_HOST="clamd"
 export DMS_CLAMD_PORT="3310"
 export DMS_CLAMD_TIMEOUT_SECONDS="60"
@@ -73,16 +74,16 @@ sudo env \
     --env-file .env.staging config --format json |
   python3 -c 'import json, sys
 config = json.load(sys.stdin)
-expected = {"backend": [("10.20.4.234", "8001", 8000, "tcp")], "frontend": [("10.20.4.234", "8081", 80, "tcp")], "upload-validator": [], "clamd": []}
+expected = {"backend": [("127.0.0.1", "8000", 8000, "tcp")], "frontend": [("127.0.0.1", "80", 80, "tcp")], "upload-validator": [], "clamd": []}
 actual = {name: [(p.get("host_ip"), str(p.get("published")), int(p["target"]), p.get("protocol", "tcp")) for p in config["services"][name].get("ports", [])] for name in expected}
 if actual != expected:
     print("ERROR: staging host port bindings do not match the private-interface allowlist")
     sys.exit(1)
 backend_env = config["services"]["backend"].get("environment", {})
-if str(backend_env.get("INVITE_EMAIL_ENABLED")).lower() != "false" or str(backend_env.get("NOTIFICATION_ENABLED")).lower() != "false":
-    print("ERROR: staging email delivery flags must remain disabled")
+if str(backend_env.get("INVITE_EMAIL_ENABLED")).lower() != "true" or str(backend_env.get("NOTIFICATION_ENABLED")).lower() != "true":
+    print("ERROR: staging email delivery flags must be enabled")
     sys.exit(1)
-print("Staging host port bindings and disabled email flags verified")'
+print("Staging host port bindings and enabled email flags verified")'
 
 # --- Pull images from registry ---
 echo "--- Pulling images from registry ---"

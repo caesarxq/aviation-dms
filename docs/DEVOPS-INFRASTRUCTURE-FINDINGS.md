@@ -14,11 +14,9 @@ No secrets are configured in the `caesarxq/aviation-dms` repository. The CI/CD p
 
 | Secret | Purpose | How to Set |
 |--------|---------|------------|
-| `STAGING_SSH_PRIVATE_KEY` | SSH key for staging instance via bastion | `gh secret set STAGING_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
-| `PRODUCTION_SSH_PRIVATE_KEY` | SSH key for production instance via bastion | `gh secret set PRODUCTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
-| `BASTION_SSH_PRIVATE_KEY` | SSH key for bastion host (ProxyJump) | `gh secret set BASTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
 | `CR_PAT` | Container registry PAT for ghcr.io (write:packages) | `gh secret set CR_PAT` (prompt) |
 | `PROD_HOST` | Production hostname for deployment | `gh secret set PROD_HOST roc.kfl.ke` |
+| `BASTION_SSH_PRIVATE_KEY` | SSH key for bastion host (shared bastion/staging VM) | `gh secret set BASTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519` |
 
 ### Commands to Run
 
@@ -26,9 +24,7 @@ No secrets are configured in the `caesarxq/aviation-dms` repository. The CI/CD p
 # Authenticate first (already done)
 gh auth status
 
-# Set all five secrets (SSH keys via file redirect, others via prompt)
-gh secret set STAGING_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
-gh secret set PRODUCTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
+# Set secrets (SSH key via file redirect, others via prompt)
 gh secret set BASTION_SSH_PRIVATE_KEY < ~/.ssh/id_ed25519
 gh secret set CR_PAT
 gh secret set PROD_HOST roc.kfl.ke
@@ -37,7 +33,9 @@ gh secret set PROD_HOST roc.kfl.ke
 gh secret list --repo caesarxq/aviation-dms
 ```
 
-**Note:** SSH private keys are passed via file redirect (`<`) so their contents are never echoed to the terminal. `CR_PAT` and `PROD_HOST` will prompt interactively.
+**Note:** SSH private key is passed via file redirect (`<`) so its contents are never echoed to the terminal. `CR_PAT` and `PROD_HOST` will prompt interactively.
+
+**Staging deploy:** Uses a self-hosted GitHub Actions runner on the shared bastion/staging VM (`roc-dis`). No `STAGING_SSH_PRIVATE_KEY` or `STAGING_HOST` secret needed — deploy commands run locally on the runner.
 
 ---
 
@@ -95,7 +93,7 @@ build → test-backend + test-frontend (parallel) → deploy-staging → promote
 ### Current State
 - Backup server: `10.20.173.120` with verified backup candidates
 - `backup_validation.py` exists and validates manifests read-only
-- Daily cron backup: `0 2 * * *` on `10.20.4.234`
+- Daily cron backup: `0 2 * * *` on backup host `10.20.173.120`
 - Full-stack backup: `backend/scripts/full-stack-backup.sh` verified end-to-end
 - **Off-host restore drill completed** — see `docs/OFF-HOST-RESTORE-DRILL-REPORT.md`
 - All 11 DR gates passed (backup creation, manifest, off-host transfer, isolated restore, SHA-256 verification, SQLite integrity, foreign key checks, schema completeness, file inventory, hash matching, read-only verification)
@@ -109,8 +107,8 @@ build → test-backend + test-frontend (parallel) → deploy-staging → promote
 ### Current State
 - Terraform directory removed (was not applied, contained uncommitted OCIDs)
 - Production instance `10.20.1.69` created manually via OCI Console
-- Staging instance `10.20.4.234` exists as cloud VM
-- Bastion `145.241.152.126` runs Caddy for TLS termination
+- Staging runs on shared bastion/staging VM `roc-dis` (`145.241.152.126`), backend on `127.0.0.1:8000`
+- Bastion `145.241.152.126` runs Caddy for TLS termination and staging reverse-proxy
 - All infrastructure state is manual, not versioned
 
 ### Risk
@@ -133,7 +131,7 @@ When OCI credentials are available, reintroduce Terraform with:
 | Action | Status | Commit |
 |--------|--------|--------|
 | Caddy reload on bastion (`roc.kfl.ke` → production) | ✅ Done | — |
-| Staging deployment on `10.20.4.234` | ✅ Done | — |
+| Staging deployment on shared bastion/staging VM `roc-dis` (`145.241.152.126`) | ✅ Done | — |
 | Production deployment on `10.20.1.69` | ✅ Done | — |
 | Fix `database.py` indentation bug | ✅ Done | `3465d73` |
 | Fix staging port conflicts (8000→8001, 8080→8081) | ✅ Done | `3465d73` |

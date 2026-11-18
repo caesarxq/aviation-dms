@@ -55,7 +55,7 @@ Applies to the KFL Aviation DMS restricted onboarding pilot. Does not authorize 
 | B3 | Orphan reconciliation is report-only; no auto-delete | | `upload_reconciliation.py` |
 | B4 | Full-stack backup container run: Docker images (6), SQLite via online backup API, storage roots, configs, security artifacts, dependencies; pushed to `10.20.173.120:~/dms-backups/` | | `backend/scripts/full-stack-backup.sh` — verified end-to-end |
 | B5 | Reverse-proxy body limits: Caddy `max_body_size 10MiB` API / `1MiB` frontend; clamd port 3310 not published to host | | `Caddyfile`, `docker-compose.yml` |
-| B6 | Cron job installed: `0 2 * * *` daily backup on backend instance | | `crontab -l` on `10.20.4.234` |
+| B6 | Cron job installed: `0 2 * * *` daily backup on backup host | | `crontab -l` on `10.20.173.120` |
 | B7 | Off-host restore target confirmed: `ubuntu@10.20.173.120:~/dms-backups/` via bastion `ubuntu@145.241.152.126` | | Verified both instances |
 
 ### Retention & Legal Hold

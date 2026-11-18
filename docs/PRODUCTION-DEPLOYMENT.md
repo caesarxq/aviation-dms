@@ -114,7 +114,7 @@ No genuine off-host drill is complete until the Accountable Manager approves the
 
 ## Staging and deployment checks
 
-1. Use a separate staging host, database, SMTP sandbox and bootstrap token. Do not run E2E tests against operational data.
+1. Use a separate staging database, SMTP sandbox and bootstrap token. Staging shares the bastion VM (`roc-dis`, `145.241.152.126`) with backend on `127.0.0.1:8000`; do not run E2E tests against operational data.
 2. Set a new, never-reused `DMS_RELEASE_TAG`; run `docker compose config --quiet`, `docker compose build backend frontend https_proxy`, then `docker compose up -d --no-build` so the running services use that built tag.
 3. Confirm HTTPS redirect/certificate, security headers, successful login/profile/logout, CSRF rejection, failed-login throttling, reset-link delivery, and 401/403 behavior for every API prefix, including `/api/p3`.
 4. Run the complete backend and frontend suites, role-based browser checks, schema clean-install/upgrade tests and API smoke tests against staging.
