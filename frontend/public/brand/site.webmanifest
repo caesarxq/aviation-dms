@@ -1,0 +1,12 @@
+{
+  "name": "KFL Aviation DMS",
+  "short_name": "KFL DMS",
+  "description": "KFL Aviation Document Management System — safety, compliance, fleet, and controlled documents.",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#1b7abf",
+  "background_color": "#f5f7fa",
+  "display": "standalone"
+}

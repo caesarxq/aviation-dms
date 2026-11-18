@@ -857,6 +857,8 @@ async def issue_invite(body: AuthInviteRequest, request: Request, response: Resp
 
         if body.email is not None:
             _validate_email(body.email)
+        if body.delivery_email is not None and body.delivery_email.strip():
+            _validate_email(body.delivery_email)
 
         cursor = await db.execute(
             "SELECT user_id, username, email, full_name, role, department, is_active, password_hash "
@@ -881,11 +883,23 @@ async def issue_invite(body: AuthInviteRequest, request: Request, response: Resp
             raise HTTPException(status_code=409, detail="This account already has a password")
 
         recipient = (user["email"] or "").strip()
-        if not recipient:
-            raise HTTPException(status_code=409, detail="The account must have a registered email address before invitation")
-        _validate_email(recipient)
-        if body.email is not None and body.email.strip().casefold() != recipient.casefold():
-            raise HTTPException(status_code=409, detail="Invitation address must match the account's registered email")
+        if body.delivery_email is not None and body.delivery_email.strip():
+            # Explicit admin override: deliver the invitation to an arbitrary
+            # validated address rather than only the account's registered email.
+            recipient = body.delivery_email.strip()
+            _validate_email(recipient)
+        else:
+            if not recipient:
+                raise HTTPException(status_code=409, detail="The account must have a registered email address before invitation")
+            _validate_email(recipient)
+            if body.email is not None and body.email.strip().casefold() != recipient.casefold():
+                raise HTTPException(status_code=409, detail="Invitation address must match the account's registered email")
+        delivery_email_override = (
+            body.delivery_email is not None
+            and bool(body.delivery_email.strip())
+            and body.delivery_email.strip().casefold() != (user["email"] or "").strip().casefold()
+        )
+        email_context_recipient = recipient
 
         cursor = await db.execute(
             """SELECT d.delivery_id, d.status, d.recipient_email, d.created_at, t.expires_at
@@ -978,7 +992,7 @@ async def issue_invite(body: AuthInviteRequest, request: Request, response: Resp
             user["user_id"],
             "invite_manual_link_issued",
             actor,
-            {"delivery_id": delivery_id, "expires_at": expires.isoformat()},
+            {"delivery_id": delivery_id, "expires_at": expires.isoformat(), "delivery_address_override": delivery_email_override},
         )
         return AuthInviteResponse(
             delivery_id=delivery_id,
@@ -1035,7 +1049,7 @@ async def issue_invite(body: AuthInviteRequest, request: Request, response: Resp
         user["user_id"],
         f"invite_email_{delivery_status}",
         actor,
-        {"delivery_id": delivery_id, "expires_at": expires.isoformat()},
+        {"delivery_id": delivery_id, "expires_at": expires.isoformat(), "delivery_address_override": delivery_email_override},
     )
     if delivery_status == "failed":
         return JSONResponse(
@@ -3246,8 +3260,10 @@ async def system_admin_observability(request: Request):
         scheduler = getattr(request.app.state, "scheduler", None)
         scheduler_task = getattr(scheduler, "_task", None) if scheduler else None
         scheduler_running = bool(scheduler and getattr(scheduler, "_running", False) and scheduler_task and not scheduler_task.done())
+        from .version_info import get_version_info
         return {
             "generated_at": now_iso(),
+            "version": get_version_info(),
             "health": {
                 "status": "ok",
                 "scheduler": "running" if scheduler_running else "not_started",

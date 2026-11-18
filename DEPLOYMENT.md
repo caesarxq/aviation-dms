@@ -45,6 +45,15 @@ Production promotion requires a separate dispatch with `environment=production`,
 | `scripts/deploy-prod.sh <TAG>` | Deploy image to production (with pre-deploy backup) |
 | `scripts/promote-to-production.sh <TAG>` | Promote staging-validated image to production |
 
+## Runtime Version Surfacing
+
+Every deployment injects `DMS_RELEASE_TAG` (and `DMS_GIT_SHA` where available) into the backend container. The running build identity is observable without SSH:
+
+- `GET /health` → `{"status": "ok", "version": {"name", "api_version", "release_tag", "git_sha"}}`
+- `GET /api/p0/admin/observability` (system admin) → top-level `version` block with the same identity, rendered as the "Build version" tile in Admin → System Observability.
+
+This makes the currently running release tag (`canonical-<git sha>-<timestamp>`) verifiable over HTTPS after every deployment; the deploy script's post-deploy smoke test should confirm the reported tag matches the requested `IMAGE_TAG`.
+
 ## Production Promotion Safety
 
 Before any production deployment:

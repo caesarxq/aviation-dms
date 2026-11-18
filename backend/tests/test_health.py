@@ -23,4 +23,9 @@ def test_health_returns_ready_when_database_query_succeeds(client):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["version"]["api_version"] == "1.0.0"
+    assert payload["version"]["name"] == "KFL Aviation DMS"
+    assert "release_tag" in payload["version"]
+    assert "git_sha" in payload["version"]

@@ -198,6 +198,7 @@ jobs:
     environment: staging
     env:
       IMAGE_TAG: ${{ needs.build.outputs.backend_tag }}
+      DMS_GIT_SHA: ${{ github.sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

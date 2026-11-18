@@ -20,6 +20,12 @@ const userProfile = {
 };
 
 const observability = {
+  version: {
+    name: "KFL Aviation DMS",
+    api_version: "1.0.0",
+    release_tag: "canonical-5012309115b2a2d3b38a23e35dc6cf92a26ebcc3-20261118T200056Z",
+    git_sha: "5012309115b2a2d3b38a23e35dc6cf92a26ebcc3",
+  },
   health: { status: "ok", scheduler: "running" },
   database: { status: "ok", integrity: "ok" },
   tables: {},
@@ -61,6 +67,15 @@ describe("AdminObservability role assignments", () => {
       "/p0/auth/users/u-quality/roles",
       { roles: ["head_quality", "librarian", "records_custodian"] },
     ));
+  });
+
+  it("shows the runtime build version and Git SHA tile", async () => {
+    renderAdmin();
+
+    expect(await screen.findByText("Build version")).toBeInTheDocument();
+    expect(screen.getByText("canonical-5012309115b2a2d3b38a23e35dc6cf92a26ebcc3-20261118T200056Z")).toBeInTheDocument();
+    expect(screen.getByText(/API 1\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/5012309115b2a/)).toBeInTheDocument();
   });
 
   it("displays preserved merged account IDs without offering them role editing", async () => {

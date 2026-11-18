@@ -26,6 +26,7 @@ echo "============================================================"
 
 # --- Export environment variables for compose ---
 export DMS_RELEASE_TAG="${IMAGE_TAG}"
+export DMS_GIT_SHA="${DMS_GIT_SHA:-}"
 export DMS_HOSTNAME="stage.kfl.ke"
 export DMS_BACKEND_BIND_IP="10.20.4.234"
 export DMS_BACKEND_HOST_PORT="8001"
@@ -49,6 +50,7 @@ export ACME_EMAIL="${ACME_EMAIL:-admin@localhost.local}"
 cd "${STAGING_DIR}"
 sudo env \
   DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
+  DMS_GIT_SHA="${DMS_GIT_SHA}" \
   DMS_HOSTNAME="${DMS_HOSTNAME}" \
   DMS_BACKEND_BIND_IP="${DMS_BACKEND_BIND_IP}" \
   DMS_BACKEND_HOST_PORT="${DMS_BACKEND_HOST_PORT}" \
@@ -97,6 +99,7 @@ echo "--- Deploying to staging ---"
 cd "${STAGING_DIR}"
 sudo env \
   DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
+  DMS_GIT_SHA="${DMS_GIT_SHA}" \
   DMS_HOSTNAME="${DMS_HOSTNAME}" \
   DMS_BACKEND_BIND_IP="${DMS_BACKEND_BIND_IP}" \
   DMS_BACKEND_HOST_PORT="${DMS_BACKEND_HOST_PORT}" \
@@ -148,6 +151,15 @@ sudo docker exec kfl-aviation-dms-staging-backend-1 \
     echo "ERROR: Backend health check failed"
     exit 1
   }
+
+# --- Verify runtime release tag matches the requested image tag ---
+reported_tag=$(sudo docker exec kfl-aviation-dms-staging-backend-1 \
+  python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2))['version']['release_tag'])")
+if [ -z "${reported_tag}" ] || [ "${reported_tag}" != "${IMAGE_TAG}" ]; then
+  echo "ERROR: runtime release tag reported as '${reported_tag}' but expected '${IMAGE_TAG}'"
+  exit 1
+fi
+echo "Runtime release tag verified: ${reported_tag}"
 
 echo "============================================================"
 echo "Staging deployment complete: ${IMAGE_TAG}"

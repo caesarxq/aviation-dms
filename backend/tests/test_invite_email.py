@@ -382,6 +382,76 @@ def test_invite_cannot_be_redirected_to_a_request_supplied_address(client, admin
         _restore_invitee(original)
 
 
+def test_invite_delivery_email_override_delivers_to_arbitrary_address(client, admin_headers, monkeypatch):
+    original = _prepare_invitee("quality-invite@example.test")
+    sent = []
+    _enable_invite_email(monkeypatch, lambda *args, **kwargs: sent.append(args) or True)
+    try:
+        response = client.post(
+            "/api/p0/auth/invites",
+            json={
+                "username": original[0],
+                "delivery_email": "alternate-delivery@example.net",
+                "delivery_method": "email",
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["recipient_email"] == "alternate-delivery@example.net"
+        assert len(sent) == 1
+        # the SMTP send goes to the override address
+        assert sent[0][0] == "alternate-delivery@example.net"
+        conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+        try:
+            row = conn.execute(
+                "SELECT recipient_email, status FROM auth_invite_email_outbox WHERE user_id = 'u-quality' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == "alternate-delivery@example.net"
+            assert row[1] == "sent"
+        finally:
+            conn.close()
+    finally:
+        _restore_invitee(original)
+
+
+def test_invite_delivery_email_override_requires_registered_email_without_override(client, admin_headers, monkeypatch):
+    original = _prepare_invitee("")
+    _enable_invite_email(monkeypatch, lambda *args, **kwargs: True)
+    try:
+        # No override supplied and no registered email -> still requires a registered address.
+        response = client.post(
+            "/api/p0/auth/invites",
+            json={"username": original[0], "delivery_method": "email"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 409
+    finally:
+        _restore_invitee(original)
+
+
+def test_invite_delivery_email_override_accepts_override_for_account_without_registered_email(client, admin_headers, monkeypatch):
+    original = _prepare_invitee("")
+    sent = []
+    _enable_invite_email(monkeypatch, lambda *args, **kwargs: sent.append(args) or True)
+    try:
+        response = client.post(
+            "/api/p0/auth/invites",
+            json={
+                "username": original[0],
+                "delivery_email": "onboard-direct@example.org",
+                "delivery_method": "email",
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["recipient_email"] == "onboard-direct@example.org"
+        assert len(sent) == 1
+        assert sent[0][0] == "onboard-direct@example.org"
+    finally:
+        _restore_invitee(original)
+
+
 def test_invite_requires_a_registered_email_address(client, admin_headers, monkeypatch):
     original = _prepare_invitee("")
     sent = []
