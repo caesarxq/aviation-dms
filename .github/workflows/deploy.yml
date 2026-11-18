@@ -194,7 +194,7 @@ jobs:
     name: Deploy to staging
     if: github.event_name == 'workflow_dispatch' && inputs.approve_staging == true
     needs: [test-backend, test-frontend, build]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, staging]
     environment: staging
     env:
       IMAGE_TAG: ${{ needs.build.outputs.backend_tag }}
@@ -202,82 +202,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up SSH
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          bastion_key_scan="$(ssh-keyscan -T 5 -t ed25519 "$BASTION_HOST" 2>/dev/null)"
-          bastion_fingerprint="$(printf '%s\n' "$bastion_key_scan" | ssh-keygen -lf - | awk '{print $2}')"
-          test "$bastion_fingerprint" = "$ROC_DIS_HOST_KEY_FINGERPRINT"
-          printf '%s\n' "$bastion_key_scan" >> ~/.ssh/known_hosts
-
       - name: Deploy to staging
         run: |
           REMOTE_DEPLOY_DIR="/tmp/kfl-aviation-dms-${IMAGE_TAG}"
 
-          ssh -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin && \
-             mkdir -m 700 -p '${REMOTE_DEPLOY_DIR}/scripts'"
+          echo '${{ secrets.CR_PAT }}' | sudo docker login ${{ env.REGISTRY }} -u ${{ env.REGISTRY_USER }} --password-stdin
+          mkdir -m 700 -p '${REMOTE_DEPLOY_DIR}/scripts'
 
-          scp -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            docker-compose.yml \
-            docker-compose.staging.yml \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/
+          cp docker-compose.yml '${REMOTE_DEPLOY_DIR}/'
+          cp docker-compose.staging.yml '${REMOTE_DEPLOY_DIR}/'
+          cp scripts/deploy-staging.sh '${REMOTE_DEPLOY_DIR}/scripts/'
 
-          scp -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            scripts/deploy-staging.sh \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh
+          sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${{ env.STAGING_DIR }}/docker-compose.yml'
+          sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${{ env.STAGING_DIR }}/docker-compose.staging.yml'
+          sudo install -D -o root -g root -m 0755 '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' '${{ env.STAGING_DIR }}/scripts/deploy-staging.sh'
+          rm -f '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh'
+          rmdir '${REMOTE_DEPLOY_DIR}/scripts' '${REMOTE_DEPLOY_DIR}'
 
-          ssh -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${{ env.STAGING_DIR }}/docker-compose.yml' && \
-             sudo install -D -o root -g root -m 0644 '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${{ env.STAGING_DIR }}/docker-compose.staging.yml' && \
-             sudo install -D -o root -g root -m 0755 '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' '${{ env.STAGING_DIR }}/scripts/deploy-staging.sh' && \
-             rm -f '${REMOTE_DEPLOY_DIR}/docker-compose.yml' '${REMOTE_DEPLOY_DIR}/docker-compose.staging.yml' '${REMOTE_DEPLOY_DIR}/scripts/deploy-staging.sh' && \
-             rmdir '${REMOTE_DEPLOY_DIR}/scripts' '${REMOTE_DEPLOY_DIR}'"
-
-          ssh -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "cd ${{ env.STAGING_DIR }} && \
-             ./scripts/deploy-staging.sh $IMAGE_TAG"
+          cd ${{ env.STAGING_DIR }}
+          ./scripts/deploy-staging.sh $IMAGE_TAG
 
       - name: Verify staging health
         run: |
-          ssh -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            -o GlobalKnownHostsFile=/dev/null \
-            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "backend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-backend-1) && \
-             frontend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-frontend-1) && \
-             test \"\$backend_image\" = \"kfl-aviation-dms-backend:${IMAGE_TAG}\" && \
-             test \"\$frontend_image\" = \"kfl-aviation-dms-frontend:${IMAGE_TAG}\" && \
-             sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+          backend_image=$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-backend-1)
+          frontend_image=$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-frontend-1)
+          test "$backend_image" = "kfl-aviation-dms-backend:${IMAGE_TAG}"
+          test "$frontend_image" = "kfl-aviation-dms-frontend:${IMAGE_TAG}"
+          sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'
 
           curl --fail --silent --show-error --output /dev/null \
             --write-out 'Staging HTTPS root HTTP %{http_code}\n' \
