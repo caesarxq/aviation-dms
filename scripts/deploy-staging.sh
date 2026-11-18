@@ -27,6 +27,10 @@ echo "============================================================"
 # --- Export environment variables for compose ---
 export DMS_RELEASE_TAG="${IMAGE_TAG}"
 export DMS_HOSTNAME="stage.kfl.ke"
+export DMS_BACKEND_BIND_IP="10.20.4.234"
+export DMS_BACKEND_HOST_PORT="8001"
+export DMS_FRONTEND_BIND_IP="10.20.4.234"
+export DMS_FRONTEND_HOST_PORT="8081"
 export DMS_CLAMD_HOST="clamd"
 export DMS_CLAMD_PORT="3310"
 export DMS_CLAMD_TIMEOUT_SECONDS="60"
@@ -40,6 +44,42 @@ export SESSION_COOKIE_SECURE="false"
 export NOTIFICATION_ENABLED="false"
 # Compose interpolates this for the inactive local-HTTPS profile too.
 export ACME_EMAIL="${ACME_EMAIL:-admin@localhost.local}"
+
+# --- Validate the effective host bindings before pulling images ---
+cd "${STAGING_DIR}"
+sudo env \
+  DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
+  DMS_HOSTNAME="${DMS_HOSTNAME}" \
+  DMS_BACKEND_BIND_IP="${DMS_BACKEND_BIND_IP}" \
+  DMS_BACKEND_HOST_PORT="${DMS_BACKEND_HOST_PORT}" \
+  DMS_FRONTEND_BIND_IP="${DMS_FRONTEND_BIND_IP}" \
+  DMS_FRONTEND_HOST_PORT="${DMS_FRONTEND_HOST_PORT}" \
+  DMS_CLAMD_HOST="${DMS_CLAMD_HOST}" \
+  DMS_CLAMD_PORT="${DMS_CLAMD_PORT}" \
+  DMS_CLAMD_TIMEOUT_SECONDS="${DMS_CLAMD_TIMEOUT_SECONDS}" \
+  DMS_CLAMD_MAX_TIMEOUT_SECONDS="${DMS_CLAMD_MAX_TIMEOUT_SECONDS}" \
+  DMS_UPLOAD_STORAGE_QUOTA_BYTES="${DMS_UPLOAD_STORAGE_QUOTA_BYTES}" \
+  DMS_AUDIT_EVIDENCE_MAX_BYTES="${DMS_AUDIT_EVIDENCE_MAX_BYTES}" \
+  DMS_P3_IMPORT_BODY_MAX_BYTES="${DMS_P3_IMPORT_BODY_MAX_BYTES}" \
+  FLIGHT_RELEASE_ENABLED="${FLIGHT_RELEASE_ENABLED}" \
+  DEV_MODE="${DEV_MODE}" \
+  SESSION_COOKIE_SECURE="${SESSION_COOKIE_SECURE}" \
+  NOTIFICATION_ENABLED="${NOTIFICATION_ENABLED}" \
+  ACME_EMAIL="${ACME_EMAIL}" \
+  docker compose -f docker-compose.yml -f docker-compose.staging.yml \
+    --env-file .env.staging config --format json |
+  python3 -c 'import json, sys
+config = json.load(sys.stdin)
+expected = {"backend": [("10.20.4.234", "8001", 8000, "tcp")], "frontend": [("10.20.4.234", "8081", 80, "tcp")], "upload-validator": [], "clamd": []}
+actual = {name: [(p.get("host_ip"), str(p.get("published")), int(p["target"]), p.get("protocol", "tcp")) for p in config["services"][name].get("ports", [])] for name in expected}
+if actual != expected:
+    print("ERROR: staging host port bindings do not match the private-interface allowlist")
+    sys.exit(1)
+backend_env = config["services"]["backend"].get("environment", {})
+if str(backend_env.get("INVITE_EMAIL_ENABLED")).lower() != "false" or str(backend_env.get("NOTIFICATION_ENABLED")).lower() != "false":
+    print("ERROR: staging email delivery flags must remain disabled")
+    sys.exit(1)
+print("Staging host port bindings and disabled email flags verified")'
 
 # --- Pull images from registry ---
 echo "--- Pulling images from registry ---"
@@ -58,6 +98,10 @@ cd "${STAGING_DIR}"
 sudo env \
   DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
   DMS_HOSTNAME="${DMS_HOSTNAME}" \
+  DMS_BACKEND_BIND_IP="${DMS_BACKEND_BIND_IP}" \
+  DMS_BACKEND_HOST_PORT="${DMS_BACKEND_HOST_PORT}" \
+  DMS_FRONTEND_BIND_IP="${DMS_FRONTEND_BIND_IP}" \
+  DMS_FRONTEND_HOST_PORT="${DMS_FRONTEND_HOST_PORT}" \
   DMS_CLAMD_HOST="${DMS_CLAMD_HOST}" \
   DMS_CLAMD_PORT="${DMS_CLAMD_PORT}" \
   DMS_CLAMD_TIMEOUT_SECONDS="${DMS_CLAMD_TIMEOUT_SECONDS}" \

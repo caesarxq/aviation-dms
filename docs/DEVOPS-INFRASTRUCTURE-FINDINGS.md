@@ -56,7 +56,7 @@ GitHub branch protection rules require GitHub Pro or a public repository. The `c
 | Code review | All changes go through PR review manually before merge |
 | Status checks | CI workflow runs on push; failures visible in PR checks |
 | No direct pushes | Team agreement: no direct pushes to `main` |
-| Deploy approval | Production promotion requires `approve_production=true` in workflow_dispatch |
+| Deploy approval | Production promotion is disabled in the workflow pending backup, host-key, and deployment-path gates |
 
 ### Recommendation
 Upgrade to GitHub Pro or make the repository public to enable native branch protection. Until then, enforce through team convention and CI visibility.
