@@ -80,6 +80,7 @@ app.include_router(p3_router, prefix="/api/p3")
 
 @app.get("/health")
 async def health():
+    from .version_info import get_version_info
     db = await get_db()
     try:
         await db.execute("SELECT 1")
@@ -87,4 +88,4 @@ async def health():
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
     finally:
         await db.close()
-    return {"status": "ok"}
+    return {"status": "ok", "version": get_version_info()}

@@ -314,6 +314,7 @@ class DocumentContentResponse(BaseModel):
 class AuthInviteRequest(BaseModel):
     username: str
     email: Optional[str] = None
+    delivery_email: Optional[str] = None
     delivery_method: Literal["email", "manual"] = "email"
     resend: bool = False
 

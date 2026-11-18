@@ -15,6 +15,8 @@ class TestAdminObservability:
         assert payload["database"]["status"] == "ok"
         assert payload["users"]["total"] >= 1
         assert payload["workflows"]["document_versions"] is not None
+        assert payload["version"]["api_version"] == "1.0.0"
+        assert payload["version"]["release_tag"] != ""
         assert len(payload["role_matrix"]) == len(ROLE_PERMISSIONS)
         assert payload["role_matrix"][0]["role"] in ROLE_PERMISSIONS
 

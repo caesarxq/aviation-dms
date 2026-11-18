@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import {
   Activity,
   Database,
+  GitCommitHorizontal,
   Mail,
   Play,
   RefreshCw,
@@ -29,6 +30,7 @@ export default function AdminObservability() {
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState("");
   const [inviteNotice, setInviteNotice] = useState("");
+  const [deliveryEmailDrafts, setDeliveryEmailDrafts] = useState<Record<string, string>>({});
   const [issuedInvites, setIssuedInvites] = useState<{
     user_id: string;
     full_name: string;
@@ -114,26 +116,34 @@ export default function AdminObservability() {
     }
   }
 
-  async function handleInvite(user: any, deliveryMethod: "email" | "manual") {
+  async function handleInvite(user: any, deliveryMethod: "email" | "manual", deliveryEmail?: string) {
     setInviteError("");
     setInviteNotice("");
-    const email = (user.email || "").trim();
+    // Admin may explicitly override the delivery address. Only treated as an
+    // override when a non-blank, distinct address is provided; otherwise we
+    // deliver to the account's registered email.
+    const overrideEmail = (deliveryEmail || "").trim();
+    const email = overrideEmail || (user.email || "").trim();
     if (!email) {
-      setInviteError("This account has no registered email address. Update and verify it against the approved roster first.");
+      setInviteError("This account has no registered email address. Update and verify it against the approved roster first, or enter a delivery address.");
       return;
     }
     if (!EMAIL_REGEX.test(email)) {
-      setInviteError("The registered email address is invalid. Correct the account record before inviting.");
+      setInviteError("The delivery email address is invalid. Correct the address before inviting.");
       return;
     }
     setInvitingUserId(user.user_id);
     try {
       const resend = issuedInvites.some((invite) => invite.user_id === user.user_id);
-      const inviteResponse = await api.post("/p0/auth/invites", {
+      const payload: Record<string, unknown> = {
         username: user.username,
         delivery_method: deliveryMethod,
         resend,
-      });
+      };
+      if (overrideEmail) {
+        payload.delivery_email = overrideEmail;
+      }
+      const inviteResponse = await api.post("/p0/auth/invites", payload);
       const delivery = {
         user_id: user.user_id,
         full_name: user.full_name || user.username,
@@ -223,6 +233,14 @@ export default function AdminObservability() {
           </div>
           <div className="mt-3"><StatusPill ok={dbOk}>{dbOk ? "Healthy" : "Degraded"}</StatusPill></div>
           <p className="mt-2 text-xs text-kfl-muted">Integrity: {data?.database?.integrity}</p>
+        </div>
+        <div className="app-surface p-5">
+          <div className="flex items-center justify-between">
+            <div className="app-label">Build version</div>
+            <GitCommitHorizontal className="text-kfl-blue" size={20} />
+          </div>
+          <div className="mt-3 text-sm font-bold text-kfl-text">{data?.version?.release_tag || "dev"}</div>
+          <p className="mt-2 text-xs text-kfl-muted break-all">API {data?.version?.api_version || "—"}{data?.version?.git_sha ? ` · ${data?.version?.git_sha.slice(0, 12)}` : ""}</p>
         </div>
         <div className="app-surface p-5">
           <div className="flex items-center justify-between">
@@ -552,28 +570,39 @@ export default function AdminObservability() {
                       {!user.has_password && user.is_active ? (
                         <div className="space-y-2">
                           <div className="font-semibold">{user.email || "No registered email"}</div>
-                          <p className="text-[10px] text-kfl-muted">Confirm this address against the approved roster before sending. The recipient cannot be changed here.</p>
+                          <p className="text-[10px] text-kfl-muted">Optional: enter a delivery address to override the registered email. Blank delivers to the registered address.</p>
+                          <input
+                            type="email"
+                            value={(deliveryEmailDrafts[user.user_id] || "")}
+                            onChange={(event) => setDeliveryEmailDrafts((prev) => ({ ...prev, [user.user_id]: event.target.value }))}
+                            placeholder={user.email || "Delivery email (optional)"}
+                            disabled={invitingUserId !== null}
+                            className="w-full rounded border border-kfl-border bg-kfl-bg px-2 py-1.5 text-xs text-kfl-text"
+                            aria-label={`Delivery email override for ${user.full_name}`}
+                          />
                           <div className="text-[10px] text-kfl-muted">Roles: {assignedRoles.map((r: string) => r.replace(/_/g, " ")).join(", ")}</div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={invitingUserId !== null || !EMAIL_REGEX.test(user.email || "")}
-                            aria-label={`${existingInvite?.delivery_method === "email" ? "Reissue" : "Send"} invite email for ${user.full_name}`}
-                            onClick={() => void handleInvite(user, "email")}
-                          >
-                            {invitingUserId === user.user_id ? "Sending…" : existingInvite?.delivery_method === "email" ? "Reissue invite email" : "Send invite email"}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={invitingUserId !== null || !EMAIL_REGEX.test(user.email || "")}
-                            aria-label={`${existingInvite?.delivery_method === "manual" ? "Reissue" : "Generate"} manual invite for ${user.full_name}`}
-                            onClick={() => void handleInvite(user, "manual")}
-                          >
-                            {invitingUserId === user.user_id ? "Preparing…" : existingInvite?.delivery_method === "manual" ? "Reissue manual invite" : "Generate manual invite"}
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={invitingUserId !== null}
+                              aria-label={`${existingInvite?.delivery_method === "email" ? "Reissue" : "Send"} invite email for ${user.full_name}`}
+                              onClick={() => void handleInvite(user, "email", deliveryEmailDrafts[user.user_id] || undefined)}
+                            >
+                              {invitingUserId === user.user_id ? "Sending…" : existingInvite?.delivery_method === "email" ? "Reissue invite email" : "Send invite email"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={invitingUserId !== null}
+                              aria-label={`${existingInvite?.delivery_method === "manual" ? "Reissue" : "Generate"} manual invite for ${user.full_name}`}
+                              onClick={() => void handleInvite(user, "manual", deliveryEmailDrafts[user.user_id] || undefined)}
+                            >
+                              {invitingUserId === user.user_id ? "Preparing…" : existingInvite?.delivery_method === "manual" ? "Reissue manual invite" : "Generate manual invite"}
+                            </Button>
+                          </div>
                         </div>
                       ) : (
                         <span className="font-mono">{user.has_password ? "Password set" : "Inactive"}</span>
