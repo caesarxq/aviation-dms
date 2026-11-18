@@ -18,6 +18,11 @@ on:
         description: 'Docker image tag to deploy (leave empty to build new)'
         required: false
         default: ''
+      approve_staging:
+        description: 'Authorize deployment to live staging'
+        required: false
+        default: false
+        type: boolean
       approve_production:
         description: 'Approve production deployment'
         required: false
@@ -183,6 +188,7 @@ jobs:
 
   deploy-staging:
     name: Deploy to staging
+    if: github.event_name == 'workflow_dispatch' && inputs.approve_staging == true
     needs: [test-backend, test-frontend, build]
     runs-on: ubuntu-latest
     environment: staging
@@ -214,6 +220,14 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            docker-compose.yml \
+            docker-compose.staging.yml \
+            ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${{ env.STAGING_DIR }}/
+
+          scp -i ~/.ssh/id_staging \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no \
+            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             scripts/deploy-staging.sh \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }}:${{ env.STAGING_DIR }}/scripts/deploy-staging.sh
 
@@ -236,7 +250,8 @@ jobs:
 
   promote-to-production:
     name: Promote to production (requires approval)
-    needs: deploy-staging
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && inputs.approve_staging == true && inputs.approve_production == true
+    needs: [deploy-staging, build]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -249,7 +264,9 @@ jobs:
 
       - name: Check production approval
         run: |
-          if [ "${{ github.event.inputs.approve_production }}" != "true" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+          if [ "${{ inputs.environment }}" != "production" ] || \
+             [ "${{ inputs.approve_staging }}" != "true" ] || \
+             [ "${{ inputs.approve_production }}" != "true" ]; then
             echo "ERROR: Production deployment requires explicit approval"
             echo "Set approve_production=true in workflow_dispatch or use the production environment protection rule"
             exit 1

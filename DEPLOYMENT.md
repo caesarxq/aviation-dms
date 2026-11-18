@@ -4,12 +4,7 @@
 
 Staging (cloud instance `10.20.4.234`) → Production (new OCI instance).
 
-The pipeline:
-1. Builds Docker images on push to `main`
-2. Deploys to staging automatically
-3. Runs E2E + security tests on staging
-4. **Pauses for manual approval** before production
-5. Deploys the same validated image tag to production
+The pipeline builds and tests images on pushes to `main`; it does not deploy to a live environment on a code push. Staging deployment requires an explicit workflow dispatch approval. Production promotion requires separate staging and production approvals.
 
 ## Repositories & Secrets
 
@@ -24,23 +19,22 @@ The pipeline:
 
 ### Environments
 
-- **staging**: Automatic deployment on push to `main`
+- **staging**: Manual workflow dispatch with `approve_staging=true`; bastion Caddy terminates public TLS
 - **production**: Requires manual approval before deployment
 
 ## Workflow Triggers
 
 ### Push to `main`
 ```
-push → build → deploy staging → test staging → PAUSE (approve production) → deploy production
+push → build/publish images → backend/frontend checks; live environments remain unchanged
 ```
 
-### Manual dispatch (`workflow_dispatch`)
+### Authorized staging dispatch (`workflow_dispatch`)
 ```bash
-gh workflow run deploy.yml \
-  -f environment=production \
-  -f image_tag=canonical-v7-feature-20261112 \
-  -f approve_production=true
+gh workflow run deploy.yml -f environment=staging -f approve_staging=true
 ```
+
+Production promotion requires a separate dispatch with `environment=production`, `approve_staging=true`, and `approve_production=true`, after staging validation and the production backup preflight.
 
 ## Deployment Scripts
 

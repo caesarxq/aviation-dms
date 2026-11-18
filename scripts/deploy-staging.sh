@@ -38,14 +38,13 @@ export FLIGHT_RELEASE_ENABLED="false"
 export DEV_MODE="true"
 export SESSION_COOKIE_SECURE="false"
 export NOTIFICATION_ENABLED="false"
-export ACME_EMAIL="admin@localhost.local"
+# Compose interpolates this for the inactive local-HTTPS profile too.
+export ACME_EMAIL="${ACME_EMAIL:-admin@localhost.local}"
 
 # --- Pull images from registry ---
 echo "--- Pulling images from registry ---"
-sudo docker pull "${REGISTRY}/${REPO_NAME}/backend:${IMAGE_TAG}" || \
-  echo "WARNING: Could not pull backend image from registry"
-sudo docker pull "${REGISTRY}/${REPO_NAME}/frontend:${IMAGE_TAG}" || \
-  echo "WARNING: Could not pull frontend image from registry"
+sudo docker pull "${REGISTRY}/${REPO_NAME}/backend:${IMAGE_TAG}"
+sudo docker pull "${REGISTRY}/${REPO_NAME}/frontend:${IMAGE_TAG}"
 
 # --- Tag images for local compose ---
 sudo docker tag "${REGISTRY}/${REPO_NAME}/backend:${IMAGE_TAG}" \
@@ -60,14 +59,14 @@ sudo docker compose \
   -f docker-compose.yml \
   -f docker-compose.staging.yml \
   --env-file .env.staging \
-  up -d --build backend upload-validator clamd frontend https_proxy
+  up -d --no-build backend upload-validator clamd frontend
 
 # --- Wait for health ---
 echo "--- Waiting for services to become healthy ---"
-for service in backend upload-validator clamd frontend https_proxy; do
+for service in backend upload-validator clamd frontend; do
   echo "Waiting for ${service}..."
   for i in $(seq 1 30); do
-    status=$(sudo docker inspect --format='{{.Status}}' \
+    status=$(sudo docker inspect --format='{{.State.Health.Status}}' \
       "kfl-aviation-dms-staging-${service}-1" 2>/dev/null || echo "not_found")
     if [ "${status}" = "healthy" ]; then
       echo "${service} is healthy"
