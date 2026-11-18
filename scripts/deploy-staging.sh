@@ -55,7 +55,22 @@ sudo docker tag "${REGISTRY}/${REPO_NAME}/frontend:${IMAGE_TAG}" \
 # --- Deploy using staging compose override ---
 echo "--- Deploying to staging ---"
 cd "${STAGING_DIR}"
-sudo docker compose \
+sudo env \
+  DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
+  DMS_HOSTNAME="${DMS_HOSTNAME}" \
+  DMS_CLAMD_HOST="${DMS_CLAMD_HOST}" \
+  DMS_CLAMD_PORT="${DMS_CLAMD_PORT}" \
+  DMS_CLAMD_TIMEOUT_SECONDS="${DMS_CLAMD_TIMEOUT_SECONDS}" \
+  DMS_CLAMD_MAX_TIMEOUT_SECONDS="${DMS_CLAMD_MAX_TIMEOUT_SECONDS}" \
+  DMS_UPLOAD_STORAGE_QUOTA_BYTES="${DMS_UPLOAD_STORAGE_QUOTA_BYTES}" \
+  DMS_AUDIT_EVIDENCE_MAX_BYTES="${DMS_AUDIT_EVIDENCE_MAX_BYTES}" \
+  DMS_P3_IMPORT_BODY_MAX_BYTES="${DMS_P3_IMPORT_BODY_MAX_BYTES}" \
+  FLIGHT_RELEASE_ENABLED="${FLIGHT_RELEASE_ENABLED}" \
+  DEV_MODE="${DEV_MODE}" \
+  SESSION_COOKIE_SECURE="${SESSION_COOKIE_SECURE}" \
+  NOTIFICATION_ENABLED="${NOTIFICATION_ENABLED}" \
+  ACME_EMAIL="${ACME_EMAIL}" \
+  docker compose \
   -f docker-compose.yml \
   -f docker-compose.staging.yml \
   --env-file .env.staging \

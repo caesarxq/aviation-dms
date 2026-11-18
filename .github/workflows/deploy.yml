@@ -259,7 +259,15 @@ jobs:
             -o StrictHostKeyChecking=no \
             -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.STAGING_USER }}@${{ env.STAGING_HOST }} \
-            "sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+            "backend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-backend-1) && \
+             frontend_image=\$(sudo docker inspect --format='{{.Config.Image}}' kfl-aviation-dms-staging-frontend-1) && \
+             test \"\$backend_image\" = \"kfl-aviation-dms-backend:${IMAGE_TAG}\" && \
+             test \"\$frontend_image\" = \"kfl-aviation-dms-frontend:${IMAGE_TAG}\" && \
+             sudo docker ps --filter name=kfl-aviation-dms-staging --format 'table {{.Names}}\t{{.Status}}'"
+
+          curl --fail --silent --show-error --output /dev/null \
+            --write-out 'Staging HTTPS root HTTP %{http_code}\n' \
+            https://stage.kfl.ke/
 
   promote-to-production:
     name: Promote to production (requires approval)
