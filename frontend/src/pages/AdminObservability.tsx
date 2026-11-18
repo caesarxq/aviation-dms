@@ -239,7 +239,7 @@ export default function AdminObservability() {
             <div className="app-label">Build version</div>
             <GitCommitHorizontal className="text-kfl-blue" size={20} />
           </div>
-          <div className="mt-3 text-sm font-bold text-kfl-text">{data?.version?.release_tag || "dev"}</div>
+          <div className="mt-3 text-sm font-bold text-kfl-text break-all">{data?.version?.release_tag || "dev"}</div>
           <p className="mt-2 text-xs text-kfl-muted break-all">API {data?.version?.api_version || "—"}{data?.version?.git_sha ? ` · ${data?.version?.git_sha.slice(0, 12)}` : ""}</p>
         </div>
         <div className="app-surface p-5">
