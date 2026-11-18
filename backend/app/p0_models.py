@@ -1,6 +1,6 @@
 """P0 Pydantic models."""
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Literal
 from enum import Enum
 from datetime import datetime
 
@@ -314,13 +314,16 @@ class DocumentContentResponse(BaseModel):
 class AuthInviteRequest(BaseModel):
     username: str
     email: Optional[str] = None
-    roles: Optional[List[str]] = None
+    delivery_method: Literal["email", "manual"] = "email"
+    resend: bool = False
 
 
 class AuthInviteResponse(BaseModel):
-    invite_code: str
-    setup_url: str
+    delivery_id: str
+    recipient_email: str
+    delivery_status: str
     expires_at: str
+    setup_url: Optional[str] = None
 
 
 class AuthForgotPasswordRequest(BaseModel):

@@ -108,4 +108,64 @@ describe("AdminObservability role assignments", () => {
       { roles: ["head_safety", "head_security"] },
     ));
   });
+
+  it("sends the invitation to the registered address without displaying a bearer token", async () => {
+    const invitee = { ...userProfile, has_password: false };
+    vi.spyOn(api, "get").mockResolvedValue({
+      data: { ...observability, user_profiles: [invitee] },
+    } as any);
+    const post = vi.spyOn(api, "post").mockResolvedValue({
+      data: {
+        delivery_id: "delivery-1",
+        recipient_email: invitee.email,
+        delivery_status: "sent",
+        setup_url: undefined,
+        expires_at: "2026-11-19T12:00:00Z",
+      },
+    } as any);
+    renderAdmin();
+
+    expect(await screen.findAllByText(new RegExp(invitee.email))).toHaveLength(2);
+    expect(screen.queryByLabelText("Email for invite")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Send invite email for Canonical User" }));
+
+    await waitFor(() => expect(post).toHaveBeenNthCalledWith(1, "/p0/auth/invites", {
+      username: "librarian",
+      delivery_method: "email",
+      resend: false,
+    }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Email accepted by SMTP for librarian@example.test.");
+    fireEvent.click(await screen.findByRole("button", { name: "Reissue invite email for Canonical User" }));
+    await waitFor(() => expect(post).toHaveBeenNthCalledWith(2, "/p0/auth/invites", {
+      username: "librarian",
+      delivery_method: "email",
+      resend: true,
+    }));
+    expect(screen.queryByText(/invite code|setup url/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps manual secure-link delivery available as an explicit fallback", async () => {
+    const invitee = { ...userProfile, has_password: false };
+    vi.spyOn(api, "get").mockResolvedValue({ data: { ...observability, user_profiles: [invitee] } } as any);
+    const setupUrl = "https://dms.example.test/setup?username=librarian#setup_token=opaque-test-token";
+    const post = vi.spyOn(api, "post").mockResolvedValue({
+      data: {
+        delivery_id: "manual-1",
+        recipient_email: invitee.email,
+        delivery_status: "manual",
+        setup_url: setupUrl,
+        expires_at: "2026-11-19T12:00:00Z",
+      },
+    } as any);
+    renderAdmin();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Generate manual invite for Canonical User" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/p0/auth/invites", {
+      username: "librarian",
+      delivery_method: "manual",
+      resend: false,
+    }));
+    expect(await screen.findByLabelText("Manual setup link for Canonical User")).toHaveValue(setupUrl);
+    expect(await screen.findByRole("status")).toHaveTextContent(/share it only through the approved secure channel/i);
+  });
 });

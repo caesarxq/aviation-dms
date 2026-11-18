@@ -173,6 +173,7 @@ def test_admin_issues_single_use_password_setup_token_for_uninitialized_user(cli
     try:
         issued = client.post("/api/p0/auth/users/u-quality/setup-token", headers=admin_headers)
         assert issued.status_code == 200
+        assert issued.headers["cache-control"] == "no-store"
         token = issued.json()["setup_token"]
         assert issued.json()["use_once"] is True
 

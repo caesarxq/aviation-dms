@@ -56,19 +56,21 @@ Content-Type: application/json
 }
 ```
 
-The invite endpoint selects an existing active account by username; it does not update the account's email or roles from the request. Reconcile and verify those fields through the authorized account/role-management workflow first. The response includes the one-time invite code and setup URL; deliver each only to that person through the approved channel.
+The invite endpoint selects an existing active canonical account by username and uses the email already stored on that account. It does not update email or roles from the request; a mismatched request email is rejected. Reconcile the account and verify the recipient against the approved roster before sending. `INVITE_EMAIL_ENABLED` defaults to `false`; general notifications being enabled does not enable invites. Do not enable this flag or send real-user invitations until the SMTP sandbox and separate onboarding go/no-go are approved. The email method is the default and fails closed when the feature flag or SMTP is unavailable. An authorized administrator may explicitly choose the manual fallback; it returns the one-time setup link to the administrator for transfer only through the approved secure channel. The raw manual link is shown once and is not recoverable from the delivery record; reissue a fresh link if lost.
+
+For email mode, the response contains a delivery reference, registered recipient, status, and expiry—not the bearer token or setup link. `delivery_status: sent` means the configured SMTP server accepted the message, not that it reached the inbox. A repeated request does not send another message while a link is active; the admin UI requires an explicit reissue, which creates a fresh one-time link and invalidates the prior one only after SMTP accepts the replacement. A failed replacement revokes only its new token; a previously sent link remains valid. The delivery record stores status only; the raw email token is sent by SMTP and only its hash is stored for password setup. In manual mode, the response includes the one-time setup link for approved secure transfer with `Cache-Control: no-store`; it is not stored server-side and cannot be retrieved later.
 
 Rate limit: max 5 invite requests per actor per 15 minutes.
 
 ## Phase 3 — Account Setup (each user)
 
-Each user navigates to their setup URL:
+Each user opens the secure one-time setup link in the invitation email. The token is in the URL fragment, so it is not sent in the initial HTTP request; the setup page removes it from the address bar after reading it. Example link (the browser does not send the fragment in the HTTP request):
 
 ```
-GET /setup/invite/<invite-code>
+https://<public-host>/setup?username=<assigned-username>#setup_token=<one-time-token>
 ```
 
-They enter their username and a new password (min 12 chars, max 72 UTF-8 bytes). The setup token is single-use and expires after 24 hours.
+They choose a new password (min 12 chars, max 72 UTF-8 bytes). The setup token is single-use and expires after 24 hours.
 
 ## Phase 4 — Guided Welcome (first login)
 
@@ -101,7 +103,7 @@ After completing welcome, `onboarding_completed` is set to `true` and the user i
 
 ## Rate Limits & Security
 
-- Invite codes: single-use, 24-hour expiry
+- Invite setup links: high-entropy, single-use, 24-hour expiry; only token hashes are stored
 - Reset tokens: short-lived, single-use
 - Forgot password: generic response (no account enumeration)
 - Login failures: 5 attempts per 15-minute window → 15-minute lockout
@@ -113,6 +115,7 @@ After completing welcome, `onboarding_completed` is set to `true` and the user i
 |---|---|---|
 | "Active user not found" on invite | Username doesn't exist or is inactive | Verify username; check `is_active` and `merged_into_user_id IS NULL` |
 | "Invite requests temporarily unavailable" | Rate limit exceeded | Wait 15 minutes or use a different admin actor |
-| Setup token expired | Token older than 24 hours | Admin issues a new invite code |
+| Setup token expired | Token older than 24 hours | After confirming the registered address and roster approval, admin reissues the invitation email |
+| Invite email disabled or not configured | `INVITE_EMAIL_ENABLED` is false or SMTP configuration is incomplete | Keep the flag off until the approved sandbox/go-no-go is ready; configure SMTP through the protected deployment settings |
 | Blank page after login | Session cookie missing or invalid | Clear cookies, re-login via `/login` |
 | Cannot switch role | Role not assigned to account | Admin assigns role via `/api/p0/auth/users/{user_id}/roles` |

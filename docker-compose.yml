@@ -39,6 +39,7 @@ services:
       PUBLIC_APP_URL: "https://${DMS_HOSTNAME:?Set DMS_HOSTNAME to the public HTTPS hostname}"
       KFL_BOOTSTRAP_TOKEN_FILE: /run/secrets/kfl_bootstrap_token
       NOTIFICATION_ENABLED: "true"
+      INVITE_EMAIL_ENABLED: "${INVITE_EMAIL_ENABLED:-false}"
       SMTP_HOST: "${SMTP_HOST:?Set SMTP_HOST for password reset and notifications}"
       SMTP_PORT: "${SMTP_PORT:-587}"
       SMTP_USER: "${SMTP_USER:?Set SMTP_USER for password reset and notifications}"

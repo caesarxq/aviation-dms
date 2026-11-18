@@ -66,7 +66,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = _load_smtp_password(os.getenv("SMTP_PASS_FILE", ""), os.getenv("SMTP_PASS", ""))
 SMTP_FROM = os.getenv("SMTP_FROM", "dms@kfl-aviation.local")
+SMTP_FROM_CONFIGURED = bool(os.getenv("SMTP_FROM", "").strip())
 NOTIFICATION_ENABLED = os.getenv("NOTIFICATION_ENABLED", "false").lower() == "true"
+INVITE_EMAIL_ENABLED = os.getenv("INVITE_EMAIL_ENABLED", "false").lower() == "true"
 
 # Escalation thresholds (hours before deadline)
 ESCALATION_THRESHOLDS = {
@@ -80,30 +82,53 @@ ESCALATION_THRESHOLDS = {
 _notification_log: List[Dict] = []
 
 
-def send_email(to: str, subject: str, body: str, entity_type: str = None, entity_id: str = None, priority: str = "medium", html: str = None) -> bool:
+def _send_smtp_message(to: str, subject: str, body: str, html: Optional[str] = None) -> None:
+    msg = MIMEMultipart("alternative")
+    msg["From"] = SMTP_FROM
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    if html:
+        msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        server.starttls(context=ssl.create_default_context())
+        if SMTP_USER and SMTP_PASS:
+            server.login(SMTP_USER, SMTP_PASS)
+        refused_recipients = server.send_message(msg)
+        if refused_recipients:
+            raise RuntimeError("SMTP refused one or more recipients")
+
+
+def invite_email_configuration_error() -> Optional[str]:
+    """Return a safe readiness reason without exposing SMTP configuration values."""
+    if not INVITE_EMAIL_ENABLED:
+        return "Invite email is disabled"
+    if not all((SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM_CONFIGURED)):
+        return "Invite email SMTP is not configured"
+    return None
+
+
+def send_invitation_email(to: str, subject: str, body: str, html: str) -> bool:
+    """Send an invite without persisting the bearer link in notifications."""
+    reason = invite_email_configuration_error()
+    if reason:
+        raise RuntimeError(reason)
+    _send_smtp_message(to, subject, body, html)
+    return True
+
+
+def send_email(to: str, subject: str, body: str, entity_type: Optional[str] = None, entity_id: Optional[str] = None, priority: str = "medium", html: Optional[str] = None) -> bool:
     """Send an email notification. Returns True on success. Persists to DB."""
     if not NOTIFICATION_ENABLED or not SMTP_HOST:
         persist_notification(to, subject, body, entity_type, entity_id, priority, "logged")
         return True
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["From"] = SMTP_FROM
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
-        if html:
-            msg.attach(MIMEText(html, "html"))
-
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.starttls(context=ssl.create_default_context())
-            if SMTP_USER and SMTP_PASS:
-                server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(msg)
-
+        _send_smtp_message(to, subject, body, html)
         persist_notification(to, subject, body, entity_type, entity_id, priority, "sent")
         return True
-    except Exception as e:
+    except Exception:
         persist_notification(to, subject, body, entity_type, entity_id, priority, "failed")
         return False
 
