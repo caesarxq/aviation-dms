@@ -124,7 +124,6 @@ export function DocumentViewer() {
   const selectionOpenerRef = useRef<HTMLElement | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
-  const [showSourcePdf, setShowSourcePdf] = useState(false);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
   const [annotationType, setAnnotationType] = useState<"comment" | "highlight">("comment");
@@ -148,6 +147,15 @@ export function DocumentViewer() {
     }
   }, [docId]);
 
+  // Auto-load source PDF when attached files include a PDF
+  useEffect(() => {
+    if (!Array.isArray(attachedFiles)) return;
+    const pdfFile = attachedFiles.find((f: any) => f.content_type === "application/pdf");
+    if (pdfFile && !pdfObjectUrl) {
+      loadSourcePdf(pdfFile.file_id);
+    }
+  }, [attachedFiles, pdfObjectUrl, loadSourcePdf]);
+
   useEffect(() => {
     return () => {
       if (pdfObjectUrl) window.URL.revokeObjectURL(pdfObjectUrl);
@@ -156,14 +164,15 @@ export function DocumentViewer() {
 
   useEffect(() => {
     if (!iframeRef.current) return;
-    if (showSourcePdf && pdfObjectUrl) {
+    if (pdfObjectUrl) {
+      // Render source PDF directly — preserves all original formatting
       iframeRef.current.srcdoc = "";
       iframeRef.current.src = pdfObjectUrl;
     } else if (content) {
       iframeRef.current.src = "";
       iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
     }
-  }, [content?.content, showSourcePdf, pdfObjectUrl]);
+  }, [content?.content, pdfObjectUrl]);
 
   const closeAnnotationDialog = useCallback(() => {
     setSelection(null);
@@ -311,28 +320,6 @@ export function DocumentViewer() {
           </p>
         </div>
         <div className="flex gap-2">
-          {attachedFiles.length > 0 && attachedFiles.some((f: any) => f.content_type === "application/pdf") && (
-            <div className="flex gap-1 border-r border-kfl-border pr-2">
-              <Button
-                onClick={() => { setShowSourcePdf(false); }}
-                variant={!showSourcePdf ? "default" : "outline"}
-                size="sm"
-              >
-                Content
-              </Button>
-              <Button
-                onClick={() => {
-                  setShowSourcePdf(true);
-                  const pdfFile = attachedFiles.find((f: any) => f.content_type === "application/pdf");
-                  if (pdfFile) loadSourcePdf(pdfFile.file_id);
-                }}
-                variant={showSourcePdf ? "default" : "outline"}
-                size="sm"
-              >
-                Source PDF
-              </Button>
-            </div>
-          )}
           <Button
             onClick={() => setShowOutline((value) => !value)}
             variant={showOutline ? "default" : "outline"}
@@ -425,7 +412,7 @@ export function DocumentViewer() {
             </aside>
           )}
           <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-kfl-border bg-white">
-            {pdfLoadError && showSourcePdf && (
+            {pdfLoadError && pdfObjectUrl === null && (
               <div className="absolute inset-0 flex items-center justify-center bg-white text-sm text-kfl-status-danger">
                 {pdfLoadError}
               </div>
@@ -434,7 +421,7 @@ export function DocumentViewer() {
               ref={iframeRef}
               title={docId || "Document"}
               className="h-full w-full border-0"
-              sandbox={showSourcePdf ? "allow-same-origin allow-scripts" : "allow-same-origin"}
+              sandbox={pdfObjectUrl ? "allow-same-origin allow-scripts" : "allow-same-origin"}
               onLoad={handleFrameLoad}
             />
           </div>
