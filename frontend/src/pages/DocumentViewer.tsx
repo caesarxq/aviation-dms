@@ -116,6 +116,7 @@ export function DocumentViewer() {
       window.URL.revokeObjectURL(url);
     },
   });
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const parentObservedDocumentRef = useRef<Document | null>(null);
   const selectionHandlerRef = useRef<EventListener | null>(null);
@@ -123,6 +124,9 @@ export function DocumentViewer() {
   const selectionOpenerRef = useRef<HTMLElement | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [showSourcePdf, setShowSourcePdf] = useState(false);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
+  const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
   const [annotationType, setAnnotationType] = useState<"comment" | "highlight">("comment");
   const [annotationContent, setAnnotationContent] = useState("");
   const [annotationTarget, setAnnotationTarget] = useState("");
@@ -130,10 +134,36 @@ export function DocumentViewer() {
   const [activeOutlineAnchor, setActiveOutlineAnchor] = useState("");
   const outlineItems = buildOutlineFromHtml(content?.content || "");
 
+  const loadSourcePdf = useCallback(async (fileId: string) => {
+    setPdfLoadError(null);
+    try {
+      const response = await api.get(`/p0/documents/${docId}/file/${fileId}`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      setPdfObjectUrl(url);
+    } catch {
+      setPdfLoadError("Failed to load source PDF");
+    }
+  }, [docId]);
+
   useEffect(() => {
-    if (!iframeRef.current || !content) return;
-    iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
-  }, [content?.content]);
+    return () => {
+      if (pdfObjectUrl) window.URL.revokeObjectURL(pdfObjectUrl);
+    };
+  }, [pdfObjectUrl]);
+
+  useEffect(() => {
+    if (!iframeRef.current) return;
+    if (showSourcePdf && pdfObjectUrl) {
+      iframeRef.current.srcdoc = "";
+      iframeRef.current.src = pdfObjectUrl;
+    } else if (content) {
+      iframeRef.current.src = "";
+      iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
+    }
+  }, [content?.content, showSourcePdf, pdfObjectUrl]);
 
   const closeAnnotationDialog = useCallback(() => {
     setSelection(null);
@@ -281,6 +311,28 @@ export function DocumentViewer() {
           </p>
         </div>
         <div className="flex gap-2">
+          {attachedFiles.length > 0 && attachedFiles.some((f: any) => f.content_type === "application/pdf") && (
+            <div className="flex gap-1 border-r border-kfl-border pr-2">
+              <Button
+                onClick={() => { setShowSourcePdf(false); }}
+                variant={!showSourcePdf ? "default" : "outline"}
+                size="sm"
+              >
+                Content
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowSourcePdf(true);
+                  const pdfFile = attachedFiles.find((f: any) => f.content_type === "application/pdf");
+                  if (pdfFile) loadSourcePdf(pdfFile.file_id);
+                }}
+                variant={showSourcePdf ? "default" : "outline"}
+                size="sm"
+              >
+                Source PDF
+              </Button>
+            </div>
+          )}
           <Button
             onClick={() => setShowOutline((value) => !value)}
             variant={showOutline ? "default" : "outline"}
@@ -373,11 +425,16 @@ export function DocumentViewer() {
             </aside>
           )}
           <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-kfl-border bg-white">
+            {pdfLoadError && showSourcePdf && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white text-sm text-kfl-status-danger">
+                {pdfLoadError}
+              </div>
+            )}
             <iframe
               ref={iframeRef}
               title={docId || "Document"}
               className="h-full w-full border-0"
-              sandbox="allow-same-origin"
+              sandbox={showSourcePdf ? "allow-same-origin allow-scripts" : "allow-same-origin"}
               onLoad={handleFrameLoad}
             />
           </div>
