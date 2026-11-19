@@ -32,7 +32,7 @@ export DMS_HOSTNAME="stage.kfl.ke"
 export DMS_BACKEND_BIND_IP="127.0.0.1"
 export DMS_BACKEND_HOST_PORT="8000"
 export DMS_FRONTEND_BIND_IP="127.0.0.1"
-export DMS_FRONTEND_HOST_PORT="80"
+export DMS_FRONTEND_HOST_PORT="8081"
 export DMS_CLAMD_HOST="clamd"
 export DMS_CLAMD_PORT="3310"
 export DMS_CLAMD_TIMEOUT_SECONDS="60"
@@ -74,7 +74,7 @@ sudo env \
     --env-file .env.staging config --format json |
   python3 -c 'import json, sys
 config = json.load(sys.stdin)
-expected = {"backend": [("127.0.0.1", "8000", 8000, "tcp")], "frontend": [("127.0.0.1", "80", 80, "tcp")], "upload-validator": [], "clamd": []}
+expected = {"backend": [("127.0.0.1", "8000", 8000, "tcp")], "frontend": [("127.0.0.1", "8081", 80, "tcp")], "upload-validator": [], "clamd": []}
 actual = {name: [(p.get("host_ip"), str(p.get("published")), int(p["target"]), p.get("protocol", "tcp")) for p in config["services"][name].get("ports", [])] for name in expected}
 if actual != expected:
     print("ERROR: staging host port bindings do not match the private-interface allowlist")
