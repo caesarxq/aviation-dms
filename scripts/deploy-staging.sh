@@ -42,7 +42,7 @@ export DMS_AUDIT_EVIDENCE_MAX_BYTES="10485760"
 export DMS_P3_IMPORT_BODY_MAX_BYTES="5242880"
 export FLIGHT_RELEASE_ENABLED="false"
 export DEV_MODE="false"
-export SESSION_COOKIE_SECURE="false"
+export SESSION_COOKIE_SECURE="true"
 export NOTIFICATION_ENABLED="true"
 export INVITE_EMAIL_ENABLED="true"
 # Compose interpolates this for the inactive local-HTTPS profile too.

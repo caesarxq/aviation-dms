@@ -14,7 +14,7 @@ import {
   ListTree,
   Download,
 } from "lucide-react";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import {
   DocumentOutline,
   buildOutlineFromHtml,
@@ -146,7 +146,9 @@ export function DocumentViewer() {
   const [annotationTarget, setAnnotationTarget] = useState("");
   const [showOutline, setShowOutline] = useState(false);
   const [activeOutlineAnchor, setActiveOutlineAnchor] = useState("");
-  const outlineItems = buildOutlineFromHtml(content?.content || "");
+  // Memoize: buildOutlineFromHtml DOM-parses the (multi-MB) document HTML, so only
+  // recompute when the content actually changes — not on every viewer re-render.
+  const outlineItems = useMemo(() => buildOutlineFromHtml(content?.content || ""), [content?.content]);
 
   // Render the document's HTML content. Source PDFs are never served inline:
   // KCAA-approved documents restrict raw-file access, and the stored HTML
