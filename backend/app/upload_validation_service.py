@@ -14,7 +14,7 @@ from .upload_validation import (
 
 MAX_CONCURRENT_VALIDATIONS = 2
 _VALIDATION_SLOTS = asyncio.Semaphore(MAX_CONCURRENT_VALIDATIONS)
-_SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx"}
+_SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
