@@ -1786,7 +1786,7 @@ async def transition_version_state(
 
 # --- Document Content ---
 @router.get("/documents/{doc_id}/content", response_model=DocumentContentResponse)
-async def get_document_content(doc_id: str, request: Request, include_draft: bool = False):
+async def get_document_content(doc_id: str, request: Request, response: Response, include_draft: bool = False):
     """Get the effective (current published) version content of a document."""
     _check_document_read(request)
     if include_draft:
@@ -1817,6 +1817,15 @@ async def get_document_content(doc_id: str, request: Request, include_draft: boo
         if not row:
             raise HTTPException(status_code=404, detail="Effective published document version not found")
         row = dict(row)
+        # Conditional requests: published manual HTML is multi-MB and immutable per
+        # version, so emit an ETag and let clients revalidate with If-None-Match (304)
+        # instead of re-transferring the whole payload. private keeps it out of shared
+        # caches; no-cache forces revalidation so a new version is picked up promptly.
+        etag = '"' + hashlib.sha256(f"{row['version_id']}:{row['updated_at']}".encode()).hexdigest()[:32] + '"'
+        response.headers["ETag"] = etag
+        response.headers["Cache-Control"] = "private, no-cache"
+        if request.headers.get("if-none-match", "") == etag:
+            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
         return DocumentContentResponse(
             document_id=row["document_id"],
             version_id=row["version_id"],

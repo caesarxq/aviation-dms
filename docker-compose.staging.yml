@@ -10,7 +10,7 @@ services:
     environment:
       DEV_MODE: "false"
       FLIGHT_RELEASE_ENABLED: "false"
-      SESSION_COOKIE_SECURE: "false"
+      SESSION_COOKIE_SECURE: "true"
       AUTH_ALLOWED_ORIGINS: "http://localhost:5173,https://stage.kfl.ke"
       CORS_ORIGINS: "http://localhost:5173,https://stage.kfl.ke"
       PUBLIC_APP_URL: "https://stage.kfl.ke"
