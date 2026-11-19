@@ -14,7 +14,7 @@ set -euo pipefail
 IMAGE_TAG="${1:?Usage: deploy-prod.sh <IMAGE_TAG>}"
 REGISTRY="${REGISTRY:-ghcr.io}"
 PROD_DIR="/opt/kfl-aviation-dms-prod"
-BACKUP_SCRIPT="${PROD_DIR}/scripts/full-stack-backup.sh"
+BACKUP_SCRIPT="${BACKUP_SCRIPT:-${PROD_DIR}/scripts/full-stack-backup.sh}"
 
 echo "============================================================"
 echo "Aviation DMS Production Deployment"
@@ -23,18 +23,17 @@ echo "Registry: ${REGISTRY}"
 echo "Target: Production OCI instance"
 echo "============================================================"
 
-# --- Pre-deploy backup (rollback safeguard) ---
+# --- Pre-deploy backup (rollback safeguard, FAIL-CLOSED) ---
 echo "--- Running pre-deployment backup ---"
-if [ -f "${BACKUP_SCRIPT}" ]; then
-  sudo "${BACKUP_SCRIPT}" || {
-    echo "ERROR: Pre-deployment backup failed. Aborting deployment."
-    exit 1
-  }
-  echo "Pre-deployment backup completed successfully"
-else
-  echo "WARNING: Backup script not found at ${BACKUP_SCRIPT}"
-  echo "Continuing without backup (not recommended for production)"
+if [ ! -f "${BACKUP_SCRIPT}" ]; then
+  echo "ERROR: Backup script not found at ${BACKUP_SCRIPT}. Aborting: production requires a pre-deployment backup." >&2
+  exit 1
 fi
+sudo "${BACKUP_SCRIPT}" || {
+  echo "ERROR: Pre-deployment backup failed. Aborting deployment." >&2
+  exit 1
+}
+echo "Pre-deployment backup completed successfully"
 
 # --- Export environment variables for compose ---
 export DMS_RELEASE_TAG="${IMAGE_TAG}"

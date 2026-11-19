@@ -3,8 +3,9 @@
 Browser/API requests use server-managed HTTP-only sessions with CSRF checks.
 Development mode may supplement sessions with an explicit, allow-listed header
 pair (X-Role / X-Actor) for local work; that path never accepts arbitrary values
-and is strictly limited on loopback origins. There is no Bearer-token fallback
-or privileged default identity."""
+and is refused for any request carrying reverse-proxy forwarding headers, so it
+cannot be used to impersonate a role on a deployed (proxied) host. There is no
+Bearer-token fallback or privileged default identity."""
 
 import os
 import hashlib
@@ -96,6 +97,20 @@ def validate_dev_identity(actor: str, role: str) -> tuple[str, str]:
 def same_principal(request: Request, other_actor_id: str | None) -> bool:
     """Compare a stored historical actor ID to the current canonical principal."""
     return bool(other_actor_id and other_actor_id in getattr(request.state, "actor_aliases", {getattr(request.state, "actor", "")}))
+
+
+def _is_proxied_request(request: Request) -> bool:
+    """True when the request carries reverse-proxy forwarding headers.
+
+    Deployed environments (staging/prod) sit behind Caddy, which always injects
+    these headers. The development identity path must never serve such requests,
+    so an external client cannot impersonate a role even if DEV_MODE is enabled.
+    Local development connects directly (no forwarding headers) and is unaffected.
+    """
+    return any(
+        request.headers.get(name, "").strip()
+        for name in ("x-forwarded-for", "x-real-ip", "forwarded")
+    )
 
 
 class P0AuthMiddleware(BaseHTTPMiddleware):
@@ -224,6 +239,8 @@ class P0AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if DEV_MODE:
+            if _is_proxied_request(request):
+                return _unauthorized("Development identity headers are not accepted through a reverse proxy")
             raw_role = request.headers.get("X-Role")
             raw_actor = request.headers.get("X-Actor")
             if not raw_role or not raw_actor:
