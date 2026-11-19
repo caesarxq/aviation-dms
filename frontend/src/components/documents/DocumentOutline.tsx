@@ -41,9 +41,12 @@ export function buildOutlineFromHtml(html: string): OutlineItem[] {
 
     if (headings.length > 0) return headings;
 
+    {
     // --- pdftohtml heading detection ---
-    // pdftohtml -c -s outputs <p class="ftNN"><span class="ftMM">text</span></p>
-    // with font sizes defined in <style> blocks. Detect heading-sized text.
+    // pdftohtml -c -s outputs <p class="ftNN">text</p> with font sizes in <style>
+    // blocks. Real section headings are often numbered ("1. Title", "4.10 APPENDIX")
+    // at body font size, while PART titles / doc titles use larger fonts. Page
+    // headers/footers (ISSUE NO., REVISION NO., PAGE, dates) must be filtered out.
     const fontSizes = new Map<string, number>();
     const styleBlocks = document.querySelectorAll("style");
     styleBlocks.forEach((styleEl) => {
@@ -54,73 +57,67 @@ export function buildOutlineFromHtml(html: string): OutlineItem[] {
       }
     });
 
+    // Page header/footer noise labels to exclude from the outline.
+    const NOISE = /^(ISSUE\s*NO\.?|REVISION\s*NO\.?|SECTION|ISSUED|PAGE|EDITION|DOC\s*REF|CONTROLLED\s*COPY|E-?MAIL|LOCATION|MOBILE|NOTICE|\(NOTICE\)|ONLINE\s*COPY|KFL|QM-|\d{1,2}\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*\d{4})$/i;
+
+    // Body text size = most common font size (fallback 12px).
+    let bodySize = 12;
     if (fontSizes.size > 0) {
-      // Find body text size (most common font size)
       const sizeCounts = new Map<number, number>();
       fontSizes.forEach((size) => sizeCounts.set(size, (sizeCounts.get(size) || 0) + 1));
-      let bodySize = 12;
       let maxCount = 0;
       sizeCounts.forEach((count, size) => {
         if (count > maxCount) { maxCount = count; bodySize = size; }
       });
+    }
 
-      // Heading classes: font size > body size + 2px threshold
-      const headingClasses = new Set<string>();
-      fontSizes.forEach((size, cls) => {
-        if (size > bodySize + 2) headingClasses.add(cls);
+    const recoveredHeadings: OutlineItem[] = [];
+    const seen = new Set<string>();
+    const paragraphs = Array.from(document.querySelectorAll("p"));
+    paragraphs.forEach((p) => {
+      const text = (p.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 140 || text.length < 3) return;
+      if (/^[\d\s.\-–—:]+$/.test(text)) return;
+      if (NOISE.test(text)) return;
+
+      // Determine the paragraph's effective font size (own class or nested span).
+      let fontSize = 0;
+      const ownCls = Array.from(p.classList).find((c) => fontSizes.has(c));
+      if (ownCls) fontSize = fontSizes.get(ownCls) || 0;
+      p.querySelectorAll("span").forEach((s) => {
+        const cls = Array.from(s.classList).find((c) => fontSizes.has(c));
+        if (cls) fontSize = Math.max(fontSize, fontSizes.get(cls) || 0);
       });
 
-      if (headingClasses.size > 0) {
-        const recoveredHeadings: OutlineItem[] = [];
-        const seen = new Set<string>();
-        const pageDivs = Array.from(document.querySelectorAll('div[id^="page"][id$="-div"]'));
-        const pageIndexMap = new Map<Element, number>();
-        pageDivs.forEach((page, index) => pageIndexMap.set(page, index));
+      // Heading candidates: numbered sections, PART titles, or large-font text.
+      const numbered = text.match(/^(\d+(?:\.\d+)*)\.?\s+([A-Za-z].*)$/);
+      const part = text.match(/^(PART\s+[A-Z](?:\s*\([^)]*\))?)$/i);
+      const isLargeFont = fontSize > bodySize + 2;
+      if (!numbered && !part && !isLargeFont) return;
 
-        // Find <p> elements containing heading-class spans
-        const paragraphs = Array.from(document.querySelectorAll("p"));
-        paragraphs.forEach((p) => {
-          const spans = Array.from(p.querySelectorAll("span"));
-          const headingSpans = spans.filter((s) =>
-            Array.from(s.classList).some((c) => headingClasses.has(c))
-          );
-          if (headingSpans.length === 0) return;
+      const sectionNumber = numbered?.[1];
+      const label = (numbered?.[2] || part?.[1] || text).trim();
+      if (!label || label.length < 3) return;
 
-          const text = (p.textContent || "").replace(/\s+/g, " ").trim();
-          if (!text || text.length > 140 || text.length < 3) return;
-          // Skip lines that are mostly numbers/symbols (page headers/footers)
-          if (/^[\d\s.\-–—:]+$/.test(text)) return;
+      const dedupeKey = `${sectionNumber || label}|${label}`.toLowerCase();
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
 
-          const numbered = text.match(/^(\d+(?:\.\d+)*)\s+(.+)$/);
-          const part = text.match(/^(PART\s+[A-D](?:\s*\([^)]*\))?)$/i);
-          const sectionNumber = numbered?.[1];
-          const label = (numbered?.[2] || part?.[1] || text).trim();
+      const blockIndex = blockIndexMap.get(p) ?? 0;
+      const level = part ? 1
+        : sectionNumber ? Math.min(6, sectionNumber.split(".").length + 1)
+        : fontSize >= bodySize * 2 ? 1 : fontSize >= bodySize * 1.5 ? 2 : 3;
 
-          const page = p.closest('div[id^="page"][id$="-div"]');
-          const pageIndex = page ? (pageIndexMap.get(page) ?? 0) : 0;
-          const dedupeKey = `${sectionNumber || label}|${label}|${pageIndex}`.toLowerCase();
-          if (seen.has(dedupeKey)) return;
-          seen.add(dedupeKey);
+      recoveredHeadings.push({
+        anchorId: `block-${blockIndex}`,
+        level,
+        heading: label,
+        sectionNumber,
+        blockIndex,
+      });
+    });
 
-          const blockIndex = blockIndexMap.get(p) ?? 0;
-          // Determine level from font size relative to body
-          const spanSize = headingSpans.reduce((max, s) => {
-            const cls = Array.from(s.classList).find((c) => fontSizes.has(c));
-            return cls ? Math.max(max, fontSizes.get(cls) || 0) : max;
-          }, 0);
-          const level = spanSize >= bodySize * 2 ? 1 : spanSize >= bodySize * 1.5 ? 2 : 3;
-
-          recoveredHeadings.push({
-            anchorId: `block-${blockIndex}`,
-            level: sectionNumber ? Math.min(6, sectionNumber.split(".").length) : level,
-            heading: label,
-            sectionNumber,
-            blockIndex,
-          });
-        });
-
-        if (recoveredHeadings.length > 0) return recoveredHeadings;
-      }
+    if (recoveredHeadings.length > 0) return recoveredHeadings;
     }
 
     // PDF-converted manuals often preserve section titles as `.t` text blocks
