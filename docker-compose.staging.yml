@@ -8,7 +8,7 @@
 services:
   backend:
     environment:
-      DEV_MODE: "true"
+      DEV_MODE: "false"
       FLIGHT_RELEASE_ENABLED: "false"
       SESSION_COOKIE_SECURE: "false"
       AUTH_ALLOWED_ORIGINS: "http://localhost:5173,https://stage.kfl.ke"
