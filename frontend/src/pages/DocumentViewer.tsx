@@ -149,6 +149,7 @@ export function DocumentViewer() {
 
   // Auto-load source PDF when attached files include a PDF
   useEffect(() => {
+    if (!Array.isArray(attachedFiles)) return;
     const pdfFile = attachedFiles.find((f: any) => f.content_type === "application/pdf");
     if (pdfFile && !pdfObjectUrl) {
       loadSourcePdf(pdfFile.file_id);
