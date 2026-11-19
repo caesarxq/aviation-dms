@@ -211,21 +211,52 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     const el = editorRef.current;
     if (!el) return;
     el.innerHTML = originalContent;
-    // Center PDF-converted page divs and give paper-like appearance
-    el.style.display = "flex";
-    el.style.flexDirection = "column";
-    el.style.alignItems = "center";
-    el.style.gap = "16px";
     el.style.overflow = "auto";
     el.style.background = "#f3f4f6";
     el.style.padding = "20px 0";
-    // Style page divs for centered paper appearance
-    const pageDivs = el.querySelectorAll('div[id^="page"][id$="-div"]');
-    pageDivs.forEach((page) => {
-      (page as HTMLElement).style.margin = "0 auto";
-      (page as HTMLElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
-      (page as HTMLElement).style.background = "#ffffff";
-    });
+
+    const pageContainer = el.querySelector("#page-container") as HTMLElement | null;
+    if (pageContainer) {
+      // pdf2htmlEX: reveal every .pc content box (display:none until its JS opens
+      // it), flow the page container, hide the built-in sidebar, center .pf pages,
+      // and scale to fit the editor width. The .t text layer is the visible,
+      // editable content; the .bi background carries graphics.
+      el.style.display = "block";
+      pageContainer.style.position = "static";
+      pageContainer.style.width = "100%";
+      pageContainer.style.height = "auto";
+      el.querySelectorAll(".pc").forEach((pc) => { (pc as HTMLElement).style.display = "block"; });
+      const sidebar = el.querySelector("#sidebar") as HTMLElement | null;
+      if (sidebar) sidebar.style.display = "none";
+      const pfs = Array.from(el.querySelectorAll(".pf")) as HTMLElement[];
+      pfs.forEach((pf) => {
+        pf.style.margin = "16px auto";
+        pf.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
+        pf.style.display = "block";
+      });
+      if (pfs.length && el.clientWidth > 0) {
+        const natural = pfs[0].getBoundingClientRect().width || 918;
+        const scale = Math.min(1, (el.clientWidth - 32) / natural);
+        pageContainer.style.zoom = scale.toFixed(4);
+      }
+    } else {
+      // pdftohtml/pdftoppm: center fixed-size page divs with paper styling.
+      el.style.display = "flex";
+      el.style.flexDirection = "column";
+      el.style.alignItems = "center";
+      el.style.gap = "16px";
+      el.querySelectorAll('div[id^="page"][id$="-div"]').forEach((page) => {
+        (page as HTMLElement).style.margin = "0 auto";
+        (page as HTMLElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
+        (page as HTMLElement).style.background = "#ffffff";
+        (page as HTMLElement).style.position = "relative";
+        (page as HTMLElement).style.overflow = "hidden";
+        (page as HTMLElement).style.flexShrink = "0";
+      });
+      el.querySelectorAll("img.page-bg").forEach((img) => {
+        (img as HTMLElement).style.display = "none";
+      });
+    }
   }, [originalContent, highFidelityManual]);
 
   useEffect(() => {

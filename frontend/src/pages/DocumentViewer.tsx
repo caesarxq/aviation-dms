@@ -23,11 +23,20 @@ import {
 
 const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'">';
 
-// CSS to center PDF-converted page divs and give them a paper-like appearance.
-// pdftohtml outputs pages as position:relative divs with fixed 612x792px size.
+// CSS for pdf2htmlEX-converted documents. pdf2htmlEX renders each page as a .pf
+// frame (918px wide) containing a .pc content box that is display:none until its
+// JS "opens" it. We force every .pc visible so all pages render statically (the
+// viewer CSP blocks scripts), make #page-container flow normally so the document
+// scrolls, hide the built-in sidebar, and center the pages. --kfl-page-zoom is set
+// by the parent viewer to scale pages to fit the available width.
 const DOCUMENT_PAGE_CSS = `<style>
-body { margin: 0; padding: 20px 0; background: #f3f4f6; display: flex; flex-direction: column; align-items: center; gap: 16px; }
-div[id^="page"][id$="-div"] { margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.12); background: #ffffff; }
+#sidebar { display: none !important; }
+#page-container { position: static !important; width: auto !important; height: auto !important; zoom: var(--kfl-page-zoom, 1); }
+.pc { display: block !important; }
+body { margin: 0; padding: 20px 0; background: #f3f4f6 !important; }
+.pf { margin: 16px auto !important; box-shadow: 0 2px 8px rgba(0,0,0,0.12); display: block; flex-shrink: 0; }
+div[id^="page"][id$="-div"] { margin: 16px auto; box-shadow: 0 2px 8px rgba(0,0,0,0.12); background: #ffffff; position: relative; overflow: hidden; flex-shrink: 0; }
+img.page-bg { display: block; width: 612px; height: 792px; }
 </style>`;
 
 function addDocumentCsp(source: string): string {
@@ -125,6 +134,7 @@ export function DocumentViewer() {
   });
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const naturalPageWidthRef = useRef<number>(0);
   const parentObservedDocumentRef = useRef<Document | null>(null);
   const selectionHandlerRef = useRef<EventListener | null>(null);
   const annotationCommentRef = useRef<HTMLTextAreaElement>(null);
@@ -143,6 +153,7 @@ export function DocumentViewer() {
   // preserves the full original formatting (layout, images, tables).
   useEffect(() => {
     if (!iframeRef.current || !content) return;
+    naturalPageWidthRef.current = 0;
     iframeRef.current.src = "";
     iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
   }, [content?.content]);
@@ -195,9 +206,35 @@ export function DocumentViewer() {
     },
   });
 
+  // Scale pdf2htmlEX pages (fixed 918px wide) to fit the viewer width. The natural
+  // page width is measured once at zoom=1, then --kfl-page-zoom is updated on resize.
+  const applyPageZoom = useCallback(() => {
+    const frame = iframeRef.current;
+    const fd = frame?.contentDocument;
+    if (!frame || !fd) return;
+    const page = fd.querySelector(".pf, div[id^='page'][id$='-div']") as HTMLElement | null;
+    if (!page) return;
+    if (!naturalPageWidthRef.current) {
+      naturalPageWidthRef.current = page.getBoundingClientRect().width || 918;
+    }
+    const available = frame.clientWidth - 32;
+    if (available <= 0 || !naturalPageWidthRef.current) return;
+    const scale = Math.min(1, available / naturalPageWidthRef.current);
+    fd.documentElement.style.setProperty("--kfl-page-zoom", scale.toFixed(4));
+  }, []);
+
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => applyPageZoom());
+    ro.observe(frame);
+    return () => ro.disconnect();
+  }, [applyPageZoom]);
+
   const handleFrameLoad = useCallback(() => {
     const frameDocument = iframeRef.current?.contentDocument;
     if (!frameDocument) return;
+    applyPageZoom();
     if (parentObservedDocumentRef.current && selectionHandlerRef.current) {
       parentObservedDocumentRef.current.removeEventListener("mouseup", selectionHandlerRef.current);
       parentObservedDocumentRef.current.removeEventListener("keyup", selectionHandlerRef.current);
@@ -222,7 +259,7 @@ export function DocumentViewer() {
     parentObservedDocumentRef.current = frameDocument;
     selectionHandlerRef.current = onSelection;
     setIframeReady(true);
-  }, []);
+  }, [applyPageZoom]);
 
   useEffect(() => {
     if (selection) annotationCommentRef.current?.focus();
