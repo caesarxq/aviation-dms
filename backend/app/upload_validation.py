@@ -31,7 +31,7 @@ async def validate_upload_content_local(
 ) -> None:
     if len(payload) > max_bytes:
         raise UploadContentInvalid("Upload exceeds the configured per-file maximum")
-    if extension not in {".pdf", ".png", ".jpg", ".jpeg"}:
+    if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".docx"}:
         raise UploadContentInvalid("Unsupported upload extension")
 
     command = [
@@ -195,7 +195,7 @@ async def validate_upload_content(
     """Validate through the isolated validator container; never parse in the API process."""
     if len(payload) > max_bytes:
         raise UploadContentInvalid("Upload exceeds the configured per-file maximum")
-    if extension not in {".pdf", ".png", ".jpg", ".jpeg"}:
+    if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".docx"}:
         raise UploadContentInvalid("Unsupported upload extension")
     url = _configured_validator_url()
     async with _VALIDATION_SLOTS:
