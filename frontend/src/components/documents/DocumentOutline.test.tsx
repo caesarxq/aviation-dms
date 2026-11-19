@@ -25,8 +25,8 @@ describe("buildOutlineFromHtml", () => {
     );
 
     expect(items).toEqual([
-      expect.objectContaining({ anchorId: "heading-0", sectionNumber: "1.1", heading: "The Company", blockIndex: 0 }),
-      expect.objectContaining({ anchorId: "heading-1", sectionNumber: "1.1.1", heading: "Remote Aircraft Operators Certificate", blockIndex: 1 }),
+      expect.objectContaining({ anchorId: "block-1", sectionNumber: "1.1", heading: "The Company", blockIndex: 1 }),
+      expect.objectContaining({ anchorId: "block-3", sectionNumber: "1.1.1", heading: "Remote Aircraft Operators Certificate", blockIndex: 3 }),
     ]);
   });
 
@@ -70,7 +70,7 @@ describe("buildOutlineFromHtml", () => {
     const items = buildOutlineFromHtml('<div class="pf"><div class="t">PART A</div></div>');
 
     expect(items).toEqual([
-      expect.objectContaining({ heading: "PART A", anchorId: "heading-0", sectionNumber: undefined }),
+      expect.objectContaining({ heading: "PART A", anchorId: "block-1", sectionNumber: undefined }),
     ]);
   });
 
@@ -176,7 +176,7 @@ describe("buildOutlineFromHtml", () => {
       '<div class="t">1.1 Title</div><div class="pf"><div class="t">inside pf</div></div>',
     );
 
-    expect(items[0].anchorId).toBe("heading-0");
+    expect(items[0].anchorId).toBe("block-0");
     expect(items[0].blockIndex).toBe(0);
   });
 
@@ -187,15 +187,15 @@ describe("buildOutlineFromHtml", () => {
     );
 
     expect(items).toEqual([
-      expect.objectContaining({ anchorId: "heading-1", heading: "Real" }),
+      expect.objectContaining({ anchorId: "block-3", heading: "Real" }),
     ]);
   });
 
-  it("rejects PART headings outside A-D range", () => {
+  it("recognizes PART headings beyond the A-D range as section titles", () => {
     const items = buildOutlineFromHtml('<div class="pf"><div class="t">PART E</div></div>');
 
     expect(items).toEqual([
-      expect.objectContaining({ anchorId: "page-0", heading: "Page 1" }),
+      expect.objectContaining({ anchorId: "block-1", heading: "PART E" }),
     ]);
   });
 
