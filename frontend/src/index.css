@@ -513,7 +513,7 @@ img[alt="Kenya Flying Labs"] {
     padding-right: 0;
   }
   .app-sidebar-brand { width: 40px; height: 40px; flex: none; justify-content: center; }
-  .app-sidebar-logo { width: 40px; height: 40px; object-fit: cover; object-position: left; }
+  .app-sidebar-logo { width: 40px; height: 40px; object-fit: cover; object-position: center; }
   .app-sidebar-header-actions { flex-direction: column; gap: 2px; }
   .app-sidebar nav { margin-top: 8px; }
   .mobile-session-controls {
