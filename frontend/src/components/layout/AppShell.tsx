@@ -334,7 +334,7 @@ export function AppShell() {
             aria-label={homeLabel}
             className="app-sidebar-brand h-auto min-w-0 flex-1 justify-start overflow-hidden p-0 hover:bg-transparent"
           >
-            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="app-sidebar-logo h-11 w-auto max-w-[124px] object-contain object-center rounded-md" />
+            <img src="/brand/kfl-logo.png" alt="Kenya Flying Labs" className="app-sidebar-logo h-12 w-auto max-w-[140px] object-contain object-center" />
           </Button>
           <div className="app-sidebar-header-actions flex shrink-0 items-center gap-0.5">
             <ThemeToggle />
