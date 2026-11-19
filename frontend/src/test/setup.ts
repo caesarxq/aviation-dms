@@ -31,6 +31,18 @@ if (typeof HTMLElement !== 'undefined') {
   if (typeof proto.releasePointerCapture !== 'function') {
     proto.releasePointerCapture = () => {};
   }
+  if (typeof proto.scrollIntoView !== 'function') {
+    proto.scrollIntoView = () => {};
+  }
+}
+
+// Radix UI Select/Popover observe element size; jsdom has no ResizeObserver.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
 }
 
 // matchMedia polyfill for jsdom (used by ThemeToggle)
