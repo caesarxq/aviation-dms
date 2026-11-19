@@ -21,25 +21,32 @@ import {
   type OutlineItem,
 } from "../components/documents/DocumentOutline";
 
-const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\">';
+const DOCUMENT_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src data: blob:; font-src data:; style-src \'unsafe-inline\' data:; media-src data: blob:; object-src \'none\'; connect-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'">';
+
+// CSS to center PDF-converted page divs and give them a paper-like appearance.
+// pdftohtml outputs pages as position:relative divs with fixed 612x792px size.
+const DOCUMENT_PAGE_CSS = `<style>
+body { margin: 0; padding: 20px 0; background: #f3f4f6; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+div[id^="page"][id$="-div"] { margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.12); background: #ffffff; }
+</style>`;
 
 function addDocumentCsp(source: string): string {
   const isHtmlDocument = /<(?:!doctype\s+html|html\b|head\b|body\b|div\b|p\b|h[1-6]\b|table\b|span\b|section\b)/i.test(source);
   if (!isHtmlDocument) {
     const escapedText = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return `<!doctype html><html><head><meta charset="utf-8"></head><body><pre>${escapedText}</pre></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8">${DOCUMENT_PAGE_CSS}</head><body><pre>${escapedText}</pre></body></html>`;
   }
   const head = /<head\b[^>]*>/i.exec(source);
   if (head && head.index !== undefined) {
     const insertAt = head.index + head[0].length;
-    return `${source.slice(0, insertAt)}${DOCUMENT_CSP}${source.slice(insertAt)}`;
+    return `${source.slice(0, insertAt)}${DOCUMENT_CSP}${DOCUMENT_PAGE_CSS}${source.slice(insertAt)}`;
   }
   const html = /<html\b[^>]*>/i.exec(source);
   if (html && html.index !== undefined) {
     const insertAt = html.index + html[0].length;
-    return `${source.slice(0, insertAt)}<head>${DOCUMENT_CSP}</head>${source.slice(insertAt)}`;
+    return `${source.slice(0, insertAt)}<head>${DOCUMENT_CSP}${DOCUMENT_PAGE_CSS}</head>${source.slice(insertAt)}`;
   }
-  return `<!doctype html><html><head>${DOCUMENT_CSP}</head><body>${source}</body></html>`;
+  return `<!doctype html><html><head>${DOCUMENT_CSP}${DOCUMENT_PAGE_CSS}</head><body>${source}</body></html>`;
 }
 
 function annotationText(annotation: any): string {
@@ -249,7 +256,7 @@ export function DocumentViewer() {
     setActiveOutlineAnchor(item.anchorId);
     const frameDocument = iframeRef.current?.contentDocument;
     if (!frameDocument) return;
-    const selector = item.anchorId.startsWith("page-") ? ".pf" : item.anchorId.startsWith("heading-") ? ".t" : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
+    const selector = item.anchorId.startsWith("page-") ? '.pf, div[id^="page"][id$="-div"]' : item.anchorId.startsWith("heading-") ? ".t" : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
     const target = frameDocument.querySelectorAll(selector)[item.blockIndex] as HTMLElement | undefined;
     if (!target) return;
     target.scrollIntoView?.({ behavior: "auto", block: "center" });

@@ -182,7 +182,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       // Fall back to index-based lookup if text matching fails
       if (!target) {
         const selector = item.anchorId.startsWith("page-")
-          ? ".pf"
+          ? '.pf, div[id^="page"][id$="-div"]'
           : item.anchorId.startsWith("heading-")
             ? ".t"
             : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
@@ -192,7 +192,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 
       if (!target) return;
 
-      const pageFrame = target.closest(".pf") as HTMLElement | null;
+      const pageFrame = (target.closest('.pf') || target.closest('div[id^="page"][id$="-div"]')) as HTMLElement | null;
       if ((item.anchorId.startsWith("page-") || item.anchorId.startsWith("heading-")) && pageFrame?.parentElement) {
         pageFrame.parentElement.scrollTop = pageFrame.offsetTop;
       } else {
@@ -211,9 +211,21 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     const el = editorRef.current;
     if (!el) return;
     el.innerHTML = originalContent;
-    // Preserve document structure: ensure the container fills the editor area
-    el.style.display = "block";
+    // Center PDF-converted page divs and give paper-like appearance
+    el.style.display = "flex";
+    el.style.flexDirection = "column";
+    el.style.alignItems = "center";
+    el.style.gap = "16px";
     el.style.overflow = "auto";
+    el.style.background = "#f3f4f6";
+    el.style.padding = "20px 0";
+    // Style page divs for centered paper appearance
+    const pageDivs = el.querySelectorAll('div[id^="page"][id$="-div"]');
+    pageDivs.forEach((page) => {
+      (page as HTMLElement).style.margin = "0 auto";
+      (page as HTMLElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
+      (page as HTMLElement).style.background = "#ffffff";
+    });
   }, [originalContent, highFidelityManual]);
 
   useEffect(() => {
@@ -222,7 +234,7 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     if (!match || !editor) return;
     const timer = window.setTimeout(() => {
       const selector = match[1] === "page"
-        ? ".pf"
+        ? '.pf, div[id^="page"][id$="-div"]'
         : "h1, h2, h3, h4, h5, h6, p, li, tr, figcaption, caption, blockquote, div";
       const blocks = editor.querySelectorAll(selector);
       const target = blocks[Number(match[2])] as HTMLElement | undefined;
