@@ -41,6 +41,88 @@ export function buildOutlineFromHtml(html: string): OutlineItem[] {
 
     if (headings.length > 0) return headings;
 
+    // --- pdftohtml heading detection ---
+    // pdftohtml -c -s outputs <p class="ftNN"><span class="ftMM">text</span></p>
+    // with font sizes defined in <style> blocks. Detect heading-sized text.
+    const fontSizes = new Map<string, number>();
+    const styleBlocks = document.querySelectorAll("style");
+    styleBlocks.forEach((styleEl) => {
+      const css = styleEl.textContent || "";
+      const matches = css.matchAll(/\.(ft\d+)\s*\{[^}]*font-size:\s*(\d+(?:\.\d+)?)px/g);
+      for (const m of matches) {
+        fontSizes.set(m[1], parseFloat(m[2]));
+      }
+    });
+
+    if (fontSizes.size > 0) {
+      // Find body text size (most common font size)
+      const sizeCounts = new Map<number, number>();
+      fontSizes.forEach((size) => sizeCounts.set(size, (sizeCounts.get(size) || 0) + 1));
+      let bodySize = 12;
+      let maxCount = 0;
+      sizeCounts.forEach((count, size) => {
+        if (count > maxCount) { maxCount = count; bodySize = size; }
+      });
+
+      // Heading classes: font size > body size + 2px threshold
+      const headingClasses = new Set<string>();
+      fontSizes.forEach((size, cls) => {
+        if (size > bodySize + 2) headingClasses.add(cls);
+      });
+
+      if (headingClasses.size > 0) {
+        const recoveredHeadings: OutlineItem[] = [];
+        const seen = new Set<string>();
+        const pageDivs = Array.from(document.querySelectorAll('div[id^="page"][id$="-div"]'));
+        const pageIndexMap = new Map<Element, number>();
+        pageDivs.forEach((page, index) => pageIndexMap.set(page, index));
+
+        // Find <p> elements containing heading-class spans
+        const paragraphs = Array.from(document.querySelectorAll("p"));
+        paragraphs.forEach((p) => {
+          const spans = Array.from(p.querySelectorAll("span"));
+          const headingSpans = spans.filter((s) =>
+            Array.from(s.classList).some((c) => headingClasses.has(c))
+          );
+          if (headingSpans.length === 0) return;
+
+          const text = (p.textContent || "").replace(/\s+/g, " ").trim();
+          if (!text || text.length > 140 || text.length < 3) return;
+          // Skip lines that are mostly numbers/symbols (page headers/footers)
+          if (/^[\d\s.\-–—:]+$/.test(text)) return;
+
+          const numbered = text.match(/^(\d+(?:\.\d+)*)\s+(.+)$/);
+          const part = text.match(/^(PART\s+[A-D](?:\s*\([^)]*\))?)$/i);
+          const sectionNumber = numbered?.[1];
+          const label = (numbered?.[2] || part?.[1] || text).trim();
+
+          const page = p.closest('div[id^="page"][id$="-div"]');
+          const pageIndex = page ? (pageIndexMap.get(page) ?? 0) : 0;
+          const dedupeKey = `${sectionNumber || label}|${label}|${pageIndex}`.toLowerCase();
+          if (seen.has(dedupeKey)) return;
+          seen.add(dedupeKey);
+
+          const blockIndex = blockIndexMap.get(p) ?? 0;
+          // Determine level from font size relative to body
+          const spanSize = headingSpans.reduce((max, s) => {
+            const cls = Array.from(s.classList).find((c) => fontSizes.has(c));
+            return cls ? Math.max(max, fontSizes.get(cls) || 0) : max;
+          }, 0);
+          const level = spanSize >= bodySize * 2 ? 1 : spanSize >= bodySize * 1.5 ? 2 : 3;
+
+          recoveredHeadings.push({
+            anchorId: `block-${blockIndex}`,
+            level: sectionNumber ? Math.min(6, sectionNumber.split(".").length) : level,
+            heading: label,
+            sectionNumber,
+            blockIndex,
+          });
+        });
+
+        if (recoveredHeadings.length > 0) return recoveredHeadings;
+      }
+    }
+
     // PDF-converted manuals often preserve section titles as `.t` text blocks
     // instead of semantic h1-h6 elements. Recover numbered headings from those
     // blocks and keep their exact text-node index for navigation.
@@ -75,7 +157,8 @@ export function buildOutlineFromHtml(html: string): OutlineItem[] {
     if (recoveredHeadings.length > 0) return recoveredHeadings;
 
     // Converted manuals may contain page wrappers without recoverable titles.
-    return Array.from(document.querySelectorAll(".pf")).map((_, index) => ({
+    const pageFallback = document.querySelectorAll('.pf, div[id^="page"][id$="-div"]');
+    return Array.from(pageFallback).map((_, index) => ({
       anchorId: `page-${index}`,
       level: 1,
       heading: `Page ${index + 1}`,
