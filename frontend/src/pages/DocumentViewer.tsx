@@ -124,8 +124,6 @@ export function DocumentViewer() {
   const selectionOpenerRef = useRef<HTMLElement | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
-  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
-  const [pdfLoadError, setPdfLoadError] = useState<string | null>(null);
   const [annotationType, setAnnotationType] = useState<"comment" | "highlight">("comment");
   const [annotationContent, setAnnotationContent] = useState("");
   const [annotationTarget, setAnnotationTarget] = useState("");
@@ -133,46 +131,14 @@ export function DocumentViewer() {
   const [activeOutlineAnchor, setActiveOutlineAnchor] = useState("");
   const outlineItems = buildOutlineFromHtml(content?.content || "");
 
-  const loadSourcePdf = useCallback(async (fileId: string) => {
-    setPdfLoadError(null);
-    try {
-      const response = await api.get(`/p0/documents/${docId}/file/${fileId}`, {
-        responseType: "blob",
-      });
-      const blob = new Blob([response.data], { type: "application/pdf" });
-      const url = window.URL.createObjectURL(blob);
-      setPdfObjectUrl(url);
-    } catch {
-      setPdfLoadError("Failed to load source PDF");
-    }
-  }, [docId]);
-
-  // Auto-load source PDF when attached files include a PDF
+  // Render the document's HTML content. Source PDFs are never served inline:
+  // KCAA-approved documents restrict raw-file access, and the stored HTML
+  // preserves the full original formatting (layout, images, tables).
   useEffect(() => {
-    if (!Array.isArray(attachedFiles)) return;
-    const pdfFile = attachedFiles.find((f: any) => f.content_type === "application/pdf");
-    if (pdfFile && !pdfObjectUrl) {
-      loadSourcePdf(pdfFile.file_id);
-    }
-  }, [attachedFiles, pdfObjectUrl, loadSourcePdf]);
-
-  useEffect(() => {
-    return () => {
-      if (pdfObjectUrl) window.URL.revokeObjectURL(pdfObjectUrl);
-    };
-  }, [pdfObjectUrl]);
-
-  useEffect(() => {
-    if (!iframeRef.current) return;
-    if (pdfObjectUrl) {
-      // Render source PDF directly — preserves all original formatting
-      iframeRef.current.srcdoc = "";
-      iframeRef.current.src = pdfObjectUrl;
-    } else if (content) {
-      iframeRef.current.src = "";
-      iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
-    }
-  }, [content?.content, pdfObjectUrl]);
+    if (!iframeRef.current || !content) return;
+    iframeRef.current.src = "";
+    iframeRef.current.srcdoc = addDocumentCsp(content.content || "");
+  }, [content?.content]);
 
   const closeAnnotationDialog = useCallback(() => {
     setSelection(null);
@@ -412,16 +378,11 @@ export function DocumentViewer() {
             </aside>
           )}
           <div className="relative min-w-0 flex-1 overflow-hidden rounded-md border border-kfl-border bg-white">
-            {pdfLoadError && pdfObjectUrl === null && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white text-sm text-kfl-status-danger">
-                {pdfLoadError}
-              </div>
-            )}
             <iframe
               ref={iframeRef}
               title={docId || "Document"}
               className="h-full w-full border-0"
-              sandbox={pdfObjectUrl ? "allow-same-origin allow-scripts" : "allow-same-origin"}
+              sandbox="allow-same-origin"
               onLoad={handleFrameLoad}
             />
           </div>
