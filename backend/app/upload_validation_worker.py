@@ -75,6 +75,17 @@ def main() -> int:
                 return 1
             return 0
 
+        if extension == ".docx":
+            from zipfile import ZipFile, BadZipFile
+
+            try:
+                zf = ZipFile(BytesIO(content))
+            except BadZipFile:
+                return 1
+            if "word/document.xml" not in zf.namelist():
+                return 1
+            return 0
+
         if extension in {".png", ".jpg", ".jpeg"}:
             from PIL import Image
 
