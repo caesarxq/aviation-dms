@@ -1,5 +1,5 @@
 import api from "./client";
-import { Occurrence, Hazard, SafetyAction, RiskAssessment, RiskAssessmentSummary, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification, ChangeRequest, ReviewComment } from "../types";
+import { Occurrence, Hazard, SafetyAction, RiskAssessment, RiskAssessmentSummary, Investigation, AuditEvent, TrainingRecord, MaintenanceRecord, CrewMember, DutyRecord, CrewQualification, ChangeRequest, ReviewComment, Feedback } from "../types";
 
 export interface OrganizationOverviewData {
   trends: {
@@ -170,4 +170,12 @@ export const safetyApi = {
     api.get<ReviewComment[]>(`/p1/change-requests/${crId}/comments`).then((r: any) => r.data),
   addReviewComment: (crId: string, data: any) =>
     api.post<ReviewComment>(`/p1/change-requests/${crId}/comments`, data).then((r: any) => r.data),
+  listFeedback: (params?: Record<string, any>) =>
+    api.get<Feedback[]>(`/p1/feedback`, { params }).then((r: any) => r.data),
+  getFeedback: (id: string) =>
+    api.get<Feedback>(`/p1/feedback/${id}`).then((r: any) => r.data),
+  createFeedback: (data: any) =>
+    api.post<Feedback>(`/p1/feedback`, data).then((r: any) => r.data),
+  updateFeedback: (id: string, data: any) =>
+    api.patch<Feedback>(`/p1/feedback/${id}`, data).then((r: any) => r.data),
 };
