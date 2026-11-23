@@ -34,6 +34,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { getPostLoginPath, ROLE_WORKSPACES } from "../../auth/permissions";
 import { WorkspaceGuide } from "./WorkspaceGuide";
 import { Button } from "@/components/ui/button";
+import FloatingFeedbackButton from "@/components/FloatingFeedbackButton";
 
 interface NavItem {
   to: string;
@@ -457,6 +458,8 @@ export function AppShell() {
           <div className="mt-2 text-slate-500">KFL Aviation DMS · v1.0</div>
         </div>
       </aside>
+
+      <FloatingFeedbackButton />
 
       <main className="app-main min-w-0 flex-1 overflow-auto bg-kfl-canvas">
         {logoutError && (
