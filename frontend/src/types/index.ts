@@ -489,3 +489,38 @@ export interface Aircraft {
   created_by: string;
   updated_by: string;
 }
+
+export interface Feedback {
+  feedback_id: string;
+  ticket_number: string;
+  actor_user_id: string;
+  actor_role: string;
+  source_route: string;
+  issue_type: string;
+  app_area: string;
+  goal: string;
+  impact: string;
+  status: string;
+  priority: string;
+  owner_id: string | null;
+  zoho_form_record_id: string | null;
+  zoho_form_sync_state: string;
+  zoho_sheet_row_id: string | null;
+  next_update_at: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+export interface FeedbackCreate {
+  issue_type: string;
+  app_area: string;
+  goal: string;
+  reproduction_steps: string;
+  expected_result: string;
+  actual_result: string;
+  impact: string;
+  observation_time: string;
+  contact: string;
+  screenshot_info: string | null;
+}

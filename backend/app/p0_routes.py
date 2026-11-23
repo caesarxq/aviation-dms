@@ -3424,3 +3424,91 @@ async def generate_evidence_pack(request: Request, entity_type: str = None, enti
     payload = json.dumps({"entity_type": entity_type, "entity_id": entity_id, "events": events}, sort_keys=True, default=str)
     checksum = "sha256-" + hashlib.sha256(payload.encode()).hexdigest()
     return {"entity_type": entity_type, "entity_id": entity_id, "events": events, "checksum": checksum}
+
+
+
+# --- Pilot Feedback / Ticketing ---
+
+@router.post("/feedback", response_model=FeedbackResponse, status_code=201)
+async def create_feedback(feedback: FeedbackCreate, request: Request):
+    _check(request, "feedback:create")
+    actor = _actor(request)
+    import uuid
+    db = await get_db()
+    try:
+        # Dedupe: reject if an open feedback with same app_area + goal already exists
+        dedupe_cursor = await db.execute(
+            "SELECT feedback_id FROM feedback WHERE app_area = ? AND goal = ? AND status IN ('new','triaging','accepted','in_progress','ready_to_verify') LIMIT 1",
+            (feedback.app_area, feedback.goal),
+        )
+        existing = await dedupe_cursor.fetchone()
+        if existing:
+            raise HTTPException(status_code=400, detail={"error": "duplicate_open", "message": "An open feedback with the same app area and goal already exists", "existing_ticket": existing["feedback_id"]})
+        feedback_id = f"FBK-{uuid.uuid4().hex[:12]}"
+        ticket_number = f"FBK-{__import__('datetime').datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4]}"
+        now = now_iso()
+        await db.execute(
+            """INSERT INTO feedback
+            (feedback_id, ticket_number, actor_user_id, actor_role, source_route,
+             issue_type, app_area, goal, reproduction_steps, expected_result, actual_result,
+             impact, observation_time, screenshot_info, contact, status, priority,
+             owner_id, zoho_form_record_id, zoho_form_sync_state, zoho_sheet_row_id,
+             next_update_at, resolved_at, closed_at, resolution, resolution_note,
+             verification, created_at, updated_at, created_by, updated_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                feedback_id, ticket_number, actor, actor, "web",
+                feedback.issue_type, feedback.app_area, feedback.goal,
+                feedback.reproduction_steps, feedback.expected_result, feedback.actual_result,
+                feedback.impact, feedback.observation_time, feedback.screenshot_info,
+                feedback.contact, "new", "P3",
+                None, None, "pending", None, None,
+                None, None, None, None, None,
+                now, now, actor, actor,
+            ),
+        )
+        await log_audit_event("feedback", feedback_id, "created", actor, {"ticket_number": ticket_number}, db=db)
+        await db.commit()
+    finally:
+        await db.close()
+
+    # Enqueue Zoho sync (best-effort, never blocks)
+    try:
+        from .feedback_sync import enqueue_feedback_create
+        await enqueue_feedback_create(feedback_id)
+    except Exception:
+        pass
+
+    return FeedbackResponse(
+        feedback_id=feedback_id, ticket_number=ticket_number,
+        actor_user_id=actor, actor_role=actor, source_route="web",
+        issue_type=feedback.issue_type, app_area=feedback.app_area, goal=feedback.goal,
+        impact=feedback.impact, status="new", priority="P3",
+        owner_id=None, zoho_form_record_id=None, zoho_form_sync_state="pending",
+        zoho_sheet_row_id=None, next_update_at=None,
+        created_at=now, updated_at=now, created_by=actor,
+    )
+
+
+@router.get("/feedback", response_model=List[FeedbackResponse])
+async def list_feedback(request: Request, status: Optional[str] = None, issue_type: Optional[str] = None, limit: int = 50, offset: int = 0):
+    _check(request, "feedback:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if issue_type:
+            conditions.append("issue_type = ?")
+            params.append(issue_type)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(
+            f"SELECT * FROM feedback WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        rows = await cursor.fetchall()
+        return [FeedbackResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()

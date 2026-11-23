@@ -30,6 +30,7 @@ PERMISSIONS = [
     "personnel:read", "personnel:view", "personnel:manage",
     "settings:read", "settings:manage",
     "backup:read", "backup:run",
+    "feedback:create", "feedback:read",
 ]
 
 ROLE_PERMISSIONS = {
@@ -43,14 +44,14 @@ ROLE_PERMISSIONS = {
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
         "flight:release", "risk_assessment:approve", "security:read_sensitive", "security:manage",
-        "audit_report:read", "organization:overview", "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
+        "audit_report:read", "organization:overview", "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close", "feedback:create", "feedback:read",
     },
     "librarian": {
         "document:create", "document:read", "document:update", "document:propose", "document:annotate",
         "document:download", "document.section.view", "document.section.extract",
         "document.section.manage", "document.policy.manage",
         "change_request:create", "distribution:manage", "retention:manage", "legal_hold:manage",
-        "compliance:read", "audit:read", "safety:read", "roc:read", "aircraft:read",
+        "compliance:read", "audit:read", "safety:read", "roc:read", "aircraft:read", "feedback:create", "feedback:read",
     },
     "head_quality": {
         "document:read", "document:approve", "document:publish", "document:propose", "document:annotate",
@@ -60,56 +61,57 @@ ROLE_PERMISSIONS = {
         "audit:read", "audit:manage", "safety:read", "safety:create", "safety:update", "safety:close",
         "roc:read", "aircraft:read", "personnel:read", "personnel:view",
         "audit_report:read", "audit_finding:read", "audit_finding:create", "audit_finding:update",
+        "feedback:create", "feedback:read",
     },
     "head_safety": {
         "document:read", "document.section.view", "document.section.extract", "document:propose", "document:annotate", "safety:read", "safety:create",
         "safety:update", "safety:close", "risk_assessment:approve", "occurrence:acknowledge", "occurrence:investigate",
         "roc:read", "aircraft:read", "audit:read", "personnel:read", "personnel:view",
-        "security:read_sensitive", "audit_finding:read", "audit_finding:create", "audit_finding:update",
+        "security:read_sensitive", "audit_finding:read", "audit_finding:create", "audit_finding:update", "feedback:create", "feedback:read",
     },
     "head_security": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "safety:update", "audit:read", "roc:read", "aircraft:read",
         "personnel:read", "personnel:view", "security:read_sensitive", "security:manage",
-        "audit_finding:read", "audit_finding:create", "audit_finding:update",
+        "audit_finding:read", "audit_finding:create", "audit_finding:update", "feedback:create", "feedback:read",
     },
     "head_operations": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "safety:update", "risk_assessment:approve", "flight:release", "roc:read", "roc:manage", "aircraft:read",
         "aircraft:manage", "aircraft:view", "compliance:read", "audit:read", "personnel:read",
-        "personnel:view", "personnel:manage",
+        "personnel:view", "personnel:manage", "feedback:create", "feedback:read",
     },
     "chief_pilot": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "risk_assessment:approve", "flight:release", "roc:read", "aircraft:read", "audit:read",
-        "personnel:read", "personnel:view",
+        "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "flight_ops_officer": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "roc:read", "aircraft:read",
-        "personnel:read", "personnel:view",
+        "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "head_training": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "roc:read", "aircraft:read",
-        "personnel:read", "personnel:view", "personnel:manage",
+        "personnel:read", "personnel:view", "personnel:manage", "feedback:create", "feedback:read",
     },
     "head_maintenance": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "roc:read", "aircraft:read",
-        "aircraft:manage", "aircraft:view", "audit:read", "personnel:read", "personnel:view",
+        "aircraft:manage", "aircraft:view", "audit:read", "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "dg_coordinator": {
         "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "roc:read", "aircraft:read",
-        "personnel:read", "personnel:view",
+        "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "occurrence_reporter": {
-        "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "occurrence:report", "roc:read", "aircraft:read",
+        "document:read", "document.section.view", "document.section.extract", "safety:read", "safety:create", "occurrence:report", "roc:read", "aircraft:read", "feedback:create", "feedback:read",
     },
     "records_custodian": {
         "document:read", "document.section.view", "document.section.extract", "retention:manage", "legal_hold:manage", "compliance:read", "audit:read",
-        "roc:read", "aircraft:read", "personnel:read", "personnel:view",
+        "roc:read", "aircraft:read", "personnel:read", "personnel:view", "feedback:read",
     },
     "independent_auditor": {
         "document:read", "document.section.view", "audit:read", "audit:manage", "compliance:read",
         "safety:read", "roc:read", "aircraft:read", "personnel:read", "personnel:view",
-        "audit_finding:read", "audit_report:read", "audit_report:provenance_verify",
+        "audit_finding:read", "audit_report:read", "audit_report:provenance_verify", "feedback:read",
     },
-    "as_contracted": {"document:read", "document.section.view", "safety:read", "roc:read", "aircraft:read"},
+    "as_contracted": {"document:read", "document.section.view", "safety:read", "roc:read", "aircraft:read", "feedback:read"},
 }
 
 ROLE_DESCRIPTIONS = {
