@@ -334,6 +334,41 @@ CREATE TABLE IF NOT EXISTS legal_holds (
     updated_at TEXT NOT NULL
 );
 
+-- Pilot feedback / ticketing
+CREATE TABLE IF NOT EXISTS feedback (
+    feedback_id TEXT PRIMARY KEY,
+    ticket_number TEXT NOT NULL UNIQUE,
+    actor_user_id TEXT NOT NULL,
+    actor_role TEXT NOT NULL,
+    source_route TEXT NOT NULL DEFAULT 'web',
+    issue_type TEXT NOT NULL,
+    app_area TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    reproduction_steps TEXT DEFAULT '',
+    expected_result TEXT DEFAULT '',
+    actual_result TEXT DEFAULT '',
+    impact TEXT NOT NULL DEFAULT 'workaround',
+    observation_time TEXT,
+    screenshot_info TEXT,
+    contact TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    priority TEXT NOT NULL DEFAULT 'P3',
+    owner_id TEXT,
+    zoho_form_record_id TEXT,
+    zoho_form_sync_state TEXT NOT NULL DEFAULT 'pending',
+    zoho_sheet_row_id TEXT,
+    next_update_at TEXT,
+    resolved_at TEXT,
+    closed_at TEXT,
+    resolution TEXT,
+    resolution_note TEXT,
+    verification TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+
 -- Audit events
 CREATE TABLE IF NOT EXISTS audit_events (
     event_id TEXT PRIMARY KEY,

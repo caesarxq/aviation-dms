@@ -451,3 +451,40 @@ class HeadingBasedExtractResponse(BaseModel):
     watermark_applied: bool
     download_url: str
     created_at: str
+
+
+# --- Pilot Feedback / Ticketing ---
+
+class FeedbackCreate(BaseModel):
+    issue_type: str
+    app_area: str
+    goal: str
+    reproduction_steps: str = ""
+    expected_result: str = ""
+    actual_result: str = ""
+    impact: str = "workaround"
+    observation_time: str
+    contact: str
+    screenshot_info: Optional[str] = None
+
+class FeedbackResponse(BaseModel):
+    feedback_id: str
+    ticket_number: str
+    actor_user_id: str
+    actor_role: str
+    source_route: str
+    issue_type: str
+    app_area: str
+    goal: str
+    impact: str
+    status: str
+    priority: str
+    owner_id: Optional[str]
+    zoho_form_record_id: Optional[str]
+    zoho_form_sync_state: str
+    zoho_sheet_row_id: Optional[str]
+    next_update_at: Optional[str]
+    created_at: str
+    updated_at: str
+    created_by: str
+

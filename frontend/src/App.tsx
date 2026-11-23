@@ -55,6 +55,7 @@ const SelfServiceUpload = lazy(() => import("./pages/SelfServiceUpload").then((m
 const AircraftInsurance = lazy(() => import("./pages/AircraftInsurance").then((module) => ({ default: module.AircraftInsurance })));
 const AdminObservability = lazy(() => import("./pages/AdminObservability").then((module) => ({ default: module.default })));
 const DocumentControllerDashboard = lazy(() => import("./pages/DocumentControllerDashboard").then((module) => ({ default: module.DocumentControllerDashboard })));
+const Feedback = lazy(() => import("./pages/Feedback").then((module) => ({ default: module.FeedbackPage })));
 const ComplianceDashboard = lazy(() => import("./pages/ComplianceDashboard").then((module) => ({ default: module.ComplianceDashboard })));
 
 function RouteLoading() {
@@ -132,6 +133,7 @@ export default function App() {
               <Route path="/admin/observability" element={<RequireAccess role="system_admin"><AdminObservability /></RequireAccess>} />
               <Route path="/document-controller" element={<RequireAccess anyPermissions={["document:policy.manage", "document:read"]}><DocumentControllerDashboard /></RequireAccess>} />
               <Route path="/compliance" element={<RequireAccess anyPermissions={["audit:read", "document.section.extract", "document.extract.approve"]}><ComplianceDashboard /></RequireAccess>} />
+              <Route path="/feedback" element={<RequireAccess permission="feedback:create"><Feedback /></RequireAccess>} />
               <Route path="/audit-reports" element={<RequireAccess permission="audit_report:read"><AuditReports /></RequireAccess>} />
               <Route path="/audit-findings" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
               <Route path="/audit-findings/:findingId" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
