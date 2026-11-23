@@ -171,11 +171,11 @@ export const safetyApi = {
   addReviewComment: (crId: string, data: any) =>
     api.post<ReviewComment>(`/p1/change-requests/${crId}/comments`, data).then((r: any) => r.data),
   listFeedback: (params?: Record<string, any>) =>
-    api.get<Feedback[]>(`/p1/feedback`, { params }).then((r: any) => r.data),
+    api.get<Feedback[]>(`/p0/feedback`, { params }).then((r: any) => r.data),
   getFeedback: (id: string) =>
-    api.get<Feedback>(`/p1/feedback/${id}`).then((r: any) => r.data),
+    api.get<Feedback>(`/p0/feedback/${id}`).then((r: any) => r.data),
   createFeedback: (data: any) =>
-    api.post<Feedback>(`/p1/feedback`, data).then((r: any) => r.data),
+    api.post<Feedback>(`/p0/feedback`, data).then((r: any) => r.data),
   updateFeedback: (id: string, data: any) =>
-    api.patch<Feedback>(`/p1/feedback/${id}`, data).then((r: any) => r.data),
+    api.patch<Feedback>(`/p0/feedback/${id}`, data).then((r: any) => r.data),
 };
