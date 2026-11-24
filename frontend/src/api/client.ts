@@ -31,7 +31,7 @@ api.interceptors.response.use(
       window.dispatchEvent(new Event("kfl:session-expired"));
     }
     return Promise.reject(error);
-  },
+  }
 );
 
 export default api;

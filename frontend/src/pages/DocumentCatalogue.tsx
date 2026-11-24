@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, FileText, Search, ShieldCheck, Plus, Shuffle } from "lucide-react";
+import { ArrowUpRight, FileText, ShieldCheck, Plus, Shuffle } from "lucide-react";
 import api from "../api/client";
 import { Modal } from "../components/ui/Modal";
 import FormField from "../components/ui/FormField";
@@ -23,8 +23,6 @@ export function DocumentCatalogue() {
   const canCreate = hasPermission("document:create");
   const canUpdate = hasPermission("document:update");
   const canEdit = canUpdate || hasPermission("document:propose");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
   const [showNewDoc, setShowNewDoc] = useState(false);
   const [showVersionDiffModal, setShowVersionDiffModal] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -79,11 +77,6 @@ export function DocumentCatalogue() {
     }
     createMutation.mutate(newDocForm);
   };
-
-  const filteredDocs = useMemo(() => docs.filter((d: any) => {
-    const haystack = `${d.title} ${d.document_id} ${d.doc_class}`.toLowerCase();
-    return haystack.includes(search.toLowerCase()) && (!status || d.status === status);
-  }), [docs, search, status]);
 
   return (
     <div className="app-page">
@@ -180,30 +173,16 @@ export function DocumentCatalogue() {
 
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
-          <div className="relative min-w-0 flex-1 md:max-w-md">
-            <Search size={16} className="pointer-events-none absolute left-3 top-3 text-kfl-muted" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, ID, or class" className="pl-9" aria-label="Search documents" />
-          </div>
-          <Select onValueChange={e => setStatus(e)}>
-            <SelectTrigger aria-label="Filter document status">
-              <SelectValue placeholder={status || "All statuses"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
-              <SelectItem value="published">Published</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="in_review">In review</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="text-sm text-kfl-muted">Use the global search bar for cross-resource filtering, including documents.</div>
         </div>
-        {isLoading ? <div className="p-10 text-center text-sm text-kfl-muted">Loading controlled documents…</div> : filteredDocs.length === 0 ? <div className="p-10 text-center text-sm text-kfl-muted">No documents match this view.</div> : (
+        {isLoading ? <div className="p-10 text-center text-sm text-kfl-muted">Loading controlled documents…</div> : docs.length === 0 ? <div className="p-10 text-center text-sm text-kfl-muted">No documents in the catalogue.</div> : (
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
                 <tr>{["Title", "Class", "Status", "Classification", "KCAA", "Review Due", "Actions"].map((heading) => <th key={heading} className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">{heading}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-kfl-border">
-                {filteredDocs.map((d: any) => (
+                {docs.map((d: any) => (
                   <tr key={d.document_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4"><div className="font-semibold text-kfl-text">{d.title}</div><div className="mt-1 font-mono text-[11px] text-kfl-muted">{d.document_id}</div></td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{d.doc_class}</td>
