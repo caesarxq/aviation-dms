@@ -123,6 +123,14 @@ describe("Risk assessment workflow", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: /Likelihood/ }), "frequent");
     await user.selectOptions(screen.getByRole("combobox", { name: /Severity/ }), "catastrophic");
     await user.selectOptions(screen.getByRole("combobox", { name: /Exposure/ }), "rare");
+    
+    // Fill in required PDF-aligned fields for OM flight risk model
+    await user.type(screen.getByLabelText(/PIC Full Name/), "John Smith");
+    await user.type(screen.getByLabelText(/Location \/ Coordinates/), "40.7128,-74.0060");
+    await user.type(screen.getByLabelText(/Drone Type \/ Model/), "DJI Matrice 300");
+    await user.type(screen.getByLabelText(/Project Type/), "Survey");
+    await user.selectOptions(screen.getByRole("combobox", { name: /Flight Decision/ }), "Hold");
+    
     await user.click(screen.getByRole("button", { name: "Submit Assessment" }));
 
     await waitFor(() => expect(safetyApi.createRiskAssessment).toHaveBeenCalledWith(expect.objectContaining({
@@ -180,6 +188,16 @@ describe("Risk assessment workflow", () => {
     await user.click(screen.getByRole("button", { name: "New Assessment" }));
     await user.type(screen.getByLabelText(/Assessment title/), "Linked assessment");
     await user.type(screen.getByLabelText(/Description/), "Detailed risk scenario");
+    
+    // Fill in required fields to pass validation
+    await user.type(screen.getByLabelText(/Assessment title/), "Linked assessment");
+    await user.type(screen.getByLabelText(/Description/), "Detailed risk scenario");
+    await user.type(screen.getByLabelText(/PIC Full Name/), "John Smith");
+    await user.type(screen.getByLabelText(/Location \/ Coordinates/), "40.7128,-74.0060");
+    await user.type(screen.getByLabelText(/Drone Type \/ Model/), "DJI Matrice 300");
+    await user.type(screen.getByLabelText(/Project Type/), "Survey");
+    await user.selectOptions(screen.getByRole("combobox", { name: /Flight Decision/ }), "Hold");
+    
     await user.click(screen.getByRole("button", { name: "Submit Assessment" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Mission not found for risk assessment");
   });
