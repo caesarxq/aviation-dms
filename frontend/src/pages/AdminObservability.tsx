@@ -84,26 +84,39 @@ export default function AdminObservability() {
   });
 
   // Backup history query
-  const { data: backupHistory } = useQuery({
+  const { data: backupHistoryRaw } = useQuery({
     queryKey: ["backup-history"],
     queryFn: () => api.get("/p0/backup/history?limit=10").then((response: any) => response.data),
     refetchInterval: 30000,
     enabled: true,
   });
 
+  // Ensure backupHistory is always an object with events array
+  const backupHistory = backupHistoryRaw && typeof backupHistoryRaw === 'object' && Array.isArray(backupHistoryRaw.events)
+    ? backupHistoryRaw
+    : { events: [] };
+
+  const backupRuns = backupHistory.events;
+
   // App version releases
-  const { data: appVersions = [], isLoading: versionsLoading } = useQuery({
+  const { data: appVersionsRaw, isLoading: versionsLoading } = useQuery({
     queryKey: ["app-versions"],
     queryFn: () => api.get("/p0/app-versions").then((response: any) => response.data),
     refetchInterval: 60000,
   });
 
+  // Ensure appVersions is always an array
+  const appVersions = Array.isArray(appVersionsRaw) ? appVersionsRaw : [];
+
   // Audit events browser
-  const { data: auditEvents = [], isLoading: auditLoading } = useQuery({
+  const { data: auditEventsRaw, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-events-admin"],
     queryFn: () => api.get("/p0/audit-events", { params: { limit: 50 } }).then((response: any) => response.data),
     refetchInterval: 120000,
   });
+
+  // Ensure auditEvents is always an array
+  const auditEvents = Array.isArray(auditEventsRaw) ? auditEventsRaw : [];
 
   const [backupNotice, setBackupNotice] = useState("");
   const [backupError, setBackupError] = useState("");
@@ -213,15 +226,14 @@ export default function AdminObservability() {
   const backup = health.backup || {};
   const scanner = health.scanner || {};
 
-  const backupRuns = backupHistory?.events || [];
-
   return (
     <div className="app-page">
       <header className="app-page-header">
         <div>
           <div className="app-eyebrow">Administration</div>
           <h1 className="app-title">System Observability</h1>
-          <p className="app-subtitle">System health, workflow posture, audit activity, backup state, and administrator-controlled access profiles.</p>
+          <p className="app-subtitle">System health, workflow posture, audit activity, backup state, and administrator-controlled access profiles.
+</p>
         </div>
         <Button onClick={() => refetch()} variant="outline" size="sm" disabled={isFetching}>
           <RefreshCw size={15} className={isFetching ? "animate-spin" : ""} /> Refresh
