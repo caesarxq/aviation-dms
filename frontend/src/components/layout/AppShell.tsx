@@ -33,6 +33,7 @@ import { safetyApi } from "../../api/safety";
 import { useAuth } from "../../auth/AuthContext";
 import { getPostLoginPath, ROLE_WORKSPACES } from "../../auth/permissions";
 import { WorkspaceGuide } from "./WorkspaceGuide";
+import { FilterBar } from "./FilterBar";
 import { Button } from "@/components/ui/button";
 import FloatingFeedbackButton from "@/components/FloatingFeedbackButton";
 
@@ -477,6 +478,7 @@ export function AppShell() {
             activeRole={profile.active_role}
           />
         )}
+        <FilterBar className="mb-4 px-4" />
         <Outlet />
       </main>
     </div>

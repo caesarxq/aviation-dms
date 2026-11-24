@@ -123,6 +123,7 @@ class P0AuthMiddleware(BaseHTTPMiddleware):
         "/api/p0/auth/password-setup",
         "/api/p0/auth/forgot-password",
         "/api/p0/auth/reset-password",
+        "/oauth/callback",
     })
     SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
     API_PREFIXES = ("/api/p0", "/api/p1", "/api/p2", "/api/p3")

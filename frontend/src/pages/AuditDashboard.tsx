@@ -1,6 +1,14 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { auditApi } from "../api/audit";
 import { AlertTriangle, BarChart3, ShieldAlert } from "lucide-react";
+
+const DEPARTMENTS = [
+  { key: "all", label: "All Departments" },
+  { key: "quality", label: "Quality", role: "head_quality" },
+  { key: "safety", label: "Safety", role: "head_safety" },
+  { key: "security", label: "Security", role: "head_security" },
+];
 
 function MetricCard({ label, value, sublabel, icon: Icon, tone = "blue" }: any) {
   const tones: Record<string, string> = {
@@ -14,9 +22,7 @@ function MetricCard({ label, value, sublabel, icon: Icon, tone = "blue" }: any) 
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="app-label">{label}</div>
-          <div className="mt-3 text-3xl font-bold tracking-tight text-kfl-text">
-            {value}
-          </div>
+          <div className="mt-3 text-3xl font-bold tracking-tight text-kfl-text">{value}</div>
           {sublabel && <div className="mt-1 text-xs text-kfl-muted">{sublabel}</div>}
         </div>
         <div className={`rounded-lg p-2.5 ${tones[tone] || tones.blue}`}>
@@ -28,9 +34,12 @@ function MetricCard({ label, value, sublabel, icon: Icon, tone = "blue" }: any) 
 }
 
 export function AuditDashboard() {
+  const [department, setDepartment] = useState<"all" | "quality" | "safety" | "security">("all");
+
+  const deptParam = department === "all" ? undefined : department;
   const { data: summary, isLoading, isError, refetch, isSuccess } = useQuery({
-    queryKey: ["audit-findings-summary"],
-    queryFn: () => auditApi.getAuditFindingsSummary(),
+    queryKey: ["audit-findings-summary", deptParam],
+    queryFn: () => auditApi.getAuditFindingsSummary(deptParam),
   });
 
   const data = summary as {
@@ -48,7 +57,9 @@ export function AuditDashboard() {
   const byLevel = data?.by_level ?? {};
   const byStatus = data?.by_status ?? {};
   const byArea = data?.by_area ?? {};
-  const metricValue = (value: number) => isSuccess ? value : "—";
+  const metricValue = (value: number) => (isSuccess ? value : "—");
+
+  const activeDept = DEPARTMENTS.find((d) => d.key === department);
 
   return (
     <div className="app-page">
@@ -60,10 +71,36 @@ export function AuditDashboard() {
             Overview of audit findings and corrective action status.
           </p>
         </div>
+        <div className="flex gap-1">
+          {DEPARTMENTS.map((d) => {
+            const isActive = department === d.key;
+            return (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => setDepartment(d.key as "all" | "quality" | "safety" | "security")}
+                className={`text-xs px-3 py-1.5 rounded border transition ${
+                  isActive
+                    ? "bg-kfl-blue text-white border-kfl-blue"
+                    : "bg-kfl-surface text-kfl-text border-kfl-border hover:bg-kfl-surface-subtle"
+                }`}
+              >
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
       </header>
 
       {isLoading && <div className="mb-4 text-sm text-kfl-muted">Loading audit summary…</div>}
-      {isError && <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">Unable to load audit summary. <button type="button" onClick={() => void refetch()} className="font-semibold underline">Retry</button></div>}
+      {isError && (
+        <div role="alert" className="mb-4 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">
+          Unable to load audit summary.{" "}
+          <button type="button" onClick={() => void refetch()} className="font-semibold underline">
+            Retry
+          </button>
+        </div>
+      )}
 
       <section className="mb-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
@@ -94,72 +131,68 @@ export function AuditDashboard() {
         />
       </section>
 
-      <section className="mb-7 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="app-surface overflow-hidden">
-          <div className="border-b border-kfl-border p-4">
-            <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
-              Findings by Level
-            </h2>
+      {activeDept && (
+        <section className="mb-7 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="app-surface overflow-hidden">
+            <div className="border-b border-kfl-border p-4">
+              <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
+                Findings by Level
+              </h2>
+            </div>
+            <div className="p-5">
+              {Object.entries(byLevel).map(([level, count]) => (
+                <div key={level} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
+                  <span className="text-sm text-kfl-text">Level {level}</span>
+                  <span className="font-mono text-[12px] text-kfl-text">{count}</span>
+                </div>
+              ))}
+              {Object.keys(byLevel).length === 0 && (
+                <div className="p-5 text-center text-sm text-kfl-muted">No data</div>
+              )}
+            </div>
           </div>
-          <div className="p-5">
-            {Object.entries(byLevel).map(([level, count]) => (
-              <div key={level} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
-                <span className="text-sm text-kfl-text">Level {level}</span>
-                <span className="font-mono text-[12px] text-kfl-text">{count}</span>
-              </div>
-            ))}
-            {Object.keys(byLevel).length === 0 && (
-              <div className="p-5 text-center text-sm text-kfl-muted">
-                No data
-              </div>
-            )}
-          </div>
-        </div>
 
-        <div className="app-surface overflow-hidden">
-          <div className="border-b border-kfl-border p-4">
-            <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
-              Findings by Area
-            </h2>
+          <div className="app-surface overflow-hidden">
+            <div className="border-b border-kfl-border p-4">
+              <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
+                Findings by Area
+              </h2>
+            </div>
+            <div className="p-5">
+              {Object.entries(byArea).map(([area, count]) => (
+                <div key={area} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
+                  <span className="text-sm text-kfl-text">{area}</span>
+                  <span className="font-mono text-[12px] text-kfl-text">{count}</span>
+                </div>
+              ))}
+              {Object.keys(byArea).length === 0 && (
+                <div className="p-5 text-center text-sm text-kfl-muted">No data</div>
+              )}
+            </div>
           </div>
-          <div className="p-5">
-            {Object.entries(byArea).map(([area, count]) => (
-              <div key={area} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
-                <span className="text-sm text-kfl-text">{area}</span>
-                <span className="font-mono text-[12px] text-kfl-text">{count}</span>
-              </div>
-            ))}
-            {Object.keys(byArea).length === 0 && (
-              <div className="p-5 text-center text-sm text-kfl-muted">
-                No data
-              </div>
-            )}
-          </div>
-        </div>
 
-        <div className="app-surface overflow-hidden">
-          <div className="border-b border-kfl-border p-4">
-            <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
-              Findings by Status
-            </h2>
+          <div className="app-surface overflow-hidden">
+            <div className="border-b border-kfl-border p-4">
+              <h2 className="text-sm font-bold text-kfl-text uppercase tracking-wider">
+                Findings by Status
+              </h2>
+            </div>
+            <div className="p-5">
+              {Object.entries(byStatus).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
+                  <span className="text-sm text-kfl-text">{status.replace(/_/g, " ").toUpperCase()}</span>
+                  <span className="font-mono text-[12px] text-kfl-text">{count}</span>
+                </div>
+              ))}
+              {Object.keys(byStatus).length === 0 && (
+                <div className="p-5 text-center text-sm text-kfl-muted">No data</div>
+              )}
+            </div>
           </div>
-          <div className="p-5">
-            {Object.entries(byStatus).map(([status, count]) => (
-              <div key={status} className="flex items-center justify-between py-3 border-b border-kfl-border last:border-0">
-                <span className="text-sm text-kfl-text">
-                  {status.replace(/_/g, " ").toUpperCase()}
-                </span>
-                <span className="font-mono text-[12px] text-kfl-text">{count}</span>
-              </div>
-            ))}
-            {Object.keys(byStatus).length === 0 && (
-              <div className="p-5 text-center text-sm text-kfl-muted">
-                No data
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 }
+
+export default AuditDashboard;

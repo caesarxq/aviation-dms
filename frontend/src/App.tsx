@@ -57,6 +57,7 @@ const AdminObservability = lazy(() => import("./pages/AdminObservability").then(
 const DocumentControllerDashboard = lazy(() => import("./pages/DocumentControllerDashboard").then((module) => ({ default: module.DocumentControllerDashboard })));
 const Feedback = lazy(() => import("./pages/Feedback").then((module) => ({ default: module.FeedbackPage })));
 const ComplianceDashboard = lazy(() => import("./pages/ComplianceDashboard").then((module) => ({ default: module.ComplianceDashboard })));
+const BulkRoleInvite = lazy(() => import("./pages/BulkRoleInvite").then((module) => ({ default: module.BulkRoleInvite })));
 
 function RouteLoading() {
   return <div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading page…</div>;
@@ -131,6 +132,7 @@ export default function App() {
               <Route path="/version-diff" element={<RequireAccess permission="document:read"><VersionDiff /></RequireAccess>} />
               <Route path="/aircraft-insurance" element={<RequireAccess permission="aircraft:read"><AircraftInsurance /></RequireAccess>} />
               <Route path="/admin/observability" element={<RequireAccess role="system_admin"><AdminObservability /></RequireAccess>} />
+              <Route path="/admin/bulk-role-invite" element={<RequireAccess role="system_admin"><BulkRoleInvite /></RequireAccess>} />
               <Route path="/document-controller" element={<RequireAccess anyPermissions={["document:policy.manage", "document:read"]}><DocumentControllerDashboard /></RequireAccess>} />
               <Route path="/compliance" element={<RequireAccess anyPermissions={["audit:read", "document.section.extract", "document.extract.approve"]}><ComplianceDashboard /></RequireAccess>} />
               <Route path="/feedback" element={<RequireAccess permission="feedback:create"><Feedback /></RequireAccess>} />

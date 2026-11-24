@@ -1,8 +1,7 @@
 """P2 API routes - Document Proposals/Annotations, Personnel Licenses, Aircraft Insurance."""
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile as FastAPIUploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
-from starlette.datastructures import UploadFile
 from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 import uuid
@@ -18,6 +17,7 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
+from .upload_ingestion import extract_pdf_text, classify_and_extract, _compute_file_hash
 from .upload_safety import (
     UploadMalwareDetected,
     UploadQuotaExceeded,
@@ -33,6 +33,7 @@ from .upload_safety import (
     upload_request_limit,
 )
 from .upload_validation import UploadContentInvalid, UploadValidationUnavailable, validate_upload_content
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 router = APIRouter()
 
@@ -96,6 +97,16 @@ async def _get_latest_version(db, doc_id: str):
 
 async def _get_proposal_source_version(db, doc_id: str):
     """Prefer the effective published version; preserve draft-only legacy workflows."""
+    # Check if document is editable (not ROC/OPS Spec or OEM publication)
+    doc = await (await db.execute(
+        "SELECT doc_class, document_category FROM documents WHERE document_id = ?", (doc_id,)
+    )).fetchone()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc["document_category"] in ("roc_ops_spec", "oem_publication"):
+        raise HTTPException(status_code=403, detail="ROC/OPS Spec and OEM publications cannot be edited via change proposals")
+    if doc["doc_class"] in ("roc_spec", "ops_spec", "oem_publication"):
+        raise HTTPException(status_code=403, detail="ROC/OPS Spec and OEM publications cannot be edited via change proposals")
     async with db.execute(
         """SELECT v.* FROM documents d
            JOIN document_versions v ON v.version_id = d.current_version_id
@@ -1225,7 +1236,7 @@ async def create_personnel_upload_file(request: Request):
         raise HTTPException(status_code=400, detail="Invalid multipart upload") from exc
 
     file = form.get("file")
-    if not isinstance(file, UploadFile):
+    if not isinstance(file, StarletteUploadFile):
         await form.close()
         raise HTTPException(status_code=422, detail="A credential file is required")
 
@@ -1561,6 +1572,274 @@ async def verify_personnel_upload(upload_id: str, body: PersonnelUploadVerificat
     except Exception:
         if db.in_transaction:
             await _rollback_safely(db)
+        raise
+    finally:
+        await db.close()
+
+
+# ==================== DOCUMENT INGESTION (Phase 3) ====================
+
+class IngestDocumentResponse(BaseModel):
+    document_type: str
+    confidence: float
+    extracted_fields: dict
+    target_table: str
+    raw_text_preview: str
+
+
+class ApplyIngestionRequest(BaseModel):
+    document_type: str
+    target_table: str
+    extracted_fields: dict
+    aircraft_id: Optional[str] = None
+    person_id: Optional[str] = None
+    document_id: Optional[str] = None
+
+
+@router.post("/ingest/document", response_model=IngestDocumentResponse)
+async def ingest_document(request: Request, file: FastAPIUploadFile = File(...)) -> IngestDocumentResponse:
+    """Upload a PDF credential/certificate, extract text, classify, and return extracted fields.
+
+    The extracted data is returned for user review before being applied to the
+    correct business table via /ingest/document/apply. All auto-extracted data
+    requires human verification.
+    """
+    _check(request, "aircraft:manage")
+    actor = _actor(request)
+    now = now_iso()
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+    # Compute file hash for duplicate detection
+    file_hash = _compute_file_hash(file_bytes)
+
+    text = extract_pdf_text(file_bytes)
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="No text could be extracted from the PDF")
+
+    result = classify_and_extract(text)
+
+    # Check for duplicate (same file hash already ingested)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT document_id, document_type, created_at FROM document_ingestion_log WHERE file_sha256 = ?",
+            (file_hash,),
+        )
+        duplicate = await cursor.fetchone()
+        if duplicate:
+            return IngestDocumentResponse(
+                document_type=duplicate["document_type"],
+                confidence=result.confidence,
+                extracted_fields=result.extracted_fields,
+                target_table=result.target_table,
+                raw_text_preview=result.raw_text[:500] + ("…" if len(result.raw_text) > 500 else ""),
+            )
+    finally:
+        await db.close()
+
+    # Log the ingestion attempt
+    db = await get_db()
+    try:
+        await log_audit_event(
+            "document_ingestion",
+            str(uuid.uuid4()),
+            "ingested",
+            actor,
+            {
+                "filename": file.filename,
+                "document_type": result.document_type,
+                "confidence": result.confidence,
+                "target_table": result.target_table,
+                "file_size": len(file_bytes),
+                "file_sha256": file_hash,
+            },
+            db=db,
+        )
+        # Log to document_ingestion_log for duplicate detection
+        log_id = _gen_id("ING")
+        await db.execute(
+            """INSERT INTO document_ingestion_log
+               (log_id, document_id, document_type, file_name, file_sha256, file_size, target_table, created_at, created_by)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (log_id, None, result.document_type, file.filename, file_hash, len(file_bytes), result.target_table, now, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return IngestDocumentResponse(
+        document_type=result.document_type,
+        confidence=result.confidence,
+        extracted_fields=result.extracted_fields,
+        target_table=result.target_table,
+        raw_text_preview=result.raw_text[:500] + ("..." if len(result.raw_text) > 500 else ""),
+    )
+
+
+@router.post("/ingest/document/apply")
+async def apply_ingestion(request: Request, payload: ApplyIngestionRequest):
+    """Apply ingested document data to the correct business table.
+
+    Creates a record in aircraft_insurance, aircraft_documents, personnel_licenses,
+    or documents with verification_status='pending' for human review.
+    """
+    _check(request, "aircraft:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        fields = payload.extracted_fields
+
+        if payload.target_table == "aircraft_insurance":
+            if not payload.aircraft_id:
+                raise HTTPException(status_code=400, detail="aircraft_id is required for insurance ingestion")
+            ins_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO aircraft_insurance
+                   (insurance_id, aircraft_id, insurance_type, policy_number, insurer, broker,
+                    coverage_amount, currency, premium_amount, premium_currency, start_date,
+                    expiry_date, status, document_ref, renewal_status, verified_by, verified_at,
+                    created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?,?,?)""",
+                (
+                    ins_id, payload.aircraft_id,
+                    fields.get("insurance_type", "hull"),
+                    fields.get("policy_number"),
+                    fields.get("insurer"),
+                    fields.get("broker"),
+                    fields.get("coverage_amount"),
+                    fields.get("currency", "USD"),
+                    fields.get("premium_amount"),
+                    fields.get("premium_currency", "USD"),
+                    fields.get("start_date"),
+                    fields.get("expiry_date"),
+                    "active",
+                    f"ingested:{payload.document_type}",
+                    "not_started",
+                    now, now, actor, actor,
+                ),
+            )
+            await log_audit_event(
+                "aircraft_insurance", ins_id, "ingested", actor,
+                {"aircraft_id": payload.aircraft_id, "source": "pdf_ingestion", "verified": False}, db=db,
+            )
+
+        elif payload.target_table == "aircraft_documents":
+            if not payload.aircraft_id:
+                raise HTTPException(status_code=400, detail="aircraft_id is required for aircraft document ingestion")
+            doc_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO aircraft_documents
+                   (doc_id, aircraft_id, document_type, document_number, issuing_authority,
+                    issue_date, expiry_date, status, document_ref, notes, verified_by, verified_at,
+                    created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?,?,?)""",
+                (
+                    doc_id, payload.aircraft_id,
+                    fields.get("document_type", "registration"),
+                    fields.get("document_number"),
+                    fields.get("issuing_authority", "KCAA"),
+                    fields.get("issue_date"),
+                    fields.get("expiry_date"),
+                    "valid",
+                    f"ingested:{payload.document_type}",
+                    "Auto-extracted from PDF - pending verification",
+                    now, now, actor, actor,
+                ),
+            )
+            await log_audit_event(
+                "aircraft_document", doc_id, "ingested", actor,
+                {"aircraft_id": payload.aircraft_id, "source": "pdf_ingestion", "verified": False}, db=db,
+            )
+
+        elif payload.target_table == "personnel_licenses":
+            if not payload.person_id:
+                raise HTTPException(status_code=400, detail="person_id is required for license ingestion")
+            lic_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO personnel_licenses
+                   (license_id, person_id, license_type, license_number, issuing_authority,
+                    issued_date, expiry_date, status, document_ref, aircraft_type, notes,
+                    verified_by, verified_at, created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?,?,?)""",
+                (
+                    lic_id, payload.person_id,
+                    fields.get("license_type", "pilot_license"),
+                    fields.get("license_number"),
+                    fields.get("issuing_authority", "KCAA"),
+                    fields.get("issued_date"),
+                    fields.get("expiry_date"),
+                    "valid",
+                    f"ingested:{payload.document_type}",
+                    fields.get("aircraft_type"),
+                    "Auto-extracted from PDF - pending verification",
+                    now, now, actor, actor,
+                ),
+            )
+            await log_audit_event(
+                "personnel_license", lic_id, "ingested", actor,
+                {"person_id": payload.person_id, "source": "pdf_ingestion", "verified": False}, db=db,
+            )
+
+        elif payload.target_table == "documents":
+            doc_id = str(uuid.uuid4())
+            doc_class = fields.get("doc_class", "policy")
+            await db.execute(
+                """INSERT INTO documents
+                   (document_id, title, doc_class, classification, status, owner_id,
+                    description, source_issue_revision, source_issued_date,
+                    document_category, created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    doc_id,
+                    fields.get("title", "Ingested Document"),
+                    doc_class,
+                    "S2",
+                    "draft",
+                    actor,
+                    fields.get("description", ""),
+                    fields.get("source_issue_revision"),
+                    fields.get("source_issued_date"),
+                    "regulatory_certificate",
+                    now, now, actor, actor,
+                ),
+            )
+            ver_id = f"VER-{doc_id}"
+            await db.execute(
+                """INSERT INTO document_versions
+                   (version_id, document_id, version_number, state, content, change_summary,
+                    kcaa_approved, kcaa_approved_by, kcaa_approved_at, created_at, updated_at, created_by, updated_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    ver_id, doc_id, "01.00.00", "draft",
+                    fields.get("raw_text", "")[:10000],
+                    "Auto-ingested from PDF - pending review",
+                    0, None, None, now, now, actor, actor,
+                ),
+            )
+            await db.execute(
+                "UPDATE documents SET current_version_id = ? WHERE document_id = ?",
+                (ver_id, doc_id),
+            )
+            await log_audit_event(
+                "document", doc_id, "ingested", actor,
+                {"doc_class": doc_class, "source": "pdf_ingestion", "verified": False}, db=db,
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown target table: {payload.target_table}")
+
+        await db.commit()
+        return {"status": "ingested", "target_table": payload.target_table, "created_at": now}
+
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
         raise
     finally:
         await db.close()

@@ -45,6 +45,12 @@ describe("Missions list filters", () => {
     await user.type(screen.getByLabelText(/Description/), "Coastal mapping mission");
     expect(screen.getByText(/Creating a planned mission does not authorize flight/)).toBeInTheDocument();
 
+    // Fill in required KFL Mission Sheet Template Fields
+    await user.type(screen.getByLabelText(/KCAA OA Reference Number/), "KCAA-OA-2026-001");
+    await user.type(screen.getByLabelText(/Pilot in Command \(PIC\) Name/), "John Smith");
+    await user.type(screen.getByLabelText(/Drone Type \/ Model/), "DJI Matrice 300");
+    await user.type(screen.getByLabelText(/PIC Full Name \(Sign-off\)/), "John Smith");
+
     await user.click(screen.getByRole("button", { name: "Create Mission" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith("/p1/missions", expect.objectContaining({
       title: "Coastal survey", mission_type: "survey", priority: "normal", planned_date: "2026-11-20",

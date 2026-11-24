@@ -18,6 +18,7 @@ export function FloatingFeedbackButton() {
     expected_result: "",
     actual_result: "",
     impact: "workaround",
+    priority: "P3",
     observation_time: "",
     contact: "",
     screenshot_info: "",
@@ -36,6 +37,7 @@ export function FloatingFeedbackButton() {
         expected_result: "",
         actual_result: "",
         impact: "workaround",
+        priority: "P3",
         observation_time: "",
         contact: "",
         screenshot_info: "",
@@ -148,6 +150,25 @@ export function FloatingFeedbackButton() {
                       <SelectItem value="block">Blocks my work</SelectItem>
                       <SelectItem value="workaround">Workaround exists</SelectItem>
                       <SelectItem value="suggestion">Suggestion</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <label className="block text-xs font-semibold text-kfl-muted uppercase tracking-wider">
+                    Priority
+                  </label>
+                  <Select
+                    onValueChange={(e) => setForm({ ...form, priority: e })}
+                    value={form.priority}
+                  >
+                    <SelectTrigger id="fb_priority" name="priority" className="h-9">
+                      <SelectValue placeholder={form.priority} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="P1">P1 - Critical</SelectItem>
+                      <SelectItem value="P2">P2 - High</SelectItem>
+                      <SelectItem value="P3">P3 - Medium</SelectItem>
+                      <SelectItem value="P4">P4 - Low</SelectItem>
+                      <SelectItem value="P5">P5 - Trivial</SelectItem>
                     </SelectContent>
                   </Select>
 

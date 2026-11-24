@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
-import { CheckCircle, ShieldCheck, Plus } from "lucide-react";
+import { CheckCircle, ShieldCheck, Plus, Download, UserCheck } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
@@ -50,6 +50,30 @@ export function RiskAssessments() {
   const [createError, setCreateError] = useState("");
   const [actionError, setActionError] = useState("");
   const [lastCreated, setLastCreated] = useState<RiskAssessment | null>(null);
+
+  // PDF-aligned fields matching KFL Drone Risk Assessment template
+  const [picFullName, setPicFullName] = useState("");
+  const [locationCoordinates, setLocationCoordinates] = useState("");
+  const [droneTypeModel, setDroneTypeModel] = useState("");
+  const [projectType, setProjectType] = useState("");
+  const [flightDecision, setFlightDecision] = useState("");
+  const [conditionsNotes, setConditionsNotes] = useState("");
+  const [headOfSafetyName, setHeadOfSafetyName] = useState("");
+  const [safetySignature, setSafetySignature] = useState("");
+  const [approvalDate, setApprovalDate] = useState("");
+  const [assessmentDate, setAssessmentDate] = useState("");
+
+  const KFL_HAZARDS = [
+    { id: "trees", name: "Trees", risk: "Collision with canopy or branches.", mitigation: "Survey canopy height and maintain clearance along the route.", score: "6 Medium", ls: "L2 × S3" },
+    { id: "buildings", name: "Buildings", risk: "Collision with structures or roof obstacles.", mitigation: "Survey the route and set a buffer from structures.", score: "6 Medium", ls: "L2 × S3" },
+    { id: "human_traffic", name: "Human traffic", risk: "Injury to people in the flight area.", mitigation: "Control access. Pause or land if people enter the flight area.", score: "4 Low", ls: "L1 × S4" },
+    { id: "wildlife", name: "Wildlife", risk: "Animal disturbance or bird strike.", mitigation: "Maintain separation. Stop if wildlife approaches or shows distress.", score: "3 Low", ls: "L1 × S3" },
+    { id: "manned_aircraft", name: "Manned aircraft", risk: "Mid-air collision.", mitigation: "Check airspace, scan for traffic and yield immediately to crewed aircraft.", score: "5 Medium", ls: "L1 × S5" },
+    { id: "strong_winds", name: "Strong winds", risk: "Loss of control or inability to return.", mitigation: "Check gusts and return margin. Hold if wind exceeds operating limits.", score: "6 Medium", ls: "L2 × S3" },
+    { id: "communication_towers", name: "Communication towers", risk: "Collision with towers or guy wires.", mitigation: "Locate towers and guy wires. Keep the flight path clear of both.", score: "4 Low", ls: "L1 × S4" },
+    { id: "electric_poles", name: "Electric poles / power lines", risk: "Wire strike or electrical contact.", mitigation: "Identify poles and spans. Set a safe stand-off distance.", score: "4 Low", ls: "L1 × S4" },
+  ];
+  const [selectedHazards, setSelectedHazards] = useState<Record<string, boolean>>({});
 
   const { data: fetchedAssessments = [], isLoading, isError, error, refetch } = useQuery<RiskAssessment[]>({
     queryKey: ["risk-assessments", statusFilter, riskFilter, page],
@@ -101,6 +125,11 @@ export function RiskAssessments() {
       description,
       likelihood,
       severity,
+      pic_full_name: picFullName,
+      location_coordinates: locationCoordinates,
+      drone_type_model: droneTypeModel,
+      project_type: projectType,
+      flight_decision: flightDecision,
       risk_level: riskModel === "sms_5x5" ? riskLevel : "not_applicable",
       exposure: riskModel === "om_flight_26" ? exposure : "not_applicable",
     },
@@ -109,6 +138,11 @@ export function RiskAssessments() {
       description: { required: true, minLength: 5 },
       likelihood: { required: true },
       severity: { required: true },
+      pic_full_name: { required: true, minLength: 2 },
+      location_coordinates: { required: true },
+      drone_type_model: { required: true },
+      project_type: { required: true },
+      flight_decision: { required: true },
       ...(riskModel === "sms_5x5" ? { risk_level: { required: true } } : { exposure: { required: true } }),
     }
   );
@@ -160,6 +194,22 @@ export function RiskAssessments() {
       toast({ title: "Approval not recorded", message, type: "error" });
     },
   });
+
+  const downloadPdf = async (assessmentId: string) => {
+    try {
+      const blob = await safetyApi.downloadRiskAssessmentPdf(assessmentId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `risk-assessment-${assessmentId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setActionError("Unable to download risk assessment PDF.");
+    }
+  };
 
   return (
     <div className="app-page">
@@ -356,6 +406,92 @@ export function RiskAssessments() {
               <Input id="ra_residual" name="residual_risk" placeholder="Residual risk statement" value={residualRisk} onChange={(e) => { setResidualRisk(e.target.value); setDirty(true); }} />
             </FormField>
           </div>
+
+          {/* PDF-aligned fields matching KFL Drone Risk Assessment template */}
+          <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Download size={14} className="text-kfl-blue" />
+              <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">KFL Risk Assessment Template Fields</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <FormField htmlFor="ra_pic_name" label="PIC Full Name" hint="Pilot in Command full name as it will appear on the signed form." required>
+                <Input id="ra_pic_name" name="pic_full_name" aria-invalid={!!raErrors.pic_full_name} className={raErrors.pic_full_name ? "border-rose-400" : ""} placeholder="PIC full name" value={picFullName} onChange={(e) => { setPicFullName(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="ra_location" label="Location / Coordinates" hint="Flight location or GPS coordinates." required>
+                <Input id="ra_location" name="location_coordinates" aria-invalid={!!raErrors.location_coordinates} className={raErrors.location_coordinates ? "border-rose-400" : ""} placeholder="Location / coordinates" value={locationCoordinates} onChange={(e) => { setLocationCoordinates(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="ra_drone" label="Drone Type / Model" hint="Aircraft type and model." required>
+                <Input id="ra_drone" name="drone_type_model" aria-invalid={!!raErrors.drone_type_model} className={raErrors.drone_type_model ? "border-rose-400" : ""} placeholder="Drone type / model" value={droneTypeModel} onChange={(e) => { setDroneTypeModel(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="ra_project" label="Project Type" hint="Type of operation (e.g. survey, inspection, training)." required>
+                <Input id="ra_project" name="project_type" aria-invalid={!!raErrors.project_type} className={raErrors.project_type ? "border-rose-400" : ""} placeholder="Project type" value={projectType} onChange={(e) => { setProjectType(e.target.value); setDirty(true); }} />
+              </FormField>
+            </div>
+            <div className="space-y-3 mb-4">
+              <FormField htmlFor="ra_flight_decision" label="Flight Decision" hint="Proceed or Hold based on overall residual risk." required>
+                <select id="ra_flight_decision" name="flight_decision" className="app-input" value={flightDecision} onChange={(e) => { setFlightDecision(e.target.value); setDirty(true); }}>
+                  <option value="">Select decision</option>
+                  <option value="Proceed">Proceed</option>
+                  <option value="Hold">Hold</option>
+                </select>
+                {raErrors.flight_decision && <p className="mt-1 text-[11px] text-rose-700">{raErrors.flight_decision}</p>}
+              </FormField>
+              <FormField htmlFor="ra_conditions" label="Additional Conditions / Notes" hint="Conditions or notes for the flight decision.">
+                <textarea id="ra_conditions" name="conditions_notes" placeholder="Additional conditions or notes" value={conditionsNotes} onChange={(e) => { setConditionsNotes(e.target.value); setDirty(true); }} rows={2} />
+              </FormField>
+            </div>
+          </div>
+
+          {/* KFL Predefined Hazard Checklist */}
+          <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck size={14} className="text-kfl-blue" />
+              <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Predefined Hazards (KFL Template)</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              {KFL_HAZARDS.map((hazard) => (
+                <div key={hazard.id} className="p-2 rounded border border-kfl-border bg-kfl-surface text-xs">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedHazards[hazard.id] ?? false}
+                      onChange={() => setSelectedHazards({ ...selectedHazards, [hazard.id]: !selectedHazards[hazard.id] })}
+                      className="mt-0.5 shrink-0 text-kfl-blue"
+                    />
+                    <div className="flex-1">
+                      <div className="font-semibold text-kfl-text">{hazard.name}</div>
+                      <div className="text-[10px] text-kfl-muted">{hazard.risk}</div>
+                      <div className="text-[10px] text-kfl-muted">{hazard.mitigation}</div>
+                      <div className="text-[10px] font-mono text-kfl-muted">{hazard.score} ({hazard.ls})</div>
+                    </div>
+                  </label>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-kfl-muted">Select hazards present and verify the listed controls before flight. Scores assume controls are in place.</p>
+          </div>
+
+          {/* Sign-off block */}
+          <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <UserCheck size={14} className="text-kfl-blue" />
+              <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Sign-off</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <FormField htmlFor="ra_head_safety" label="Approved by Head of Safety" hint="Name of the Head of Safety approving this assessment.">
+                <Input id="ra_head_safety" name="head_of_safety" value={headOfSafetyName} onChange={(e) => { setHeadOfSafetyName(e.target.value); setDirty(true); }} placeholder="Head of Safety name" />
+              </FormField>
+              <FormField htmlFor="ra_approval_date" label="Approval Date" hint="Date of Head of Safety approval.">
+                <Input id="ra_approval_date" name="approval_date" type="date" value={approvalDate} onChange={(e) => { setApprovalDate(e.target.value); setDirty(true); }} />
+              </FormField>
+              <FormField htmlFor="ra_safety_signature" label="Head of Safety Signature" hint="Signature of the Head of Safety.">
+                <Input id="ra_safety_signature" name="safety_signature" value={safetySignature} onChange={(e) => { setSafetySignature(e.target.value); setDirty(true); }} placeholder="Signature" />
+              </FormField>
+              <FormField htmlFor="ra_date_filed" label="Date Filed" hint="Date the assessment was filed.">
+                <Input id="ra_date_filed" name="date_filed" type="date" value={assessmentDate} onChange={(e) => { setAssessmentDate(e.target.value); setDirty(true); }} />
+              </FormField>
+            </div>
+          </div>
           <Button
             type="button"
             disabled={!raIsValid || createMutation.isPending}
@@ -364,6 +500,16 @@ export function RiskAssessments() {
               createMutation.mutate({
                 title: title.trim(),
                 description: description.trim(),
+                pic_full_name: picFullName.trim(),
+                location_coordinates: locationCoordinates.trim(),
+                drone_type_model: droneTypeModel.trim(),
+                project_type: projectType.trim(),
+                flight_decision: flightDecision,
+                conditions_notes: conditionsNotes.trim() || null,
+                head_of_safety_name: headOfSafetyName.trim() || null,
+                safety_signature: safetySignature.trim() || null,
+                approval_date: approvalDate || null,
+                date_filed: assessmentDate || null,
                 hazard_ids: hazardIds,
                 occurrence_id: occurrenceId.trim() || null,
                 mission_id: missionId || null,
@@ -474,6 +620,15 @@ export function RiskAssessments() {
                           ) : canApprove && approvalPending && r.can_approve_for_current_user !== true ? (
                             <span className="text-xs text-kfl-muted">Independent reviewer required</span>
                           ) : <span className="text-xs text-kfl-muted">—</span>}
+                          <Button
+                            type="button"
+                            aria-label={`Download PDF ${r.assessment_id}`}
+                            size="sm"
+                            onClick={() => downloadPdf(r.assessment_id)}
+                            className="mt-2 inline-flex items-center gap-1 text-xs text-kfl-blue hover:underline border-0 bg-transparent p-0"
+                          >
+                            <Download size={12} /> PDF
+                          </Button>
                         </td>
                       </tr>
                     );

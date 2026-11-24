@@ -178,4 +178,14 @@ export const safetyApi = {
     api.post<Feedback>(`/p0/feedback`, data).then((r: any) => r.data),
   updateFeedback: (id: string, data: any) =>
     api.patch<Feedback>(`/p0/feedback/${id}`, data).then((r: any) => r.data),
+
+  downloadRiskAssessmentPdf: (id: string) =>
+    api.get(`/p3/risk-assessments/${encodeURIComponent(id)}/pdf`, {
+      responseType: "blob",
+    }).then((r: any) => r.data),
+
+  downloadMissionSheetPdf: (id: string) =>
+    api.get(`/p1/missions/${encodeURIComponent(id)}/pdf`, {
+      responseType: "blob",
+    }).then((r: any) => r.data),
 };

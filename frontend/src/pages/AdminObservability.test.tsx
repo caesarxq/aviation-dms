@@ -19,6 +19,11 @@ const userProfile = {
   has_password: true,
 };
 
+const healthData = { 
+    backup: { enabled: true, running: false, run_count: 0, failure_count: 0, last_error: null },
+    scanner: { configured: true, reachable: true, host: "localhost", port: 3310, detail: "OK" }
+  };
+
 const observability = {
   version: {
     name: "KFL Aviation DMS",
@@ -26,7 +31,7 @@ const observability = {
     release_tag: "canonical-5012309115b2a2d3b38a23e35dc6cf92a26ebcc3-20261118T200056Z",
     git_sha: "5012309115b2a2d3b38a23e35dc6cf92a26ebcc3",
   },
-  health: { status: "ok", scheduler: "running" },
+  health: { status: "ok", scheduler: "running", ...healthData },
   database: { status: "ok", integrity: "ok" },
   tables: {},
   users: { total: 1, active: 1, inactive: 0 },
@@ -40,6 +45,40 @@ const observability = {
   ],
 };
 
+const appVersions = [
+  {
+    version_id: "v1",
+    version_number: "1.0.0",
+    released_at: "2026-11-18T20:00:56Z",
+    released_by: "u-admin",
+    changelog_non_technical: "Initial release",
+    changelog_technical: "Initial release",
+    notification_sent: true,
+  },
+];
+
+const backupHistory = {
+  events: [
+    {
+      event_id: "evt-1",
+      timestamp: "2026-11-18T20:00:56Z",
+      action: "backup_run",
+      details: { accepted: true },
+    },
+  ],
+};
+
+const auditEvents = [
+  {
+    event_id: "evt-1",
+    timestamp: "2026-11-18T20:00:56Z",
+    entity_type: "user",
+    action: "created",
+    actor_id: "u-admin",
+    details: "User created",
+  },
+];
+
 function renderAdmin() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -51,8 +90,23 @@ function renderAdmin() {
 
 describe("AdminObservability role assignments", () => {
   beforeEach(() => {
-    vi.spyOn(api, "get").mockResolvedValue({ data: observability } as any);
+    vi.spyOn(api, "get").mockImplementation((url: string) => {
+      if (url === "/p0/admin/observability") {
+        return Promise.resolve({ data: observability } as any);
+      }
+      if (url === "/p0/app-versions") {
+        return Promise.resolve({ data: appVersions } as any);
+      }
+      if (url === "/p0/backup/history") {
+        return Promise.resolve({ data: backupHistory } as any);
+      }
+      if (url === "/p0/audit-events") {
+        return Promise.resolve({ data: auditEvents } as any);
+      }
+      return Promise.resolve({ data: {} } as any);
+    });
     vi.spyOn(api, "put").mockResolvedValue({ data: { user_id: "u-quality", roles: ["head_quality", "librarian", "records_custodian"] } } as any);
+    vi.spyOn(api, "post").mockResolvedValue({ data: { delivery_id: "delivery-1", recipient_email: "librarian@example.test", delivery_status: "sent", setup_url: undefined, expires_at: "2026-11-19T12:00:00Z" } } as any);
   });
   afterEach(() => vi.restoreAllMocks());
 

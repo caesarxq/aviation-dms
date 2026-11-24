@@ -126,6 +126,44 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     enabled: !!docId,
   });
 
+  const { data: docMeta } = useQuery({
+    queryKey: ["doc-meta", docId],
+    queryFn: () => api.get(`/p0/documents/${docId}`).then((r: any) => r.data),
+    enabled: !!docId,
+  });
+
+  const manualOwnerRole = docMeta?.manual_owner_role;
+  const manualOwnerLabel = manualOwnerRole?.replace("_", " ").replace(/\b\w/g, (l: string) => l.toUpperCase()) || "Head of Quality Management Systems";
+
+  // Check if document is a ROC/OPS Spec or OEM publication (non-editable)
+  const isNonEditableDoc = docMeta?.document_category === "roc_ops_spec" || docMeta?.document_category === "oem_publication" ||
+                          docMeta?.doc_class === "roc_spec" || docMeta?.doc_class === "ops_spec" || docMeta?.doc_class === "oem_publication";
+
+  if (isNonEditableDoc) {
+    return (
+      <div className="app-page">
+        <header className="app-page-header">
+          <div>
+            <div className="app-eyebrow">Document Control</div>
+            <h1 className="app-title">Document Editor</h1>
+          </div>
+        </header>
+        <div className="app-surface p-10 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <h2 className="text-lg font-semibold text-kfl-text mb-2">Document Not Editable</h2>
+          <p className="text-sm text-kfl-muted max-w-md mx-auto">
+            {docMeta?.document_category === "roc_ops_spec" || docMeta?.doc_class === "roc_spec" || docMeta?.doc_class === "ops_spec"
+              ? "ROC and OPS Spec documents are regulatory reference documents and cannot be edited via change proposals."
+              : "OEM publications are manufacturer reference documents and cannot be edited via change proposals."}
+          </p>
+          <Button onClick={() => setDocId("")} className="mt-4" variant="outline">
+            Return to Document Selection
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const [originalContent, setOriginalContent] = useState("");
   const [currentContent, setCurrentContent] = useState("");
   const [changeSummary, setChangeSummary] = useState("");
@@ -429,6 +467,11 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
     enabled: showSubmit && hasChanges && !highFidelityManual,
     staleTime: 1000,
   });
+
+  // Submit button disabled state (depends on hasChanges, previewLoading, proposalPreview, etc.)
+  const canSubmit = hasChanges && submitRationale.trim() !== "" && !submitting && !previewLoading &&
+    !(highFidelityManual && proposedChangeRanges.length === 0) &&
+    !(!highFidelityManual && (!proposalPreview?.changes?.length || !selectedChangeSequences.length));
 
   useEffect(() => {
     if (proposalPreview?.changes) {
@@ -787,15 +830,27 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
       <Dialog open={showSubmit && canPropose} onOpenChange={open => { if (!open) setShowSubmit(false); }}>
         <DialogContent className="max-w-md w-full">
           <DialogHeader>
-            <DialogTitle>Submit Change Proposal</DialogTitle>
+            <DialogTitle>Submit Change Proposals</DialogTitle>
             <DialogDescription>
-              Your suggested changes will be recorded as a proposal and undergo the prescribed manual change process before being adopted or rejected.
+              Your suggested changes will be recorded as proposals and undergo the prescribed manual change process before being adopted or rejected.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-4">
+            {/* Manual owner routing banner */}
+            <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-3">
+              <div className="flex items-start gap-2 mb-1">
+                <UserCheck size={14} className="text-kfl-blue mt-0.5" />
+                <div>
+                  <div className="text-xs font-semibold text-kfl-text">Routing</div>
+                  <div className="text-xs text-kfl-muted">
+                    Proposals for <strong>{docMeta?.title || "this document"}</strong> are routed to <strong>{manualOwnerLabel}</strong> (manual owner), then to Head of Quality Management Systems for approval.
+                  </div>
+                </div>
+              </div>
+            </div>
             {highFidelityManual ? (
               <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-3">
-                <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-kfl-text">Proposed changes</span>
                   <span className="text-xs text-kfl-muted">{proposedChangeRanges.length} proposed</span>
                 </div>
@@ -854,14 +909,15 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
               </>
             )}
             <div>
-              <Label htmlFor="proposal-rationale">Rationale</Label>
+              <Label htmlFor="proposal-rationale">Rationale <span className="text-rose-500">*</span></Label>
               <Textarea
                 id="proposal-rationale"
                 name="rationale"
-                placeholder="Why is this change needed?"
+                placeholder="Why is this change needed? (required)"
                 value={submitRationale}
                 onChange={(e) => setSubmitRationale(e.target.value)}
                 rows={3}
+                required
               />
             </div>
             <div>
@@ -885,9 +941,9 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
               <Button onClick={() => setShowSubmit(false)} variant="outline">Cancel</Button>
               <Button
                 onClick={handleSubmitProposal}
-                disabled={submitting || previewLoading || !hasChanges || (highFidelityManual && proposedChangeRanges.length === 0) || (!highFidelityManual && (!proposalPreview?.changes?.length || !selectedChangeSequences.length))}
+                disabled={!canSubmit}
               >
-                {submitting ? "Submitting…" : "Submit Proposal"}
+                {submitting ? "Submitting…" : "Submit Change Proposals"}
               </Button>
             </div>
           </div>
@@ -948,8 +1004,8 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 
 function DocumentSelector({ setDocId }: { setDocId: (id: string) => void }) {
   const { data: docs = [], isLoading } = useQuery({
-    queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
+    queryKey: ["documents", "controlled_manual"],
+    queryFn: () => api.get("/p0/documents?document_category=controlled_manual").then((r: any) => r.data),
   });
 
   if (isLoading) return <div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading documents…</div>;

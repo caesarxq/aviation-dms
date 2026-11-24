@@ -41,4 +41,20 @@ export const p2Api = {
     api.post<any>("/p0/distributions", data).then((r: any) => r.data),
   acknowledgeDistribution: (id: string) =>
     api.post(`/p0/distributions/${id}/acknowledge`).then((r: any) => r.data),
+
+  // Document Ingestion (Phase 3)
+  ingestDocument: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.post<{ document_type: string; confidence: number; extracted_fields: Record<string, any>; target_table: string; raw_text_preview: string }>("/p2/ingest/document", formData).then((r: any) => r.data);
+  },
+  applyIngestion: (data: {
+    document_type: string;
+    target_table: string;
+    extracted_fields: Record<string, any>;
+    aircraft_id?: string;
+    person_id?: string;
+    document_id?: string;
+  }) =>
+    api.post<any>("/p2/ingest/document/apply", data).then((r: any) => r.data),
 };

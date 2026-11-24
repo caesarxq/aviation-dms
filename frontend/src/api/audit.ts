@@ -161,6 +161,8 @@ export const auditApi = {
   linkCorrectiveAction: (id: string, data: any) =>
     api.post(`/p3/audit-findings/${id}/car`, data).then((r: any) => r.data),
 
-  getAuditFindingsSummary: () =>
-    api.get<any>("/p3/audit-findings/summary").then((r: any) => r.data),
+  getAuditFindingsSummary: (department?: string) =>
+    api
+      .get<any>("/p3/audit-findings/summary", { params: { department } })
+      .then((r: any) => r.data),
 };

@@ -352,6 +352,7 @@ class AircraftUpdate(BaseModel):
     serial_number: Optional[str] = None
     roc_id: Optional[str] = None
     status: Optional[str] = None
+    operational_status: Optional[str] = None
     category: Optional[str] = None
     weight_class: Optional[str] = None
     max_takeoff_weight_kg: Optional[float] = None
@@ -367,6 +368,7 @@ class AircraftResponse(BaseModel):
     serial_number: Optional[str] = None
     roc_id: Optional[str] = None
     status: str
+    operational_status: str = "serviceable"
     category: Optional[str] = None
     weight_class: Optional[str] = None
     max_takeoff_weight_kg: Optional[float] = None
@@ -609,13 +611,16 @@ class CorrectiveActionCreate(BaseModel):
     title: str
     description: str
     finding_id: Optional[str] = None
+    audit_finding_id: Optional[str] = None
     audit_id: Optional[str] = None
+    audit_report_id: Optional[str] = None
     finding_level: str = "level_2"
     root_cause: Optional[str] = None
     corrective_action: Optional[str] = None
     preventive_action: Optional[str] = None
     owner_id: str
     due_date: Optional[str] = None
+
 
 class CorrectiveActionUpdate(BaseModel):
     title: Optional[str] = None
@@ -626,13 +631,18 @@ class CorrectiveActionUpdate(BaseModel):
     preventive_action: Optional[str] = None
     owner_id: Optional[str] = None
     due_date: Optional[str] = None
+    audit_finding_id: Optional[str] = None
+    audit_report_id: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
+
 
 class CorrectiveActionResponse(BaseModel):
     car_id: str
     finding_id: Optional[str] = None
+    audit_finding_id: Optional[str] = None
     audit_id: Optional[str] = None
+    audit_report_id: Optional[str] = None
     title: str
     description: str
     finding_level: str = "level_2"

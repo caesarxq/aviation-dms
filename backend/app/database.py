@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS documents (
     classification TEXT NOT NULL DEFAULT 'S2',
     status TEXT NOT NULL DEFAULT 'draft',
     owner_id TEXT NOT NULL,
+    manual_owner_role TEXT,
+    document_category TEXT NOT NULL DEFAULT 'controlled_manual',
     description TEXT,
     tags TEXT,
     current_version_id TEXT,
@@ -150,6 +152,17 @@ CREATE TABLE IF NOT EXISTS document_classifications (
     requires_approval INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+
+-- Manual ownership mapping: doc_class -> head of department responsible
+CREATE TABLE IF NOT EXISTS manual_ownership (
+    doc_class TEXT PRIMARY KEY,
+    owner_role TEXT NOT NULL,
+    head_of_department_user_id TEXT NOT NULL,
+    approver_role TEXT NOT NULL DEFAULT 'head_quality',
+    updated_at TEXT NOT NULL,
+    updated_by TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_ownership_owner_role ON manual_ownership(owner_role);
 
 -- Document-level and section-level role permissions
 CREATE TABLE IF NOT EXISTS document_permissions (
@@ -354,6 +367,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     status TEXT NOT NULL DEFAULT 'new',
     priority TEXT NOT NULL DEFAULT 'P3',
     owner_id TEXT,
+    bugtracker_id TEXT,
+    bugtracker_url TEXT,
     zoho_form_record_id TEXT,
     zoho_form_sync_state TEXT NOT NULL DEFAULT 'pending',
     zoho_sheet_row_id TEXT,
@@ -486,6 +501,12 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     reviewed_by TEXT,
     reviewed_at TEXT,
     status TEXT NOT NULL DEFAULT 'draft',
+    pic_full_name TEXT,
+    location_coordinates TEXT,
+    drone_type_model TEXT,
+    project_type TEXT,
+    flight_decision TEXT,
+    conditions_notes TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -525,6 +546,7 @@ CREATE TABLE IF NOT EXISTS audit_reports (
     auditee_id TEXT NOT NULL,
     scope TEXT,
     regulatory_basis TEXT,
+    audit_type TEXT NOT NULL DEFAULT 'internal',
     status TEXT NOT NULL DEFAULT 'open',
     evidence_file TEXT,
     evidence_sha256 TEXT,
@@ -544,6 +566,7 @@ CREATE TABLE IF NOT EXISTS audit_findings (
     title TEXT NOT NULL,
     description TEXT NOT NULL,
     regulatory_reference TEXT,
+    department TEXT,
     status TEXT NOT NULL DEFAULT 'open',
     corrective_action_id TEXT,
     due_date TEXT,
@@ -657,6 +680,7 @@ CREATE TABLE IF NOT EXISTS aircraft (
     serial_number TEXT,
     roc_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
+    operational_status TEXT NOT NULL DEFAULT 'serviceable',
     category TEXT,
     weight_class TEXT,
     max_takeoff_weight_kg REAL,
@@ -706,6 +730,10 @@ CREATE TABLE IF NOT EXISTS missions (
     flight_plan_id TEXT,
     release_id TEXT,
     post_flight_report_id TEXT,
+    kcaa_oa_reference TEXT,
+    pic_name TEXT,
+    drone_type_model TEXT,
+    flight_log_data TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -816,7 +844,9 @@ CREATE TABLE IF NOT EXISTS quality_audit_findings (
 CREATE TABLE IF NOT EXISTS corrective_actions (
     car_id TEXT PRIMARY KEY,
     finding_id TEXT,
+    audit_finding_id TEXT,
     audit_id TEXT,
+    audit_report_id TEXT,
     title TEXT NOT NULL,
     description TEXT NOT NULL,
     finding_level TEXT NOT NULL DEFAULT 'level_2',
@@ -835,7 +865,9 @@ CREATE TABLE IF NOT EXISTS corrective_actions (
     created_by TEXT NOT NULL,
     updated_by TEXT NOT NULL,
     FOREIGN KEY (finding_id) REFERENCES quality_audit_findings(finding_id),
-    FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
+    FOREIGN KEY (audit_finding_id) REFERENCES audit_findings(finding_id),
+    FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id),
+    FOREIGN KEY (audit_report_id) REFERENCES audit_reports(audit_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_audits_status ON quality_audits(status);
@@ -1229,6 +1261,22 @@ CREATE TABLE IF NOT EXISTS personnel_uploads (
     FOREIGN KEY (person_id) REFERENCES users(user_id)
 );
 
+-- Document ingestion log for duplicate detection and audit trail
+CREATE TABLE IF NOT EXISTS document_ingestion_log (
+    log_id TEXT PRIMARY KEY,
+    document_id TEXT,
+    document_type TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL UNIQUE,
+    file_size INTEGER,
+    target_table TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_ingestion_log_file_hash ON document_ingestion_log(file_sha256);
+CREATE INDEX IF NOT EXISTS idx_document_ingestion_log_created ON document_ingestion_log(created_at DESC);
+
 -- Aircraft insurance policies
 CREATE TABLE IF NOT EXISTS aircraft_insurance (
     insurance_id TEXT PRIMARY KEY,
@@ -1320,6 +1368,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- App version tracking for upgrade notifications
+CREATE TABLE IF NOT EXISTS app_versions (
+    version_id TEXT PRIMARY KEY,
+    version_number TEXT NOT NULL,
+    released_at TEXT NOT NULL,
+    released_by TEXT NOT NULL,
+    changelog_non_technical TEXT NOT NULL,
+    changelog_technical TEXT,
+    notification_sent INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_versions_number ON app_versions(version_number);
+CREATE INDEX IF NOT EXISTS idx_app_versions_notification_sent ON app_versions(notification_sent);
 
 -- Crew Management
 CREATE TABLE IF NOT EXISTS crew_members (
@@ -1934,7 +1996,9 @@ async def _migrate_legacy_quality_findings(db):
 
 async def _rebuild_corrective_actions_finding_fk(db):
     fks = await (await db.execute("PRAGMA foreign_key_list(corrective_actions)")).fetchall()
-    if any(row["table"] == "quality_audit_findings" and row["from"] == "finding_id" and row["to"] == "finding_id" for row in fks):
+    has_quality_fk = any(row["table"] == "quality_audit_findings" and row["from"] == "finding_id" and row["to"] == "finding_id" for row in fks)
+    has_stale_audit_fk = any(row["table"] in ("audit_findings__upgrade", "audit_findings") and row["from"] == "audit_finding_id" for row in fks)
+    if has_quality_fk and not has_stale_audit_fk:
         return
 
     columns = await _table_columns(db, "corrective_actions")
@@ -2198,6 +2262,7 @@ async def init_db():
     try:
         await db.execute("BEGIN IMMEDIATE")
         await _add_column_if_missing(db, "audit_reports", "evidence_sha256", "TEXT")
+        await _add_column_if_missing(db, "audit_reports", "audit_type", "TEXT NOT NULL DEFAULT 'internal'")
         # documents: kcaa_approval_required, review_due_date
         await _add_column_if_missing(db, "documents", "kcaa_approval_required", "INTEGER NOT NULL DEFAULT 0")
         await _add_column_if_missing(db, "documents", "review_due_date", "TEXT")
@@ -2275,6 +2340,26 @@ async def init_db():
         await _add_column_if_missing(db, "roc_register", "authorized_registrations", "TEXT")
         await _add_column_if_missing(db, "aircraft", "opspec_authorized", "INTEGER NOT NULL DEFAULT 0")
         await _add_column_if_missing(db, "personnel_uploads", "file_sha256", "TEXT")
+        # New columns for Phase 1 manual ownership, document category, operational status
+        await _add_column_if_missing(db, "documents", "manual_owner_role", "TEXT")
+        await _add_column_if_missing(db, "documents", "document_category", "TEXT NOT NULL DEFAULT 'controlled_manual'")
+        await _add_column_if_missing(db, "aircraft", "operational_status", "TEXT NOT NULL DEFAULT 'serviceable'")
+        await _add_column_if_missing(db, "audit_findings", "department", "TEXT")
+        await _add_column_if_missing(db, "corrective_actions", "audit_finding_id", "TEXT")
+        await _add_column_if_missing(db, "corrective_actions", "audit_report_id", "TEXT")
+        await _add_column_if_missing(db, "feedback", "bugtracker_id", "TEXT")
+        await _add_column_if_missing(db, "feedback", "bugtracker_url", "TEXT")
+        # New columns for PDF-aligned risk assessments and missions
+        await _add_column_if_missing(db, "risk_assessments", "pic_full_name", "TEXT")
+        await _add_column_if_missing(db, "risk_assessments", "location_coordinates", "TEXT")
+        await _add_column_if_missing(db, "risk_assessments", "drone_type_model", "TEXT")
+        await _add_column_if_missing(db, "risk_assessments", "project_type", "TEXT")
+        await _add_column_if_missing(db, "risk_assessments", "flight_decision", "TEXT")
+        await _add_column_if_missing(db, "risk_assessments", "conditions_notes", "TEXT")
+        await _add_column_if_missing(db, "missions", "kcaa_oa_reference", "TEXT")
+        await _add_column_if_missing(db, "missions", "pic_name", "TEXT")
+        await _add_column_if_missing(db, "missions", "drone_type_model", "TEXT")
+        await _add_column_if_missing(db, "missions", "flight_log_data", "TEXT")
         ra_columns = {
             "risk_model": "TEXT NOT NULL DEFAULT 'sms_5x5'",
             "exposure": "TEXT",
@@ -2442,6 +2527,31 @@ async def apply_catalogue_corrections():
             "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
             ("fdtl_validation_status", "configurable_application_defaults_pending_regulatory_clause_validation", now),
         )
+        # Seed manual ownership mapping: doc_class -> Head of Department responsible
+        ownership_rows = [
+            ("operations_manual", "head_operations", "u-ops", "head_quality"),
+            ("safety_manual", "head_safety", "u-safety/security", "head_quality"),
+            ("quality_manual", "head_quality", "u-quality", "head_quality"),
+            ("security_manual", "head_security", "u-safety/security", "head_quality"),
+            ("training_manual", "head_training", "u-training", "head_quality"),
+            ("maintenance_manual", "head_maintenance", "u-maintenance", "head_quality"),
+        ]
+        for doc_class, owner_role, head_user_id, approver_role in ownership_rows:
+            await db.execute(
+                """INSERT OR IGNORE INTO manual_ownership
+                   (doc_class, owner_role, head_of_department_user_id, approver_role, updated_at, updated_by)
+                   VALUES (?,?,?,?,?,?)""",
+                (doc_class, owner_role, head_user_id, approver_role, now, "system"),
+            )
+        # Assign manual_owner_role to existing documents based on doc_class
+        for doc_class, owner_role, head_user_id, approver_role in ownership_rows:
+            await db.execute(
+                """UPDATE documents
+                   SET manual_owner_role = ?, document_category = 'controlled_manual',
+                       updated_at = ?, updated_by = ?
+                   WHERE doc_class = ? AND manual_owner_role IS NULL""",
+                (owner_role, now, "system", doc_class),
+            )
         await db.commit()
     finally:
         await db.close()

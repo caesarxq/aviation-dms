@@ -1,0 +1,121 @@
+# KFL Aviation DMS — Onboarding Runbook
+
+## Overview
+
+For the current readiness gates and roster-reconciliation sequence, see [Onboarding Readiness and Roster Plan](ONBOARDING-READINESS-PLAN.md). For end-user setup and first-use instructions, see [User Onboarding Procedure](USER-ONBOARDING-PROCEDURE.md). This runbook remains the administrator's controlled provisioning procedure.
+
+## Staging account snapshot (as of 2026-11-06)
+
+The **read-only staging snapshot as of 2026-11-06** recorded 1 active, onboarded canonical account: user ID `u-admin`, sign-in username `admin`, role `system_admin`; no other members had been invited at that time. Source: read-only staging account inspection. This is a dated snapshot, not a current-state assertion; revalidate against the authorized account inventory before provisioning. The role profiles below are the planned mapping, not a count of invited/onboarded users. Do not issue invitations until the authoritative roster is confirmed and the controlled manuals and conducted safety audit are reconciled.
+
+In that snapshot, the seven non-admin canonical profiles were retained as pre-seeded, passwordless accounts and inactive; merged legacy accounts were also inactive. A database `is_active` flag alone is not evidence that a person has been invited or onboarded. Preserve the confirmed person-to-role mapping; reconcile the invite roster before activating additional members.
+
+**Fresh-install difference:** the clean database seed inserts canonical profiles active by default; identity consolidation deactivates merged rows but does not reproduce this staging snapshot's one-active-account state. Before any clean-install invitation, inspect the actual target database and reconcile its roster through the approved procedure. Do not assume this staging snapshot or a seed `is_active` value proves invitation or onboarding.
+
+## Owner-approved canonical role profiles
+
+The project owner confirmed these canonical IDs and role assignments on 2026-11-07. This mapping is authoritative for planning; account activation and invitation status are separate and must not be inferred from this table.
+
+| User ID | Primary Role | Additional Roles |
+|---|---|---|
+| u-admin | system_admin | head_maintenance |
+| u-quality | head_quality | librarian, records_custodian |
+| u-safety/security | head_safety | head_security |
+| u-ops | head_operations | chief_pilot, head_training |
+| u-flight-ops | flight_ops_officer | dg_coordinator |
+| u-accountable | accountable_manager | — |
+| u-auditor | independent_auditor | — |
+| u-reporter | occurrence_reporter | — |
+
+**Historical status snapshot:** In the read-only staging snapshot dated 2026-11-06, only `u-admin` was onboarded and the other canonical profiles were inactive. Do not use that dated status as a current account-state assertion. Legacy IDs remain aliases for historical records and compatibility; they are not separate approved accounts.
+
+## Phase 1 — Initial administrator bootstrap
+
+The staging administrator had completed this phase in the 2026-11-06 snapshot. For a fresh deployment, first query `GET /api/p0/auth/bootstrap-status`; proceed only when `setup_required`, `bootstrap_configured`, and `bootstrap_token_required` are true. Open `/setup` and enter the one-time token read directly from the protected file configured by `KFL_BOOTSTRAP_TOKEN_FILE`, then choose a password of at least 12 characters and no more than 72 UTF-8 bytes. The form sets the seeded `u-admin` account (sign-in username `admin`) and creates its session. The token is submitted in the bootstrap request body by the UI; it is not a bearer header and must never be shared in chat or stored in this document.
+
+After success, verify `setup_required` is false and invalidate the consumed token. Do not reset the database to repeat bootstrap. Local `DEV_MODE` loopback bootstrap is for development only and is not the production/staging procedure.
+
+## Phase 2 — Member invites (not started)
+
+The 2026-11-06 snapshot recorded no member invitations; it is historical, not a current-state assertion. The project owner has since confirmed the roster and role map as authoritative, but account status still requires per-person verification through the approved roster process. The owner selected this sequence: after the technical gates pass, a named, roster-verified `independent_auditor` is the first restricted pilot account. This decision does not authorize activation or invitation now.
+
+Historical audit provisioning uses the dedicated P3 provenance-import workflow on `/audit-reports`. The system administrator stages source metadata and findings in the browser UI, referencing a PDF already retained under `attachments/`; the UI does not upload files, and staging creates only a quarantined candidate. The named source auditor remains Brian Swanya (`u-safety/security`) with the approved `head_safety`/`head_security` roles. A distinct, active `independent_auditor` reviews the candidate and hash-checked PDF in the same browser workflow, then verifies with checksum and finding-reconciliation attestations or rejects with a reason. The source auditor, auditee, importer, and verifier must be distinct principals; the verifier permission is narrow and unavailable to `system_admin`. Successful verification atomically creates the report/findings and records separate importer and verifier identities. This workflow is implemented locally and tested with synthetic evidence, but is not deployed; no historical audit has been imported. Do not use the development-only importer, change account roles, activate/invite an auditor, deploy this workflow, or import the source until the technical gates pass and separately authorized review is complete. The policy owners and chosen sequence are recorded in the [Readiness Plan](ONBOARDING-READINESS-PLAN.md) and [API Reference](API-REFERENCE.md).
+
+After the remaining gates, per-person roster verification, and explicit go/no-go, the `system_admin` issues one invitation per approved person:
+
+Before issuing an invite, verify that the approved canonical account is active through the authorized roster-reconciliation procedure. The invite endpoint returns 404 for inactive profiles. Do not activate a pre-seeded profile merely to make an invite succeed; if the approved account is still inactive and no authorized activation procedure is available, stop and obtain an operational decision.
+
+```
+POST /api/p0/auth/invites
+Cookie: __Host-kfl_session=<session>; __Host-kfl_csrf=<csrf>
+X-CSRF-Token: <csrf>
+Content-Type: application/json
+
+{
+  "username": "<approved-username>"
+}
+```
+
+The invite endpoint selects an existing active canonical account by username and uses the email already stored on that account. It does not update email or roles from the request; a mismatched request email is rejected. Reconcile the account and verify the recipient against the approved roster before sending. `INVITE_EMAIL_ENABLED` is controlled by deployment configuration; on staging it is enabled with Zoho sandbox SMTP. General notifications being enabled does not enable invites. Do not enable invites for real users until separate approval is confirmed for a controlled staging invitation test. The email method is the default and fails closed when the feature flag or SMTP is unavailable. An authorized administrator may explicitly choose the manual fallback; it returns the one-time setup link to the administrator for transfer only through the approved secure channel. The raw manual link is shown once and is not recoverable from the delivery record; reissue a fresh link if lost.
+
+For email mode, the response contains a delivery reference, registered recipient, status, and expiry—not the bearer token or setup link. `delivery_status: sent` means the configured SMTP server accepted the message, not that it reached the inbox. A repeated request does not send another message while a link is active; the admin UI requires an explicit reissue, which creates a fresh one-time link and invalidates the prior one only after SMTP accepts the replacement. A failed replacement revokes only its new token; a previously sent link remains valid. The delivery record stores status only; the raw email token is sent by SMTP and only its hash is stored for password setup. In manual mode, the response includes the one-time setup link for approved secure transfer with `Cache-Control: no-store`; it is not stored server-side and cannot be retrieved later.
+
+Rate limit: max 5 invite requests per actor per 15 minutes.
+
+## Phase 3 — Account Setup (each user)
+
+Each user opens the secure one-time setup link in the invitation email. The token is in the URL fragment, so it is not sent in the initial HTTP request; the setup page removes it from the address bar after reading it. Example link (the browser does not send the fragment in the HTTP request):
+
+```
+https://<public-host>/setup?username=<assigned-username>#setup_token=<one-time-token>
+```
+
+They choose a new password (min 12 chars, max 72 UTF-8 bytes). The setup token is single-use and expires after 24 hours.
+
+## Phase 4 — Guided Welcome (first login)
+
+On first login, if `onboarding_completed` is `false`, the user is redirected to `/welcome`, which shows:
+
+1. Name and canonical account ID
+2. Department, or a prompt to confirm it if not listed
+3. Assigned roles
+4. Active-role selector (for multi-role accounts)
+5. Completion button
+
+After completing welcome, `onboarding_completed` is set to `true` and the user is redirected to the active role's workspace. A small, dismissible workspace guide then explains the role shortcuts, **All modules**, and role switching. Its dismissal is stored in that browser profile under the canonical user ID; clearing site storage or using another browser may show it again. It does not change permissions. See the user procedure for the guide's details.
+
+## Post-Login Destinations by Role
+
+| Role | Landing Route |
+|---|---|
+| system_admin | `/admin/observability` |
+| accountable_manager | `/organization-overview` |
+| librarian, records_custodian, as_contracted | `/documents` (for `as_contracted`, only if its shared baseline permissions are approved; it is not contract-scoped) |
+| head_quality | `/audit-dashboard` |
+| head_safety | `/safety-actions` |
+| head_security | `/security-reviews` |
+| head_operations, chief_pilot, flight_ops_officer | `/missions` |
+| head_training | `/training` |
+| head_maintenance | `/maintenance` |
+| dg_coordinator | `/dangerous-goods` |
+| occurrence_reporter | `/occurrences` |
+| independent_auditor | `/audit-reports` |
+
+## Rate Limits & Security
+
+- Invite setup links: high-entropy, single-use, 24-hour expiry; only token hashes are stored
+- Reset tokens: short-lived, single-use
+- Forgot password: generic response (no account enumeration)
+- Login failures: 5 attempts per 15-minute window → 15-minute lockout
+- Invite requests: 5 per actor per 15-minute window → 15-minute lockout
+
+## Troubleshooting
+
+| Symptom | Cause | Resolution |
+|---|---|---|
+| "Active user not found" on invite | Username doesn't exist or is inactive | Verify username; check `is_active` and `merged_into_user_id IS NULL` |
+| "Invite requests temporarily unavailable" | Rate limit exceeded | Wait 15 minutes or use a different admin actor |
+| Setup token expired | Token older than 24 hours | After confirming the registered address and roster approval, admin reissues the invitation email |
+| Invite email enabled on staging | `INVITE_EMAIL_ENABLED=true` with Zoho sandbox SMTP (`smtppro.zoho.com:587`, From `staging@kfl.ke`) | Configured on staging host via `.env` and `SMTP_PASS` env var; SMTP app password in host secret file |
+| Blank page after login | Session cookie missing or invalid | Clear cookies, re-login via `/login` |
+| Cannot switch role | Role not assigned to account | Admin assigns role via `/api/p0/auth/users/{user_id}/roles` |

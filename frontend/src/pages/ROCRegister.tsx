@@ -71,6 +71,7 @@ export function ROCRegister() {
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Registration</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Model</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Serial</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Op. Status</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Status</th>
                 <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Category</th>
               </tr>
@@ -81,6 +82,9 @@ export function ROCRegister() {
                   <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{ac.registration}</td>
                   <td className="px-4 py-4 text-sm text-kfl-secondary">{ac.model}</td>
                   <td className="px-4 py-4 text-sm text-kfl-secondary">{ac.serial_number || "—"}</td>
+                  <td className="px-4 py-4">
+                    <span className={operationalStatusClass(ac.operational_status)}>{ac.operational_status}</span>
+                  </td>
                   <td className="px-4 py-4">
                     <span className={missionStatusClass(ac.status)}>{ac.status}</span>
                   </td>
@@ -107,6 +111,17 @@ function missionStatusClass(status: string) {
     case "active": return "app-status app-status-healthy";
     case "maintenance": return "app-status app-status-info";
     case "retired": return "app-status app-status-critical";
+    default: return "app-status app-status-info";
+  }
+}
+
+function operationalStatusClass(status: string) {
+  switch (status) {
+    case "grounded": return "app-status app-status-critical";
+    case "unserviceable": return "app-status app-status-warning";
+    case "serviceable": return "app-status app-status-healthy";
+    case "standby": return "app-status app-status-info";
+    case "deployed": return "app-status app-status-healthy";
     default: return "app-status app-status-info";
   }
 }

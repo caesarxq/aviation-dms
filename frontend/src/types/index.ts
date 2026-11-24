@@ -520,6 +520,7 @@ export interface FeedbackCreate {
   expected_result: string;
   actual_result: string;
   impact: string;
+  priority: string;
   observation_time: string;
   contact: string;
   screenshot_info: string | null;

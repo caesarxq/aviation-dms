@@ -357,11 +357,11 @@ def test_p3_evidence_reference_fails_closed_without_size_policy(client, admin_he
 
 def test_p3_finding_close_requires_separate_permission_valid_transition_and_evidence(client, admin_headers):
     finding_id = _create_finding(client, admin_headers)
-    head_quality = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+    head_operations = {"X-Role": "head_operations", "X-Actor": "u-ops"}
 
     # Close permission is independent of the broader finding update permission.
     denied = client.patch(
-        f"/api/p3/audit-findings/{finding_id}", json={"status": "closed", "closure_evidence": "verified"}, headers=head_quality
+        f"/api/p3/audit-findings/{finding_id}", json={"status": "closed", "closure_evidence": "verified"}, headers=head_operations
     )
     assert denied.status_code == 403
 

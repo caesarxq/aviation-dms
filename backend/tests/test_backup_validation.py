@@ -150,6 +150,7 @@ def test_backup_candidate_rejects_missing_required_table_column(tmp_path):
         (root / folder).mkdir()
     with sqlite3.connect(root / "dms.db") as connection:
         connection.executescript(SCHEMA)
+        connection.execute("DROP TABLE corrective_actions")
         connection.execute("DROP TABLE audit_findings")
         connection.execute(
             "CREATE TABLE audit_findings "

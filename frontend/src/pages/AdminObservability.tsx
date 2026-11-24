@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 function StatusPill({ ok, children, size }: { ok?: boolean; children: ReactNode; size?: "sm" | "md" | "xs" }) {
   const base = "badge px-2 py-0.5 rounded font-semibold";
   const sizeClass = size === "xs" ? "text-[9px] px-1" : size === "sm" ? "text-[10px] px-1.5" : "text-xs px-2";
-  return <Badge variant={ok ? "default" : "destructive"} className={`${base} ${sizeClass} ${ok ? "bg-kfl-status-success-bg text-kfl-status-success" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{children}</Badge>;
+  return <Badge variant={ok ? "default" : "destructive"} className={base + " " + sizeClass + " " + (ok ? "bg-kfl-status-success-bg text-kfl-status-success" : "bg-kfl-status-danger-bg text-kfl-status-danger")}>{children}</Badge>;
 }
 
 export default function AdminObservability() {
@@ -84,12 +84,39 @@ export default function AdminObservability() {
   });
 
   // Backup history query
-  const { data: backupHistory } = useQuery({
+  const { data: backupHistoryRaw } = useQuery({
     queryKey: ["backup-history"],
     queryFn: () => api.get("/p0/backup/history?limit=10").then((response: any) => response.data),
     refetchInterval: 30000,
     enabled: true,
   });
+
+  // Ensure backupHistory is always an object with events array
+  const backupHistory = backupHistoryRaw && typeof backupHistoryRaw === 'object' && Array.isArray(backupHistoryRaw.events)
+    ? backupHistoryRaw
+    : { events: [] };
+
+  const backupRuns = backupHistory.events;
+
+  // App version releases
+  const { data: appVersionsRaw, isLoading: versionsLoading } = useQuery({
+    queryKey: ["app-versions"],
+    queryFn: () => api.get("/p0/app-versions").then((response: any) => response.data),
+    refetchInterval: 60000,
+  });
+
+  // Ensure appVersions is always an array
+  const appVersions = Array.isArray(appVersionsRaw) ? appVersionsRaw : [];
+
+  // Audit events browser
+  const { data: auditEventsRaw, isLoading: auditLoading } = useQuery({
+    queryKey: ["audit-events-admin"],
+    queryFn: () => api.get("/p0/audit-events", { params: { limit: 50 } }).then((response: any) => response.data),
+    refetchInterval: 120000,
+  });
+
+  // Ensure auditEvents is always an array
+  const auditEvents = Array.isArray(auditEventsRaw) ? auditEventsRaw : [];
 
   const [backupNotice, setBackupNotice] = useState("");
   const [backupError, setBackupError] = useState("");
@@ -102,7 +129,7 @@ export default function AdminObservability() {
     }
     setSavingUserId(user.user_id);
     try {
-      await api.put(`/p0/auth/users/${encodeURIComponent(user.user_id)}/roles`, { roles });
+      await api.put("/p0/auth/users/" + encodeURIComponent(user.user_id) + "/roles", { roles });
       setRoleDrafts((current) => {
         const next = { ...current };
         delete next[user.user_id];
@@ -119,9 +146,6 @@ export default function AdminObservability() {
   async function handleInvite(user: any, deliveryMethod: "email" | "manual", deliveryEmail?: string) {
     setInviteError("");
     setInviteNotice("");
-    // Admin may explicitly override the delivery address. Only treated as an
-    // override when a non-blank, distinct address is provided; otherwise we
-    // deliver to the account's registered email.
     const overrideEmail = (deliveryEmail || "").trim();
     const email = overrideEmail || (user.email || "").trim();
     if (!email) {
@@ -159,8 +183,8 @@ export default function AdminObservability() {
         delivery,
       ]);
       setInviteNotice(deliveryMethod === "manual"
-        ? `Manual setup link generated for ${delivery.recipient_email}. Share it only through the approved secure channel; it expires within 24 hours.`
-        : `Email accepted by SMTP for ${delivery.recipient_email}. The one-time setup link expires within 24 hours.`);
+        ? "Manual setup link generated for " + delivery.recipient_email + ". Share it only through the approved secure channel; it expires within 24 hours."
+        : "Email accepted by SMTP for " + delivery.recipient_email + ". The one-time setup link expires within 24 hours.");
       await queryClient.invalidateQueries({ queryKey: ["admin-observability"] });
     } catch (cause: any) {
       const failedDelivery = cause?.response?.data;
@@ -202,15 +226,14 @@ export default function AdminObservability() {
   const backup = health.backup || {};
   const scanner = health.scanner || {};
 
-  const backupRuns = backupHistory?.events || [];
-
   return (
     <div className="app-page">
       <header className="app-page-header">
         <div>
           <div className="app-eyebrow">Administration</div>
           <h1 className="app-title">System Observability</h1>
-          <p className="app-subtitle">System health, workflow posture, audit activity, backup state, and administrator-controlled access profiles.</p>
+          <p className="app-subtitle">System health, workflow posture, audit activity, backup state, and administrator-controlled access profiles.
+</p>
         </div>
         <Button onClick={() => refetch()} variant="outline" size="sm" disabled={isFetching}>
           <RefreshCw size={15} className={isFetching ? "animate-spin" : ""} /> Refresh
@@ -643,6 +666,98 @@ export default function AdminObservability() {
         <div className="border-b border-kfl-border px-5 py-4"><h2 className="font-bold text-kfl-text">Role matrix</h2><p className="mt-1 text-xs text-kfl-muted">Explicit permissions granted to each profile.</p></div>
         <div className="overflow-x-auto"><table className="min-w-full"><thead className="border-b border-kfl-border bg-kfl-surface-subtle"><tr><th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Role</th><th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Access level</th><th className="px-5 py-3 text-left text-[11px] uppercase text-kfl-muted">Permissions</th></tr></thead><tbody className="divide-y divide-kfl-border">{data?.role_matrix?.map((profile: any) => <tr key={profile.role}><td className="px-5 py-3 font-mono text-xs font-semibold text-kfl-text">{profile.role}</td><td className="px-5 py-3 text-sm text-kfl-secondary">{profile.access_level}</td><td className="px-5 py-3 text-xs text-kfl-secondary">{profile.permissions.join(", ")}</td></tr>)}</tbody></table></div>
       </section>
+
+      {/* Release History */}
+      <section className="mb-6 app-surface overflow-hidden">
+        <div className="border-b border-kfl-border px-5 py-4">
+          <h2 className="font-bold text-kfl-text">Release history</h2>
+          <p className="mt-1 text-xs text-kfl-muted">Application versions released and upgrade notifications sent.</p>
+        </div>
+        <div className="p-5">
+          {versionsLoading ? (
+            <div className="text-center text-xs text-kfl-muted py-4">Loading release history…</div>
+          ) : appVersions.length === 0 ? (
+            <div className="text-center text-xs text-kfl-muted py-4">No releases recorded yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Version</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Released</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Released by</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Notifications</th>
+                    <th className="px-3 py-2 text-right font-semibold text-kfl-muted">Changelog</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-kfl-border">
+                  {appVersions.slice(0, 10).map((v: any) => (
+                    <tr key={v.version_id}>
+                      <td className="px-3 py-2 font-mono text-kfl-text">{v.version_number}</td>
+                      <td className="px-3 py-2 text-kfl-muted">{v.released_at?.slice(0, 16).replace("T", " ") ?? "—"}</td>
+                      <td className="px-3 py-2 text-kfl-muted">{v.released_by}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-xs font-mono ${v.notification_sent ? "text-emerald-600" : "text-kfl-muted"}`}>
+                          {v.notification_sent ? "Sent" : "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => alert(v.changelog_non_technical)}
+                          className="text-xs text-kfl-blue hover:underline"
+                        >
+                          View changelog
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Audit Events */}
+      <section className="app-surface overflow-hidden">
+        <div className="border-b border-kfl-border px-5 py-4">
+          <h2 className="font-bold text-kfl-text">System audit events</h2>
+          <p className="mt-1 text-xs text-kfl-muted">Recent database mutations and user actions across the control system.</p>
+        </div>
+        <div className="p-5">
+          {auditLoading ? (
+            <div className="text-center text-xs text-kfl-muted py-4">Loading audit events…</div>
+          ) : auditEvents.length === 0 ? (
+            <div className="text-center text-xs text-kfl-muted py-4">No audit events recorded.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="border-b border-kfl-border bg-kfl-surface-subtle">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Time</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Entity</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Action</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Actor</th>
+                    <th className="px-3 py-2 text-left font-semibold text-kfl-muted">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-kfl-border">
+                  {auditEvents.slice(0, 20).map((e: any) => (
+                    <tr key={e.event_id}>
+                      <td className="px-3 py-2 font-mono text-kfl-muted">{e.timestamp?.slice(0, 16).replace("T", " ") ?? "—"}</td>
+                      <td className="px-3 py-2 font-mono text-kfl-text">{e.entity_type}</td>
+                      <td className="px-3 py-2 text-kfl-text">{e.action}</td>
+                      <td className="px-3 py-2 font-mono text-kfl-muted">{e.actor_id}</td>
+                      <td className="px-3 py-2 truncate max-w-[200px] text-kfl-muted">{e.details ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
-}
+};
