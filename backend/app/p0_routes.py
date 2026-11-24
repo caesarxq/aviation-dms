@@ -17,6 +17,9 @@ import asyncio
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 from collections import Counter
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .database import get_db, DB_PATH
 from .audit import log_audit_event
@@ -3510,5 +3513,70 @@ async def list_feedback(request: Request, status: Optional[str] = None, issue_ty
         )
         rows = await cursor.fetchall()
         return [FeedbackResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+# ==================== ZOHO BUGTRACKER WEBHOOK ====================
+
+@router.post("/webhook/zoho-bugtracker")
+async def zoho_bugtracker_webhook(request: Request):
+    """
+    Webhook endpoint for Zoho BugTracker bug status updates.
+    
+    Zoho BugTracker can POST to this endpoint when a bug status changes.
+    Expected payload: JSON with bug_id, status, and optionally feedback_id.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    bug_id = payload.get("bug_id") or payload.get("id")
+    new_status = payload.get("status") or payload.get("bug_status")
+    feedback_id = payload.get("feedback_id")
+
+    if not bug_id or not new_status:
+        raise HTTPException(status_code=422, detail="bug_id and status are required")
+
+    # Map BugTracker status to local status
+    from .bugtracker_sync import _map_bugtracker_to_status
+    local_status = _map_bugtracker_to_status(new_status)
+
+    # If feedback_id not in payload, try to find by bugtracker_id
+    if not feedback_id:
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT feedback_id FROM feedback WHERE bugtracker_id = ?", (str(bug_id),)
+            )
+            row = await cursor.fetchone()
+            if row:
+                feedback_id = row["feedback_id"]
+        finally:
+            await db.close()
+
+    if not feedback_id:
+        logger.warning("BugTracker webhook: no feedback found for bug_id %s", bug_id)
+        return {"status": "ignored", "reason": "no_feedback_found"}
+
+    # Update local feedback status
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "UPDATE feedback SET status = ?, zoho_form_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
+            (local_status, feedback_id, local_status),
+        )
+        await db.commit()
+        if cursor.rowcount > 0:
+            logger.info("BugTracker webhook: updated feedback %s to status %s", feedback_id, local_status)
+            return {"status": "updated", "feedback_id": feedback_id, "new_status": local_status}
+        else:
+            return {"status": "no_change", "feedback_id": feedback_id}
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("BugTracker webhook failed for %s: %s", feedback_id, exc)
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
     finally:
         await db.close()

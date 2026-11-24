@@ -1,7 +1,22 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUpRight, BarChart3, CalendarClock, CheckCircle2, FileCheck2, ShieldCheck, Users, Plane, Briefcase, Target } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  BarChart3,
+  CalendarClock,
+  CheckCircle2,
+  FileCheck2,
+  ShieldCheck,
+  Users,
+  Plane,
+  Briefcase,
+  Target,
+  TrendingUp,
+  TrendingDown,
+  Wrench,
+} from "lucide-react";
 import { safetyApi } from "../api/safety";
 import { SafetyKPIsModal } from "../components/ui/modals/SafetyKPIsModal";
 import { useAuth } from "../auth/AuthContext";
@@ -9,25 +24,63 @@ import { ROLE_WORKSPACES } from "../auth/permissions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-function MetricCard({ label, value, context, icon: Icon, tone = "blue" }: any) {
+function MetricCard({
+  label,
+  value,
+  context,
+  icon: Icon,
+  tone = "blue",
+  href,
+  trend,
+}: {
+  label: string;
+  value: string | number;
+  context?: string;
+  icon: any;
+  tone?: string;
+  href?: string;
+  trend?: string;
+}) {
   const tones: Record<string, string> = {
     blue: "bg-kfl-status-info-bg text-kfl-status-info",
     green: "bg-kfl-status-success-bg text-kfl-status-success",
     amber: "bg-kfl-status-warning-bg text-kfl-status-warning",
     red: "bg-kfl-status-danger-bg text-kfl-status-danger",
   };
+  const trendTone = trend === "up" ? "text-emerald-600" : trend === "down" ? "text-rose-600" : "text-kfl-muted";
+  const trendIcon = trend === "up" ? <TrendingUp size={12} /> : trend === "down" ? <TrendingDown size={12} /> : null;
+
+  const CardContent = (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="app-label">{label}</div>
+        <div className="mt-3 text-3xl font-bold tracking-tight text-kfl-text">{value}</div>
+        {context && <div className="mt-1 text-xs text-kfl-muted">{context}</div>}
+        {trend && (
+          <div className="mt-1 flex items-center gap-1">
+            {trendIcon}
+            <span className={`text-xs font-semibold ${trendTone}`}>{trend}</span>
+          </div>
+        )}
+      </div>
+      <div className={`rounded-lg p-2.5 ${tones[tone] || tones.blue}`}>
+        <Icon size={19} strokeWidth={1.8} />
+      </div>
+    </div>
+  );
+
+  if (href) {
+    return (
+      <Link to={href} className="block">
+        <div className="app-surface p-5 transition hover:-translate-y-0.5 hover:shadow-card cursor-pointer border border-kfl-border hover:border-kfl-blue rounded-lg">
+          {CardContent}
+        </div>
+      </Link>
+    );
+  }
   return (
     <div className="app-surface p-5 transition hover:-translate-y-0.5 hover:shadow-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="app-label">{label}</div>
-          <div className="mt-3 text-3xl font-bold tracking-tight text-kfl-text">{value}</div>
-          {context && <div className="mt-1 text-xs text-kfl-muted">{context}</div>}
-        </div>
-        <div className={`rounded-lg p-2.5 ${tones[tone] || tones.blue}`}>
-          <Icon size={19} strokeWidth={1.8} />
-        </div>
-      </div>
+      {CardContent}
     </div>
   );
 }
@@ -36,6 +89,123 @@ function priorityClass(priority: string) {
   if (priority === "critical") return "badge badge-destructive";
   if (priority === "high") return "badge badge-secondary";
   return "badge badge-outline";
+}
+
+const ROLE_DASHBOARD_CONFIG: Record<string, {
+  metrics: Array<{ label: string; valueKey: string; context: string; icon: any; tone: string; href: string; trendKey?: string }>;
+  quickActions: Array<{ label: string; href: string; icon: any }>;
+}> = {
+  head_operations: {
+    metrics: [
+      { label: "Active Missions", valueKey: "missions_count", context: "Current operations", icon: Plane, tone: "blue", href: "/missions?status=in_progress", trendKey: "missions_trend" },
+      { label: "Crew On Duty", valueKey: "crew_on_duty", context: "FDTL-compliant assignments", icon: Users, tone: "green", href: "/duties", trendKey: "crew_trend" },
+    ],
+    quickActions: [
+      { label: "New Mission", href: "/missions", icon: Plane },
+      { label: "Release Flight", href: "/missions", icon: Briefcase },
+    ],
+  },
+  head_safety: {
+    metrics: [
+      { label: "Open Occurrences", valueKey: "open_occurrences", context: "Awaiting classification", icon: AlertTriangle, tone: "amber", href: "/occurrences?status=reported", trendKey: "occurrences_trend" },
+      { label: "Safety Actions Overdue", valueKey: "safety_actions_overdue", context: "Past due date", icon: CheckCircle2, tone: "red", href: "/safety-actions?status=overdue", trendKey: "safety_actions_trend" },
+    ],
+    quickActions: [
+      { label: "Report Occurrence", href: "/occurrences", icon: AlertTriangle },
+      { label: "Review Hazard", href: "/hazards", icon: ShieldCheck },
+    ],
+  },
+  head_quality: {
+    metrics: [
+      { label: "Audit Findings Open", valueKey: "audit_findings_open", context: "Pending closure", icon: ShieldCheck, tone: "amber", href: "/audit-findings?status=open", trendKey: "findings_trend" },
+      { label: "Quality Audits Due", valueKey: "quality_audits_due", context: "Scheduled this month", icon: Briefcase, tone: "blue", href: "/quality-audits?status=planned", trendKey: "audits_trend" },
+    ],
+    quickActions: [
+      { label: "New Audit", href: "/audit-reports", icon: Briefcase },
+      { label: "Review Findings", href: "/audit-findings?status=open", icon: ShieldCheck },
+    ],
+  },
+  accountable_manager: {
+    metrics: [
+      { label: "Audit Findings Open", valueKey: "audit_findings_open", context: "Pending closure", icon: ShieldCheck, tone: "amber", href: "/audit-findings?status=open", trendKey: "findings_trend" },
+      { label: "Quality Audits Due", valueKey: "quality_audits_due", context: "Scheduled this month", icon: Briefcase, tone: "blue", href: "/quality-audits?status=planned", trendKey: "audits_trend" },
+    ],
+    quickActions: [
+      { label: "Review Compliance", href: "/compliance", icon: FileCheck2 },
+      { label: "View Reports", href: "/audit-reports", icon: BarChart3 },
+    ],
+  },
+  head_maintenance: {
+    metrics: [
+      { label: "Aircraft in Service", valueKey: "aircraft_in_service", context: "Airworthy fleet", icon: Plane, tone: "green", href: "/roc?status=serviceable", trendKey: "fleet_trend" },
+      { label: "Maintenance Due", valueKey: "maintenance_due", context: "Scheduled inspections", icon: Wrench, tone: "amber", href: "/maintenance", trendKey: "maintenance_trend" },
+    ],
+    quickActions: [
+      { label: "Manage Aircraft", href: "/roc", icon: Plane },
+      { label: "Schedule Maintenance", href: "/maintenance", icon: Wrench },
+    ],
+  },
+  head_training: {
+    metrics: [
+      { label: "Personnel Qualified", valueKey: "personnel_qualified", context: "Current qualifications", icon: Target, tone: "green", href: "/personnel-licenses?status=valid", trendKey: "training_trend" },
+      { label: "Training Due", valueKey: "training_due", context: "Recency expiring", icon: CalendarClock, tone: "amber", href: "/training?expiring=30", trendKey: "training_due_trend" },
+    ],
+    quickActions: [
+      { label: "Manage Licenses", href: "/personnel-licenses", icon: Target },
+      { label: "View Training", href: "/training", icon: CalendarClock },
+    ],
+  },
+  dg_coordinator: {
+    metrics: [
+      { label: "DG Shipments Active", valueKey: "dg_shipments_active", context: "In transit", icon: Plane, tone: "amber", href: "/dangerous-goods", trendKey: "dg_trend" },
+      { label: "DG Training Current", valueKey: "dg_training_current", context: "Certified staff", icon: Users, tone: "green", href: "/training", trendKey: "dg_training_trend" },
+    ],
+    quickActions: [
+      { label: "DG Shipments", href: "/dangerous-goods", icon: Plane },
+      { label: "DG Acceptance", href: "/dangerous-goods", icon: ShieldCheck },
+    ],
+  },
+  head_security: {
+    metrics: [
+      { label: "Security Reviews Open", valueKey: "security_reviews_open", context: "Pending action", icon: ShieldCheck, tone: "amber", href: "/security-reviews", trendKey: "security_trend" },
+      { label: "Incidents Reported", valueKey: "security_incidents", context: "Last 30 days", icon: AlertTriangle, tone: "red", href: "/security", trendKey: "security_incidents_trend" },
+    ],
+    quickActions: [
+      { label: "Security Reviews", href: "/security-reviews", icon: ShieldCheck },
+      { label: "Security Incidents", href: "/security", icon: AlertTriangle },
+    ],
+  },
+  records_custodian: {
+    metrics: [
+      { label: "Documents in Catalogue", valueKey: "documents_count", context: "Controlled documents", icon: FileCheck2, tone: "blue", href: "/documents", trendKey: "documents_trend" },
+      { label: "Distributions Pending", valueKey: "distributions_pending", context: "Awaiting release", icon: Plane, tone: "amber", href: "/distributions?status=pending", trendKey: "distributions_trend" },
+    ],
+    quickActions: [
+      { label: "Documents", href: "/documents", icon: FileCheck2 },
+      { label: "Distributions", href: "/distributions", icon: Plane },
+    ],
+  },
+  independent_auditor: {
+    metrics: [
+      { label: "Audit Reports Open", valueKey: "audit_reports_open", context: "Awaiting review", icon: Briefcase, tone: "blue", href: "/audit-reports?status=open", trendKey: "audit_reports_trend" },
+      { label: "Findings Unresolved", valueKey: "findings_unresolved", context: "Not yet closed", icon: AlertTriangle, tone: "red", href: "/audit-findings?status=open", trendKey: "findings_trend" },
+    ],
+    quickActions: [
+      { label: "Audit Reports", href: "/audit-reports", icon: Briefcase },
+      { label: "Findings", href: "/audit-findings", icon: AlertTriangle },
+    ],
+  },
+};
+
+function getFallbackMetrics(trends: any, deadlines: any, trendsLoading: boolean, deadlinesLoading: boolean, trendsError: any, deadlinesError: any) {
+  const showUnavailable = trendsLoading || trendsError || deadlinesLoading || deadlinesError;
+  const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
+  return [
+    { label: "Occurrences (30 days)", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.occurrences_last_30_days ?? 0, context: "Reported safety events", icon: AlertTriangle, tone: "amber", href: "/occurrences" },
+    { label: "Total Hazards", value: trendsLoading ? "—" : trendsError ? "Unavailable" : hazardTotal, context: "Across active risk registers", icon: ShieldCheck, tone: "blue", href: "/hazards" },
+    { label: "Open Safety Actions", value: trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.safety_actions_by_status?.open ?? 0, context: "Awaiting completion", icon: CheckCircle2, tone: "blue", href: "/safety-actions" },
+    { label: "Deadlines requiring attention", value: deadlinesLoading ? "—" : deadlinesError ? "Unavailable" : deadlines?.overdue_count ?? 0, context: deadlinesError ? "Deadline data unavailable" : "Overdue items", icon: CalendarClock, tone: deadlinesError ? "blue" : deadlines?.overdue_count ? "red" : "green", href: "/notifications" },
+  ];
 }
 
 export function Dashboard() {
@@ -54,63 +224,18 @@ export function Dashboard() {
   const workspace = ROLE_WORKSPACES[activeRole];
   const roleLabel = activeRole.replace(/_/g, " ");
 
-  const hazardTotal = Object.values(trends?.hazards_by_risk_level ?? {}).reduce((a: number, b: any) => a + Number(b || 0), 0);
   const isLoading = trendsLoading || deadlinesLoading;
   const hasDataErrors = trendsError || deadlinesError;
+  const showUnavailable = isLoading || hasDataErrors;
 
-  // Role-specific metric cards
-  const roleMetrics: Array<{ label: string; value: string | number; context: string; icon: any; tone: string }> = [];
-  const showUnavailable = trendsLoading || trendsError || deadlinesLoading || deadlinesError;
-  if (activeRole === "head_operations" || activeRole === "chief_pilot" || activeRole === "flight_ops_officer") {
-    roleMetrics.push(
-      { label: "Active Missions", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.missions_count ?? 0, context: "Current operations", icon: Plane, tone: "blue" },
-      { label: "Crew On Duty", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.crew_on_duty ?? 0, context: "FDTL-compliant assignments", icon: Users, tone: "green" },
-    );
-  } else if (activeRole === "head_safety") {
-    roleMetrics.push(
-      { label: "Open Occurrences", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.open_occurrences ?? 0, context: "Awaiting classification", icon: AlertTriangle, tone: "amber" },
-      { label: "Safety Actions Overdue", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.safety_actions_overdue ?? 0, context: "Past due date", icon: CheckCircle2, tone: "red" },
-    );
-  } else if (activeRole === "head_quality" || activeRole === "accountable_manager") {
-    roleMetrics.push(
-      { label: "Audit Findings Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.audit_findings_open ?? 0, context: "Pending closure", icon: ShieldCheck, tone: "amber" },
-      { label: "Quality Audits Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.quality_audits_due ?? 0, context: "Scheduled this month", icon: Briefcase, tone: "blue" },
-    );
-  } else if (activeRole === "head_maintenance") {
-    roleMetrics.push(
-      { label: "Aircraft in Service", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.aircraft_in_service ?? 0, context: "Airworthy fleet", icon: Plane, tone: "green" },
-      { label: "Maintenance Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.maintenance_due ?? 0, context: "Scheduled inspections", icon: CalendarClock, tone: "amber" },
-    );
-  } else if (activeRole === "head_training") {
-    roleMetrics.push(
-      { label: "Personnel Qualified", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.personnel_qualified ?? 0, context: "Current qualifications", icon: Target, tone: "green" },
-      { label: "Training Due", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.training_due ?? 0, context: "Recency expiring", icon: CalendarClock, tone: "amber" },
-    );
-  } else if (activeRole === "dg_coordinator") {
-    roleMetrics.push(
-      { label: "DG Shipments Active", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.dg_shipments_active ?? 0, context: "In transit", icon: Plane, tone: "amber" },
-      { label: "DG Training Current", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.dg_training_current ?? 0, context: "Certified staff", icon: Users, tone: "green" },
-    );
-  } else if (activeRole === "head_security") {
-    roleMetrics.push(
-      { label: "Security Reviews Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.security_reviews_open ?? 0, context: "Pending action", icon: ShieldCheck, tone: "amber" },
-      { label: "Incidents Reported", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.security_incidents ?? 0, context: "Last 30 days", icon: AlertTriangle, tone: "red" },
-    );
-  } else if (activeRole === "records_custodian") {
-    roleMetrics.push(
-      { label: "Documents in Catalogue", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.documents_count ?? 0, context: "Controlled documents", icon: FileCheck2, tone: "blue" },
-      { label: "Distributions Pending", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.distributions_pending ?? 0, context: "Awaiting release", icon: Plane, tone: "amber" },
-    );
-  } else if (activeRole === "independent_auditor") {
-    roleMetrics.push(
-      { label: "Audit Reports Open", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.audit_reports_open ?? 0, context: "Awaiting review", icon: Briefcase, tone: "blue" },
-      { label: "Findings Unresolved", value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.findings_unresolved ?? 0, context: "Not yet closed", icon: AlertTriangle, tone: "red" },
-    );
-  } else if (activeRole === "librarian" || activeRole === "as_contracted" || activeRole === "occurrence_reporter" || activeRole === "system_admin") {
-    roleMetrics.push(
-      { label: "System Status", value: trendsError ? "Degraded" : "Operational", context: "All services", icon: ShieldCheck, tone: trendsError ? "red" : "green" },
-    );
-  }
+  const config = ROLE_DASHBOARD_CONFIG[activeRole];
+  const roleMetrics = config
+    ? config.metrics.map((m) => ({
+        ...m,
+        value: showUnavailable ? (trendsLoading ? "—" : "Unavailable") : trends?.[m.valueKey] ?? 0,
+        trend: showUnavailable ? undefined : m.trendKey ? (trends?.[m.trendKey] === "up" ? "up" : trends?.[m.trendKey] === "down" ? "down" : "stable") : undefined,
+      }))
+    : getFallbackMetrics(trends, deadlines, trendsLoading, deadlinesLoading, trendsError, deadlinesError);
 
   return (
     <div className="app-page">
@@ -140,17 +265,36 @@ export function Dashboard() {
       </header>
 
       <section className="mb-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Key metrics">
-        {roleMetrics.length > 0 ? roleMetrics.map((card, i) => (
-          <MetricCard key={i} label={card.label} value={card.value} context={card.context} icon={card.icon} tone={card.tone} />
-        )) : (
-          <>
-            <MetricCard label="Occurrences (30 days)" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.occurrences_last_30_days ?? 0} context="Reported safety events" icon={AlertTriangle} tone="amber" />
-            <MetricCard label="Total Hazards" value={trendsLoading ? "—" : trendsError ? "Unavailable" : hazardTotal} context="Across active risk registers" icon={ShieldCheck} tone="blue" />
-            <MetricCard label="Open Safety Actions" value={trendsLoading ? "—" : trendsError ? "Unavailable" : trends?.safety_actions_by_status?.open ?? 0} context="Awaiting completion" icon={CheckCircle2} tone="blue" />
-            <MetricCard label="Deadlines requiring attention" value={deadlinesLoading ? "—" : deadlinesError ? "Unavailable" : deadlines?.overdue_count ?? 0} context={deadlinesError ? "Deadline data unavailable" : "Overdue items"} icon={CalendarClock} tone={deadlinesError ? "blue" : deadlines?.overdue_count ? "red" : "green"} />
-          </>
-        )}
+        {roleMetrics.map((card, i) => (
+          <MetricCard key={i} {...card} />
+        ))}
       </section>
+
+      {config?.quickActions && config.quickActions.length > 0 && (
+        <section className="mb-7">
+          <div className="flex items-start justify-between gap-4 border-b border-kfl-border px-5 py-4">
+            <div>
+              <h2 className="text-base font-bold text-kfl-text">Quick actions</h2>
+              <p className="mt-1 text-xs text-kfl-muted">Common tasks for {roleLabel}</p>
+            </div>
+          </div>
+          <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {config.quickActions.map((action, i) => (
+              <Link key={i} to={action.href} className="block">
+                <div className="app-surface p-4 transition hover:-translate-y-0.5 hover:shadow-card cursor-pointer border border-kfl-border hover:border-kfl-blue rounded-lg">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-kfl-text">{action.label}</div>
+                      <p className="mt-0.5 text-xs text-kfl-muted">Quick access</p>
+                    </div>
+                    <action.icon size={19} strokeWidth={1.8} className="text-kfl-blue" />
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.45fr_0.85fr]">
         <div className="app-surface overflow-hidden">
@@ -222,8 +366,18 @@ export function Dashboard() {
           <div className="space-y-4">
             {[
               ["Document control", "Status not verified", "info", "Unverified"],
-              ["Safety reporting", trendsError ? "Safety data unavailable" : trendsLoading ? "Checking safety data" : "Safety data available", "info", trendsError ? "Unavailable" : trendsLoading ? "Checking" : "Data available"],
-              ["Deadline monitoring", deadlinesError ? "Deadline data unavailable" : deadlinesLoading ? "Checking deadlines" : deadlines?.overdue_count ? `${deadlines.overdue_count} overdue item(s)` : "No overdue items", deadlinesError ? "info" : deadlinesLoading ? "info" : deadlines?.overdue_count ? "critical" : "healthy", deadlinesError ? "Unavailable" : deadlinesLoading ? "Checking" : deadlines?.overdue_count ? "Action" : "Clear"],
+              [
+                "Safety reporting",
+                trendsError ? "Safety data unavailable" : trendsLoading ? "Checking safety data" : "Safety data available",
+                "info",
+                trendsError ? "Unavailable" : trendsLoading ? "Checking" : "Data available",
+              ],
+              [
+                "Deadline monitoring",
+                deadlinesError ? "Deadline data unavailable" : deadlinesLoading ? "Checking deadlines" : deadlines?.overdue_count ? `${deadlines.overdue_count} overdue item(s)` : "No overdue items",
+                deadlinesError ? "info" : deadlinesLoading ? "info" : deadlines?.overdue_count ? "critical" : "healthy",
+                deadlinesError ? "Unavailable" : deadlinesLoading ? "Checking" : deadlines?.overdue_count ? "Action" : "Clear",
+              ],
               ["Notification service", "Notification status not checked", "info", "Not checked"],
             ].map(([label, value, tone, status]) => (
               <div key={label} className="flex items-center justify-between gap-3 border-b border-kfl-border pb-3 last:border-0 last:pb-0">
@@ -243,3 +397,5 @@ export function Dashboard() {
     </div>
   );
 }
+
+export default Dashboard;

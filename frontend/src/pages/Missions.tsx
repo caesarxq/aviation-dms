@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { Plus } from "lucide-react";
+import { safetyApi } from "../api/safety";
+import { Plus, Download, UserCheck, ShieldCheck } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
@@ -72,15 +73,52 @@ export function Missions() {
   const [priority, setPriority] = useState("normal");
   const [plannedDate, setPlannedDate] = useState("");
   const [location, setLocation] = useState("");
+
+  // PDF-aligned fields matching KFL Drone Mission Sheet template
+  const [kcaaOaReference, setKcaaOaReference] = useState("");
+  const [picName, setPicName] = useState("");
+  const [missionDroneTypeModel, setMissionDroneTypeModel] = useState("");
+  const [missionPicFullName, setMissionPicFullName] = useState("");
+  const [missionSignature, setMissionSignature] = useState("");
+  const [missionDateFiled, setMissionDateFiled] = useState("");
+
+  // Flight log rows (matching KFL Mission Sheet: 11 rows)
+  const [flightLog, setFlightLog] = useState<Array<{
+    flightNo: number;
+    start: string;
+    end: string;
+    totalRun: string;
+    batteryNumber: string;
+    chargeCycles: string;
+  }>>(Array.from({ length: 11 }, (_, i) => ({
+    flightNo: i + 1,
+    start: "",
+    end: "",
+    totalRun: "",
+    batteryNumber: "",
+    chargeCycles: "",
+  })));
   const [missionError, setMissionError] = useState("");
   const [dirty, setDirty] = useState(false);
 
   const { errors: missionFieldErrors, isValid: missionIsValid } = useValidation(
-    { title, mission_type: missionType, priority },
+    {
+      title,
+      mission_type: missionType,
+      priority,
+      kcaa_oa_reference: kcaaOaReference,
+      pic_name: picName,
+      drone_type_model: missionDroneTypeModel,
+      mission_pic_full_name: missionPicFullName,
+    },
     {
       title: { required: true, minLength: 2 },
       mission_type: { required: true, minLength: 2 },
       priority: { required: true, minLength: 2 },
+      kcaa_oa_reference: { required: true },
+      pic_name: { required: true },
+      drone_type_model: { required: true },
+      mission_pic_full_name: { required: true },
     }
   );
 
@@ -118,6 +156,23 @@ export function Missions() {
       toast({ title: "Mission transition not recorded", message: getErrorMessage(error, "Reload the mission and retry."), type: "error" });
     },
   });
+
+  const downloadMissionPdf = async (missionId: string) => {
+    try {
+      const response = await safetyApi.downloadMissionSheetPdf(missionId);
+      const blob = response as Blob;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `mission-sheet-${missionId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Unable to download mission sheet PDF", type: "error" });
+    }
+  };
 
   return (
     <div className="app-page">
@@ -214,8 +269,85 @@ export function Missions() {
               <FormField htmlFor="mission_description" label="Description" className="md:col-span-2">
                 <textarea id="mission_description" name="description" rows={3} value={description} onChange={(e) => { setDescription(e.target.value); setDirty(true); }} className="flex-1 min-h-[80px]" />
               </FormField>
+
+              {/* KFL Mission Sheet Template Fields */}
+              <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-4 mb-4 md:col-span-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <Download size={14} className="text-kfl-blue" />
+                  <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">KFL Mission Sheet Template Fields</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <FormField htmlFor="mission_kcaa_oa" label="KCAA OA Reference Number" hint="KCAA Operations Authorization reference number." required>
+                    <Input id="mission_kcaa_oa" name="kcaa_oa_reference" aria-invalid={!!missionFieldErrors.kcaa_oa_reference} className={missionFieldErrors.kcaa_oa_reference ? "border-rose-400" : ""} placeholder="KCAA OA reference" value={kcaaOaReference} onChange={(e) => { setKcaaOaReference(e.target.value); setDirty(true); }} />
+                    {missionFieldErrors.kcaa_oa_reference && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.kcaa_oa_reference}</p>}
+                  </FormField>
+                  <FormField htmlFor="mission_pic_name" label="Pilot in Command (PIC) Name" hint="PIC full name." required>
+                    <Input id="mission_pic_name" name="pic_name" aria-invalid={!!missionFieldErrors.pic_name} className={missionFieldErrors.pic_name ? "border-rose-400" : ""} placeholder="PIC name" value={picName} onChange={(e) => { setPicName(e.target.value); setDirty(true); }} />
+                    {missionFieldErrors.pic_name && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.pic_name}</p>}
+                  </FormField>
+                  <FormField htmlFor="mission_drone_type" label="Drone Type / Model" hint="Aircraft type and model." required>
+                    <Input id="mission_drone_type" name="drone_type_model" aria-invalid={!!missionFieldErrors.drone_type_model} className={missionFieldErrors.drone_type_model ? "border-rose-400" : ""} placeholder="Drone type / model" value={missionDroneTypeModel} onChange={(e) => { setMissionDroneTypeModel(e.target.value); setDirty(true); }} />
+                    {missionFieldErrors.drone_type_model && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.drone_type_model}</p>}
+                  </FormField>
+                  <FormField htmlFor="mission_pic_full_name" label="PIC Full Name (Sign-off)" hint="PIC full name as it will appear on the signed mission sheet." required>
+                    <Input id="mission_pic_full_name" name="mission_pic_full_name" aria-invalid={!!missionFieldErrors.mission_pic_full_name} className={missionFieldErrors.mission_pic_full_name ? "border-rose-400" : ""} placeholder="PIC full name" value={missionPicFullName} onChange={(e) => { setMissionPicFullName(e.target.value); setDirty(true); }} />
+                    {missionFieldErrors.mission_pic_full_name && <p className="mt-1 text-[11px] text-rose-700">{missionFieldErrors.mission_pic_full_name}</p>}
+                  </FormField>
+                </div>
+
+                {/* Flight Log */}
+                <div className="mt-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ShieldCheck size={14} className="text-kfl-blue" />
+                    <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Flight Log (11 rows)</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">Flight no.</th>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">Start (HH:MM)</th>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">End (HH:MM)</th>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">Total run</th>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">Battery number</th>
+                          <th className="px-2 py-1 text-left font-bold text-kfl-muted">Charge cycles</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {flightLog.map((row) => (
+                          <tr key={row.flightNo} className="border-b border-kfl-border/50">
+                            <td className="px-2 py-1 text-kfl-muted">{row.flightNo}</td>
+                            <td className="px-2 py-1"><Input className="flex-1 border border-kfl-border rounded px-1 py-0.5 text-xs" value={row.start} onChange={(e) => { const next = [...flightLog]; next[row.flightNo - 1].start = e.target.value; setFlightLog(next); setDirty(true); }} /></td>
+                            <td className="px-2 py-1"><Input className="flex-1 border border-kfl-border rounded px-1 py-0.5 text-xs" value={row.end} onChange={(e) => { const next = [...flightLog]; next[row.flightNo - 1].end = e.target.value; setFlightLog(next); setDirty(true); }} /></td>
+                            <td className="px-2 py-1"><Input className="flex-1 border border-kfl-border rounded px-1 py-0.5 text-xs" value={row.totalRun} onChange={(e) => { const next = [...flightLog]; next[row.flightNo - 1].totalRun = e.target.value; setFlightLog(next); setDirty(true); }} /></td>
+                            <td className="px-2 py-1"><Input className="flex-1 border border-kfl-border rounded px-1 py-0.5 text-xs" value={row.batteryNumber} onChange={(e) => { const next = [...flightLog]; next[row.flightNo - 1].batteryNumber = e.target.value; setFlightLog(next); setDirty(true); }} /></td>
+                            <td className="px-2 py-1"><Input className="flex-1 border border-kfl-border rounded px-1 py-0.5 text-xs" value={row.chargeCycles} onChange={(e) => { const next = [...flightLog]; next[row.flightNo - 1].chargeCycles = e.target.value; setFlightLog(next); setDirty(true); }} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mission Sign-off */}
+              <div className="rounded-lg border border-kfl-border bg-kfl-surface-subtle p-4 mb-4 md:col-span-2">
+                <div className="flex items-center gap-2 mb-3">
+                  <UserCheck size={14} className="text-kfl-blue" />
+                  <span className="text-xs font-semibold text-kfl-text uppercase tracking-wider">Mission Sign-off</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <FormField htmlFor="mission_signature" label="PIC Signature" hint="PIC signature.">
+                    <Input id="mission_signature" name="mission_signature" value={missionSignature} onChange={(e) => { setMissionSignature(e.target.value); setDirty(true); }} placeholder="Signature" />
+                  </FormField>
+                  <FormField htmlFor="mission_date_filed" label="Date Filed" hint="Date the mission sheet was filed.">
+                    <Input id="mission_date_filed" name="mission_date_filed" type="date" value={missionDateFiled} onChange={(e) => { setMissionDateFiled(e.target.value); setDirty(true); }} />
+                  </FormField>
+                </div>
+              </div>
             </div>
-            <Button
+
+              <Button
               type="button"
               disabled={!missionIsValid || createMutation.isPending}
               onClick={() => {
@@ -227,6 +359,10 @@ export function Missions() {
                   priority: priority.trim(),
                   planned_date: plannedDate || null,
                   location: location.trim() || null,
+                  kcaa_oa_reference: kcaaOaReference.trim() || null,
+                  pic_name: picName.trim() || null,
+                  drone_type_model: missionDroneTypeModel.trim() || null,
+                  flight_log_data: JSON.stringify(flightLog),
                 });
               }}
               variant="default"
@@ -300,6 +436,15 @@ export function Missions() {
                             {a.label}
                           </button>
                         ))}
+                      <Button
+                        type="button"
+                        aria-label={`Download PDF ${m.mission_id}`}
+                        size="sm"
+                        onClick={() => downloadMissionPdf(m.mission_id)}
+                        className="mt-2 inline-flex items-center gap-1 text-xs text-kfl-blue hover:underline border-0 bg-transparent p-0"
+                      >
+                        <Download size={12} /> PDF
+                      </Button>
                     </td>
                   </tr>
                 ))}

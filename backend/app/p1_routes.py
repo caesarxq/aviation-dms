@@ -1227,6 +1227,98 @@ async def summarize_aircraft(request: Request):
         await db.close()
 
 
+@router.post("/aircraft/compute-operational-status")
+async def compute_operational_status(request: Request):
+    """Compute aircraft operational_status from maintenance, safety, and mission data.
+
+    Priority (highest first):
+      grounded   - open maintenance-related safety actions or audit findings
+      unserviceable - overdue maintenance (next_due passed, not completed)
+      deployed   - aircraft assigned to an in-progress mission
+      serviceable - otherwise
+    """
+    _check(request, "aircraft:manage")
+    actor = _actor(request)
+    now = now_iso()
+    today = now[:10]
+    db = await get_db()
+    try:
+        # Grounded: open safety_actions or audit findings linked to this aircraft's maintenance
+        grounded_rows = await (await db.execute("""
+            SELECT DISTINCT a.aircraft_id, a.registration
+            FROM aircraft a
+            LEFT JOIN maintenance_records m ON m.aircraft_registration = a.registration
+            LEFT JOIN safety_actions sa ON sa.occurrence_id IS NOT NULL
+            WHERE (
+                (m.next_due IS NOT NULL AND m.next_due < ? AND m.status != 'completed')
+                OR (sa.status = 'open' AND sa.owner_id IS NOT NULL)
+            )
+        """, (today,))).fetchall()
+
+        # Deployed: aircraft on in-progress mission
+        deployed_rows = await (await db.execute("""
+            SELECT DISTINCT a.aircraft_id, a.registration
+            FROM aircraft a
+            JOIN missions m ON m.aircraft_id = a.aircraft_id
+            WHERE m.status = 'in_progress'
+        """)).fetchall()
+
+        deployed_ids = {row["aircraft_id"] for row in deployed_rows}
+        updated = 0
+
+        cursor = await db.execute("SELECT aircraft_id, registration FROM aircraft")
+        all_aircraft = await cursor.fetchall()
+        all_aircraft_list = list(all_aircraft)
+
+        for row in all_aircraft_list:
+            ac_id = row["aircraft_id"]
+            reg = row["registration"]
+
+            # Determine new status
+            is_grounded = False
+            # Check maintenance records for overdue
+            m_cursor = await db.execute(
+                "SELECT 1 FROM maintenance_records WHERE aircraft_registration = ? AND next_due IS NOT NULL AND next_due < ? AND status != 'completed' LIMIT 1",
+                (reg, today),
+            )
+            if await m_cursor.fetchone():
+                new_status = "unserviceable"
+            else:
+                # Check open safety findings for this aircraft's maintenance
+                s_cursor = await db.execute(
+                    """SELECT 1 FROM safety_actions sa
+                       JOIN occurrences o ON o.occurrence_id = sa.occurrence_id
+                       WHERE sa.status = 'open' AND o.location = ? LIMIT 1""",
+                    (reg,),
+                )
+                if await s_cursor.fetchone():
+                    new_status = "grounded"
+                elif ac_id in deployed_ids:
+                    new_status = "deployed"
+                else:
+                    new_status = "serviceable"
+
+            current_cursor = await db.execute(
+                "SELECT operational_status FROM aircraft WHERE aircraft_id = ?", (ac_id,)
+            )
+            current = await current_cursor.fetchone()
+            if current and current["operational_status"] != new_status:
+                await db.execute(
+                    "UPDATE aircraft SET operational_status = ?, updated_at = ?, updated_by = ? WHERE aircraft_id = ?",
+                    (new_status, now, actor, ac_id),
+                )
+                updated += 1
+                await log_audit_event(
+                    "aircraft", ac_id, "operational_status_changed", actor,
+                    {"registration": reg, "from": current["operational_status"], "to": new_status}, db=db,
+                )
+
+        await db.commit()
+        return {"computed": len(all_aircraft_list), "updated": updated}
+    finally:
+        await db.close()
+
+
 @router.get("/aircraft/{ac_id}", response_model=AircraftResponse)
 async def get_aircraft(ac_id: str, request: Request):
     _check(request, "aircraft:read")
@@ -1307,6 +1399,51 @@ async def update_aircraft(ac_id: str, update: AircraftUpdate, request: Request):
         raise
     finally:
         await db.close()
+
+# ==================== AIRCRAFT OPERATIONAL STATUS (Phase 7) ====================
+
+class OperationalStatusUpdate(BaseModel):
+    operational_status: str = Field(pattern="^(grounded|unserviceable|serviceable|standby|deployed)$")
+
+@router.patch("/aircraft/{ac_id}/operational-status", response_model=AircraftResponse)
+async def update_aircraft_operational_status(ac_id: str, update: OperationalStatusUpdate, request: Request):
+    """Update aircraft operational status (Head of Maintenance only)."""
+    _check(request, "aircraft:manage")
+    # Additional check: only head_maintenance can change operational_status
+    if _role(request) != "head_maintenance":
+        raise HTTPException(status_code=403, detail="Only Head of Maintenance can change aircraft operational status")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (ac_id,))
+        current_row = await cursor.fetchone()
+        if not current_row:
+            raise HTTPException(status_code=404, detail="Aircraft not found")
+        current = dict(current_row)
+        old_status = current.get("operational_status")
+        if old_status == update.operational_status:
+            return AircraftResponse(**current)
+        await db.execute(
+            "UPDATE aircraft SET operational_status = ?, updated_at = ?, updated_by = ? WHERE aircraft_id = ?",
+            (update.operational_status, now, actor, ac_id),
+        )
+        await log_audit_event(
+            "aircraft", ac_id, "operational_status_changed", actor,
+            {"old_status": old_status, "new_status": update.operational_status}, db=db,
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM aircraft WHERE aircraft_id = ?", (ac_id,))
+        row = await cursor.fetchone()
+        return AircraftResponse(**dict(row))
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
+    finally:
+        await db.close()
+
 
 # ==================== MISSIONS (P1 Phase 3) ====================
 
@@ -3468,6 +3605,88 @@ async def reject_change_request(cr_id: str, request: Request, payload: Optional[
     finally:
         await db.close()
     return {"cr_id": cr_id, "status": "rejected", "rejection_reason": payload.rejection_reason}
+
+
+@router.post("/change-requests/{cr_id}/publish")
+async def publish_change_request(cr_id: str, request: Request):
+    """Publish an approved change request, making it eligible for distribution."""
+    _check(request, "change_request:approve")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "approved":
+            raise HTTPException(status_code=400, detail="Only approved change requests can be published")
+        if same_principal(request, cr["requester_id"]):
+            raise HTTPException(status_code=403, detail="The requester cannot publish their own change request (separation of duties)")
+        await db.execute(
+            "UPDATE change_requests SET status = 'published', updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "published"}
+
+
+@router.post("/change-requests/{cr_id}/distribute")
+async def distribute_change_request(cr_id: str, request: Request):
+    """Distribute a published change request to controlled document recipients."""
+    _check(request, "distribution:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "published":
+            raise HTTPException(status_code=400, detail="Only published change requests can be distributed")
+        await db.execute(
+            "UPDATE change_requests SET status = 'distributed', updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "distributed"}
+
+
+@router.post("/change-requests/{cr_id}/redirect")
+async def redirect_change_request(cr_id: str, request: Request, payload: Optional[ChangeRequestReview] = None):
+    """Redirect a change request back to the requester for rework (Head of Quality only)."""
+    _check(request, "change_request:approve")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM change_requests WHERE cr_id = ?", (cr_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Change request not found")
+        cr = dict(row)
+        if cr["status"] != "under_review":
+            raise HTTPException(status_code=400, detail="Only change requests under review can be redirected")
+        if same_principal(request, cr["requester_id"]):
+            raise HTTPException(status_code=403, detail="The requester cannot redirect their own change request")
+        reason = payload.rejection_reason if payload else None
+        if not reason or not reason.strip():
+            raise HTTPException(status_code=422, detail="A redirect reason is required")
+        await db.execute(
+            "UPDATE change_requests SET status = 'open', reviewer_id = ?, reviewed_at = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (actor, now, now, actor, cr_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return {"cr_id": cr_id, "status": "open", "redirected_by": actor, "redirect_reason": reason.strip()}
 
 
 @router.post("/change-requests/{cr_id}/comments", response_model=ReviewCommentResponse, status_code=201)

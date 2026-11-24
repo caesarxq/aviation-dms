@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aviation DMS — Entity Relationship Diagram</title>
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 24px; background: var(--card, #ffffff); color: var(--foreground, #102a43); }
+  h1 { font-size: 1.5rem; margin-bottom: 16px; color: var(--accent, #1b7abf); }
+  .mermaid { background: var(--card, #ffffff); border: 1px solid var(--border, #d9e2ec); border-radius: 8px; padding: 16px; }
+  .legend { margin-top: 24px; font-size: 0.875rem; color: var(--muted-foreground, #52606d); }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .pk { color: var(--status-critical, #c53030); font-weight: bold; }
+  .fk { color: var(--status-info, #2b6cb0); font-weight: bold; }
+  a { color: var(--accent, #1b7abf); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>Aviation DMS — Entity Relationship Diagram</h1>
+<p>SQLite schema relationships. PK = primary key, FK = foreign key. Tables marked <span class="pk">■</span> are seeded or controlled by the application.</p>
+
+<div class="mermaid">
+erDiagram
+    users ||--o{ user_roles : "has"
+    users ||--o{ user_id_aliases : "aliases"
+    users ||--o{ auth_sessions : "creates"
+    users ||--o{ documents : "creates"
+    users ||--o{ document_proposals : "proposes"
+    users ||--o{ change_requests : "requests"
+    users ||--o{ audit_events : "generates"
+    users ||--o{ personnel_licenses : "holds"
+    users ||--o{ personnel_uploads : "uploads"
+    users ||--o{ occurrences : "reports"
+    users ||--o{ risk_assessments : "assesses"
+    users ||--o{ corrective_actions : "owns"
+    users ||--o{ security_incidents : "reports"
+    users ||--o{ dg_shipments : "creates"
+    users ||--o{ dg_acceptance_checks : "performs"
+    users ||--o{ flight_plans : "files"
+    users ||--o{ flight_releases : "releases"
+    users ||--o{ missions : "plans"
+    users ||--o{ aircraft_insurance : "holds"
+    users ||--o{ maintenance_records : "performs"
+    users ||--o{ distributions : "receives"
+    users ||--o{ audit_reports : "creates"
+    users ||--o{ audit_report_imports : "stages"
+    users ||--o{ audit_report_imports : "verifies"
+    users ||--o{ audit_findings : "creates"
+
+    document_versions ||--|| documents : "current version of"
+    documents ||--o{ document_versions : "has"
+    documents ||--o{ document_proposals : "has"
+    documents ||--o{ change_requests : "triggers"
+    documents ||--o{ document_sections : "contains"
+    documents ||--o{ document_files : "has"
+    documents ||--o{ document_classifications : "classified as"
+    documents ||--o{ distributions : "distributed"
+    documents ||--o{ retention_rules : "subject to"
+    documents ||--o{ legal_holds : "held under"
+
+    document_classifications ||--o{ documents : "applies to"
+    document_sections ||--o{ extraction_requests : "source of"
+    extraction_requests ||--|| extractions : "produces"
+    extractions ||--o{ document_versions : "from version"
+
+    roc_register ||--o{ aircraft : "covers"
+    aircraft ||--o{ aircraft_insurance : "has"
+    aircraft ||--o{ maintenance_records : "undergoes"
+    aircraft ||--o{ missions : "used in"
+
+    missions ||--o{ flight_plans : "generates"
+    flight_plans ||--o{ flight_releases : "authorizes"
+    risk_assessments ||--o{ flight_releases : "gates"
+    personnel_qualifications ||--o{ crew_members : "held by"
+    crew_members ||--o{ missions : "assigned to"
+
+    occurrences ||--o{ investigations : "leads to"
+    occurrences ||--o{ corrective_actions : "drives"
+    occurrences ||--o{ safety_actions : "drives"
+    occurrences ||--o{ risk_assessments : "linked to"
+    occurrences ||--o{ mor_assessments : "assessed by"
+
+    corrective_actions ||--o{ audit_findings : "addresses"
+    audit_findings ||--o{ corrective_actions : "resolved by"
+    audit_reports ||--o{ audit_findings : "contains"
+    audit_report_imports ||--o{ audit_reports : "creates"
+    audit_report_imports ||--o{ audit_findings : "creates"
+
+    personnel_uploads ||--o{ personnel_licenses : "evidence for"
+    legal_holds ||--o{ documents : "applies to"
+    retention_rules ||--o{ legal_holds : "governed by"
+
+    notifications ||--o{ users : "sent to"
+</div>
+
+<div class="legend">
+  <h3>Key Tables</h3>
+  <div class="legend-item"><span class="pk">users</span> — 15 seeded role profiles, 8 canonical active accounts</div>
+  <div class="legend-item"><span class="pk">documents / document_versions</span> — controlled documents with KCAA approval gates</div>
+  <div class="legend-item"><span class="pk">document_proposals / change_requests</span> — atomic changes with SoD enforcement</div>
+  <div class="legend-item"><span class="pk">audit_events</span> — immutable audit trail for all state-changing operations</div>
+  <div class="legend-item"><span class="pk">personnel_uploads</span> — private credential files with SHA-256 integrity</div>
+  <div class="legend-item"><span class="pk">document_classifications</span> — PUBLIC, TEMPLATE, CONTROLLED, KCAA_APPROVED</div>
+  <div class="legend-item"><span class="pk">retention_rules / legal_holds</span> — RR-023 (36 months), RR-025 (lifetime metadata)</div>
+  <div class="legend-item"><span class="pk">roc_register / aircraft</span> — ROC-001 with 7 OpSpec registrations vs 20-aircraft master fleet</div>
+  <div class="legend-item"><span class="pk">audit_report_imports / extractions</span> — P3 provenance workflow and section extraction</div>
+</div>
+
+<script>
+mermaid.initialize({ startOnLoad: true, theme: 'base', securityLevel: 'loose' });
+</script>
+</body>
+</html>

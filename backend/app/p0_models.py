@@ -1,5 +1,5 @@
 """P0 Pydantic models."""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from enum import Enum
 from datetime import datetime
@@ -16,6 +16,15 @@ class DocClass(str, Enum):
     form = "form"
     policy = "policy"
     procedure = "procedure"
+    roc_spec = "roc_spec"
+    ops_spec = "ops_spec"
+    oem_publication = "oem_publication"
+
+
+class DocumentCategory(str, Enum):
+    controlled_manual = "controlled_manual"
+    roc_ops_spec = "roc_ops_spec"
+    oem_publication = "oem_publication"
 
 
 class ApprovalState(str, Enum):
@@ -30,9 +39,12 @@ class ApprovalState(str, Enum):
 
 class ChangeStatus(str, Enum):
     open = "open"
+    submitted = "submitted"
     in_review = "in_review"
     approved = "approved"
     rejected = "rejected"
+    published = "published"
+    distributed = "distributed"
     implemented = "implemented"
     closed = "closed"
 
@@ -101,6 +113,8 @@ class DocumentResponse(BaseModel):
     document_id: str
     title: str
     doc_class: str
+    manual_owner_role: Optional[str] = None
+    document_category: str = "controlled_manual"
     classification: str
     status: str
     owner_id: str
@@ -119,7 +133,6 @@ class DocumentResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class DocumentVersionCreate(BaseModel):
@@ -148,7 +161,6 @@ class DocumentVersionResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class DocumentFile(BaseModel):
@@ -194,7 +206,6 @@ class ChangeRequestResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class DistributionCreate(BaseModel):
@@ -215,7 +226,6 @@ class DistributionResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class RetentionRuleResponse(BaseModel):
@@ -230,7 +240,6 @@ class RetentionRuleResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class LegalHoldCreate(BaseModel):
@@ -266,7 +275,6 @@ class ComplianceObligationResponse(BaseModel):
     created_at: str
     updated_at: str
     created_by: str
-    updated_by: str
 
 
 class RegulatoryReferenceResponse(BaseModel):
@@ -325,6 +333,31 @@ class AuthInviteResponse(BaseModel):
     delivery_status: str
     expires_at: str
     setup_url: Optional[str] = None
+
+
+# --- Role-based multi-user invitation ---
+
+class RoleInviteRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=100)
+    emails: List[str] = Field(min_length=1, max_length=50)
+    delivery_method: Literal["email", "manual"] = "email"
+    department: Optional[str] = Field(default=None, max_length=200)
+
+
+class RoleInviteItem(BaseModel):
+    username: str
+    user_id: str
+    email: str
+    role: str
+    delivery_id: str
+    delivery_status: str
+    expires_at: str
+    setup_url: Optional[str] = None
+
+
+class RoleInviteResponse(BaseModel):
+    role: str
+    invited: List[RoleInviteItem]
 
 
 class AuthForgotPasswordRequest(BaseModel):
@@ -463,9 +496,11 @@ class FeedbackCreate(BaseModel):
     expected_result: str = ""
     actual_result: str = ""
     impact: str = "workaround"
+    priority: str = "P3"
     observation_time: str
     contact: str
     screenshot_info: Optional[str] = None
+
 
 class FeedbackResponse(BaseModel):
     feedback_id: str
@@ -488,3 +523,22 @@ class FeedbackResponse(BaseModel):
     updated_at: str
     created_by: str
 
+
+# --- App version tracking ---
+
+class AppVersionCreate(BaseModel):
+    version_number: str = Field(min_length=1, max_length=50)
+    changelog_non_technical: str = Field(min_length=10, max_length=10000)
+    changelog_technical: Optional[str] = Field(default=None, max_length=10000)
+    send_notifications: bool = True
+
+
+class AppVersionResponse(BaseModel):
+    version_id: str
+    version_number: str
+    released_at: str
+    released_by: str
+    changelog_non_technical: str
+    changelog_technical: Optional[str]
+    notification_sent: int
+    created_at: str

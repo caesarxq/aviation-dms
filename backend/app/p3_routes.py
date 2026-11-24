@@ -20,6 +20,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .database import DB_PATH, get_db
 from .p0_auth import same_principal
+from .p1_models import (
+    CorrectiveActionCreate,
+    CorrectiveActionUpdate,
+    CorrectiveActionResponse,
+)
 from .rbac import has_permission
 from .upload_safety import (
     UploadMalwareDetected,
@@ -261,6 +266,7 @@ class AuditReportCreate(BaseModel):
     auditee_id: str = Field(min_length=1, max_length=100)
     scope: Optional[str] = Field(default=None, max_length=2000)
     regulatory_basis: Optional[str] = Field(default=None, max_length=2000)
+    audit_type: str = Field(default="internal", max_length=50)
     status: ReportStatus = ReportStatus.open
     evidence_file: Optional[str] = Field(default=None, max_length=1000)
 
@@ -275,6 +281,7 @@ class AuditFindingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     description: str = Field(min_length=1, max_length=10000)
     regulatory_reference: Optional[str] = Field(default=None, max_length=2000)
+    department: Optional[str] = Field(default=None, min_length=1, max_length=50)
     due_date: Optional[date] = None
 
 
@@ -342,6 +349,7 @@ class AuditFindingUpdate(BaseModel):
     area: Optional[str] = Field(default=None, min_length=1, max_length=200)
     level: Optional[int] = Field(default=None, ge=1, le=4)
     regulatory_reference: Optional[str] = Field(default=None, max_length=2000)
+    department: Optional[str] = Field(default=None, min_length=1, max_length=50)
     status: Optional[FindingStatus] = None
     due_date: Optional[date] = None
     corrective_action_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
@@ -510,15 +518,16 @@ async def create_audit_report(payload: AuditReportCreate, request: Request):
         await db.execute(
             """INSERT INTO audit_reports
                (audit_id, audit_number, audit_date, auditor_id, auditee_id, scope, regulatory_basis,
-                status, evidence_file, evidence_sha256, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                audit_type, status, evidence_file, evidence_sha256, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 audit_id, audit_number, audit_date, auditor_id, auditee_id, payload.scope,
-                payload.regulatory_basis, payload.status.value, payload.evidence_file, evidence_sha256, now, now,
+                payload.regulatory_basis, payload.audit_type, payload.status.value, payload.evidence_file, evidence_sha256, now, now,
             ),
         )
         await _write_event(db, "audit_report", audit_id, "created", actor, {
             "audit_number": audit_number,
+            "audit_type": payload.audit_type,
             "evidence_sha256": evidence_sha256,
         })
         await db.commit()
@@ -530,6 +539,7 @@ async def create_audit_report(payload: AuditReportCreate, request: Request):
     return {
         "audit_id": audit_id,
         "audit_number": audit_number,
+        "audit_type": payload.audit_type,
         "status": payload.status.value,
         "evidence_sha256": evidence_sha256,
         "created_at": now,
@@ -1063,11 +1073,12 @@ async def create_audit_finding(payload: AuditFindingCreate, request: Request):
         await db.execute(
             """INSERT INTO audit_findings
                (finding_id, audit_id, finding_number, area, level, title, description,
-                regulatory_reference, status, due_date, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                regulatory_reference, department, status, due_date, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 finding_id, payload.audit_id, payload.finding_number, payload.area, payload.level,
-                payload.title, payload.description, payload.regulatory_reference, FindingStatus.open.value,
+                payload.title, payload.description, payload.regulatory_reference,
+                payload.department, FindingStatus.open.value,
                 _date(payload.due_date), now, now,
             ),
         )
@@ -1089,6 +1100,7 @@ async def list_audit_findings(
     status: Optional[FindingStatus] = None,
     level: Optional[int] = Query(default=None, ge=1, le=4),
     area: Optional[str] = Query(default=None, min_length=1, max_length=200),
+    department: Optional[str] = Query(default=None, min_length=1, max_length=50),
     search: Optional[str] = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=100000),
@@ -1108,6 +1120,9 @@ async def list_audit_findings(
     if area:
         conditions.append("area = ?")
         params.append(area)
+    if department:
+        conditions.append("department = ?")
+        params.append(department)
     if search and search.strip():
         search_pattern = f"%{search.strip().lower()}%"
         conditions.append(
@@ -1139,6 +1154,24 @@ async def update_audit_finding(finding_id: str, payload: AuditFindingUpdate, req
         closure_evidence = payload.closure_evidence or ""
         if not closure_evidence.strip():
             raise HTTPException(status_code=422, detail="closure_evidence is required to close a finding")
+        # Department-head closure gate: a finding tagged to a department can only
+        # be closed by the head of that department (Head of Quality / Safety / Security).
+        actor_role = _role(request)
+        db = await get_db()
+        try:
+            row = await (await db.execute("SELECT department FROM audit_findings WHERE finding_id = ?", (finding_id,))).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Audit finding not found")
+            dept = row["department"]
+            if dept:
+                dept_head_role = {"quality": "head_quality", "safety": "head_safety", "security": "head_security"}.get(dept)
+                if dept_head_role and actor_role != dept_head_role:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Closing a {dept} department finding requires the {dept_head_role} role.",
+                    )
+        finally:
+            await db.close()
     elif "closure_evidence" in fields:
         raise HTTPException(status_code=422, detail="closure_evidence may only be supplied while closing a finding")
 
@@ -1152,7 +1185,7 @@ async def update_audit_finding(finding_id: str, payload: AuditFindingUpdate, req
             raise HTTPException(status_code=404, detail="Audit finding not found")
         current = dict(row)
         updates = {}
-        for field in ("title", "description", "area", "level", "regulatory_reference", "due_date", "corrective_action_id"):
+        for field in ("title", "description", "area", "level", "regulatory_reference", "department", "due_date", "corrective_action_id"):
             if field in fields:
                 value = getattr(payload, field)
                 updates[field] = _date(value) if field == "due_date" else value
@@ -1223,14 +1256,212 @@ async def link_corrective_action(finding_id: str, payload: CorrectiveActionLink,
     return {"finding_id": finding_id, "corrective_action_id": car_id}
 
 
-@router.get("/audit-findings/summary")
-async def audit_findings_summary(request: Request):
+@router.post("/corrective-actions", response_model=CorrectiveActionResponse, status_code=201)
+async def create_corrective_action(car: CorrectiveActionCreate, request: Request):
+    """Create a Corrective Action Request (CAR) linked to an audit finding."""
+    _check(request, "audit_finding:update")
+    actor = _actor(request)
+    car_id = _gen_id("CAR")
+    now = _now()
+    db = await get_db()
+    try:
+        # Validate the linked finding (either quality or external audit finding)
+        audit_id = None
+        audit_report_id = None
+        finding_level = car.finding_level
+        
+        if car.audit_finding_id:
+            finding = await (await db.execute(
+                "SELECT finding_id, audit_id, level, title FROM audit_findings WHERE finding_id = ?",
+                (car.audit_finding_id,),
+            )).fetchone()
+            if not finding:
+                raise HTTPException(status_code=404, detail="Audit finding not found")
+            audit_id = finding["audit_id"]
+            audit_report_id = audit_id  # For external audits, audit_id = audit_report_id
+            finding_level = f"level_{finding['level']}"
+        elif car.finding_id:
+            finding = await (await db.execute(
+                "SELECT finding_id, audit_id FROM quality_audit_findings WHERE finding_id = ?",
+                (car.finding_id,),
+            )).fetchone()
+            if not finding:
+                raise HTTPException(status_code=404, detail="Quality audit finding not found")
+            audit_id = finding["audit_id"]
+            finding_level = car.finding_level
+        else:
+            raise HTTPException(status_code=422, detail="Either finding_id or audit_finding_id is required")
+        
+        # Validate audit_id/audit_report_id consistency
+        if car.audit_id and car.audit_id != audit_id:
+            raise HTTPException(status_code=422, detail="audit_id does not match the finding's audit")
+        if car.audit_report_id and car.audit_report_id != audit_report_id:
+            raise HTTPException(status_code=422, detail="audit_report_id does not match the finding's audit report")
+        
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute(
+            """INSERT INTO corrective_actions
+               (car_id, finding_id, audit_finding_id, audit_id, audit_report_id, title, description,
+                finding_level, root_cause, corrective_action, preventive_action,
+                owner_id, due_date, status, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                car_id, car.finding_id, car.audit_finding_id, audit_id, audit_report_id,
+                car.title, car.description, car.finding_level, car.root_cause,
+                car.corrective_action, car.preventive_action, car.owner_id,
+                car.due_date, "open", now, now, actor, actor,
+            ),
+        )
+        await _write_event(db, "corrective_action", car_id, "created", actor, {
+            "title": car.title,
+            "audit_finding_id": car.audit_finding_id,
+            "finding_id": car.finding_id,
+        })
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+    return CorrectiveActionResponse(
+        car_id=car_id, finding_id=car.finding_id, audit_finding_id=car.audit_finding_id,
+        audit_id=audit_id, audit_report_id=audit_report_id,
+        title=car.title, description=car.description,
+        finding_level=car.finding_level, root_cause=car.root_cause,
+        corrective_action=car.corrective_action, preventive_action=car.preventive_action,
+        owner_id=car.owner_id, due_date=car.due_date, status="open",
+        verification=None, verified_by=None, verified_at=None, closed_at=None,
+        created_at=now, updated_at=now, created_by=actor, updated_by=actor,
+    )
+
+
+@router.get("/corrective-actions", response_model=list[CorrectiveActionResponse])
+async def list_corrective_actions(
+    request: Request,
+    status: Optional[str] = None,
+    audit_finding_id: Optional[str] = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    """List corrective action requests with optional status and finding filters."""
+    _check(request, "audit_finding:read")
+    conditions = []
+    params = []
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if audit_finding_id:
+        conditions.append("audit_finding_id = ?")
+        params.append(audit_finding_id)
+    where = " AND ".join(conditions) if conditions else "1=1"
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            f"SELECT * FROM corrective_actions WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        rows = await cursor.fetchall()
+        return [CorrectiveActionResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/corrective-actions/{car_id}", response_model=CorrectiveActionResponse)
+async def get_corrective_action(car_id: str, request: Request):
+    """Get a single corrective action request by ID."""
     _check(request, "audit_finding:read")
     db = await get_db()
     try:
-        by_level_rows = await (await db.execute("SELECT level, COUNT(*) AS count FROM audit_findings GROUP BY level")).fetchall()
-        by_status_rows = await (await db.execute("SELECT status, COUNT(*) AS count FROM audit_findings GROUP BY status")).fetchall()
-        by_area_rows = await (await db.execute("SELECT area, COUNT(*) AS count FROM audit_findings GROUP BY area")).fetchall()
+        row = await (await db.execute(
+            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
+        )).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Corrective action not found")
+        return CorrectiveActionResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.post("/corrective-actions/{car_id}/verify")
+async def verify_corrective_action(car_id: str, request: Request):
+    """Verify that a corrective action has been implemented effectively."""
+    _check(request, "audit_finding:update")
+    actor = _actor(request)
+    now = _now()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        car = await (await db.execute(
+            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
+        )).fetchone()
+        if not car:
+            raise HTTPException(status_code=404, detail="Corrective action not found")
+        car = dict(car)
+        if car["status"] != "open":
+            raise HTTPException(status_code=400, detail="Only open corrective actions can be verified")
+        if same_principal(request, car["owner_id"]):
+            raise HTTPException(status_code=403, detail="The CAR owner cannot verify their own corrective action")
+        await db.execute(
+            "UPDATE corrective_actions SET verification = 'pending_verification', updated_at = ?, updated_by = ? WHERE car_id = ?",
+            (now, actor, car_id),
+        )
+        await _write_event(db, "corrective_action", car_id, "verification_requested", actor, {})
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+    return {"car_id": car_id, "status": "pending_verification", "verified_by": actor}
+
+
+@router.post("/corrective-actions/{car_id}/close")
+async def close_corrective_action(car_id: str, request: Request):
+    """Close a verified corrective action."""
+    _check(request, "audit_finding:update")
+    actor = _actor(request)
+    now = _now()
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        car = await (await db.execute(
+            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
+        )).fetchone()
+        if not car:
+            raise HTTPException(status_code=404, detail="Corrective action not found")
+        car = dict(car)
+        if car["status"] != "pending_verification":
+            raise HTTPException(status_code=400, detail="Only pending_verification corrective actions can be closed")
+        if same_principal(request, car["owner_id"]):
+            raise HTTPException(status_code=403, detail="The CAR owner cannot close their own corrective action")
+        await db.execute(
+            "UPDATE corrective_actions SET status = 'closed', verification = 'verified', verified_by = ?, verified_at = ?, closed_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?",
+            (actor, now, now, now, actor, car_id),
+        )
+        await _write_event(db, "corrective_action", car_id, "closed", actor, {})
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+    return {"car_id": car_id, "status": "closed", "verified_by": actor, "closed_at": now}
+
+
+@router.get("/audit-findings/summary")
+async def audit_findings_summary(request: Request, department: Optional[str] = Query(default=None, min_length=1, max_length=50)):
+    _check(request, "audit_finding:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if department:
+            conditions.append("department = ?")
+            params.append(department)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        by_level_rows = await (await db.execute(f"SELECT level, COUNT(*) AS count FROM audit_findings WHERE {where} GROUP BY level", params)).fetchall()
+        by_status_rows = await (await db.execute(f"SELECT status, COUNT(*) AS count FROM audit_findings WHERE {where} GROUP BY status", params)).fetchall()
+        by_area_rows = await (await db.execute(f"SELECT area, COUNT(*) AS count FROM audit_findings WHERE {where} GROUP BY area", params)).fetchall()
         by_level = {str(row["level"]): row["count"] for row in by_level_rows}
         by_status = {row["status"]: row["count"] for row in by_status_rows}
         by_area = {row["area"]: row["count"] for row in by_area_rows}
@@ -1259,5 +1490,123 @@ async def get_audit_finding(finding_id: str, request: Request):
         if row is None:
             raise HTTPException(status_code=404, detail="Audit finding not found")
         return dict(row)
+    finally:
+        await db.close()
+
+
+# ==================== PDF RENDERING (Phase 3) ====================
+
+from fastapi.responses import Response
+from .pdf_render import render_risk_assessment_pdf, render_mission_sheet_pdf
+
+
+@router.get("/risk-assessments/{assessment_id}/pdf")
+async def download_risk_assessment_pdf(assessment_id: str, request: Request):
+    """Download a KFL Drone Risk Assessment PDF for a given assessment."""
+    _check(request, "risk_assessment:read")
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT * FROM risk_assessments WHERE assessment_id = ?", (assessment_id,)
+        )).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Risk assessment not found")
+        ra = dict(row)
+
+        # Build hazards list from the assessment
+        hazards = []
+        hazard_fields = [
+            ("Trees", "Collision with canopy or branches.", "Survey canopy height and maintain clearance along the route.", "6 Medium", "L2 × S3"),
+            ("Buildings", "Collision with structures or roof obstacles.", "Survey the route and set a buffer from structures.", "6 Medium", "L2 × S3"),
+            ("Human traffic", "Injury to people in the flight area.", "Control access. Pause or land if people enter the flight area.", "4 Low", "L1 × S4"),
+            ("Wildlife", "Animal disturbance or bird strike.", "Maintain separation. Stop if wildlife approaches or shows distress.", "3 Low", "L1 × S3"),
+            ("Manned aircraft", "Mid-air collision.", "Check airspace, scan for traffic and yield immediately to crewed aircraft.", "5 Medium", "L1 × S5"),
+            ("Strong winds", "Loss of control or inability to return.", "Check gusts and return margin. Hold if wind exceeds operating limits.", "6 Medium", "L2 × S3"),
+            ("Communication towers", "Collision with towers or guy wires.", "Locate towers and guy wires. Keep the flight path clear of both.", "4 Low", "L1 × S4"),
+            ("Electric poles / power lines", "Wire strike or electrical contact.", "Identify poles and spans. Set a safe stand-off distance.", "4 Low", "L1 × S4"),
+        ]
+        for name, risk, mitigation, score, ls in hazard_fields:
+            hazards.append({
+                "hazard": name,
+                "risk": risk,
+                "mitigation": mitigation,
+                "score": score,
+            })
+
+        pdf_bytes = render_risk_assessment_pdf({
+            "location": ra.get("location_coordinates", ra.get("location", "")),
+            "date": ra.get("assessed_at", ""),
+            "project_type": ra.get("project_type", "Drone Operations"),
+            "drone_type": ra.get("drone_type_model", ra.get("exposure", "")),
+            "pic": ra.get("pic_full_name", ra.get("assessor_id", "")),
+            "hazards": hazards,
+            "scoring_note": "Scores assume the controls are in place. Reassess if site conditions warrant a different score.",
+            "overall_risk_score": ra.get("risk_score", "—"),
+            "overall_risk_level": ra.get("risk_level", "—"),
+            "flight_decision": ra.get("flight_decision", "Proceed" if not ra.get("flight_cancelled") else "Hold"),
+            "conditions": ra.get("conditions_notes", ra.get("residual_risk", "")),
+            "filed_by": ra.get("pic_full_name", ra.get("assessor_id", "")),
+            "pic_full_name": ra.get("pic_full_name", ra.get("assessor_id", "")),
+            "date_filed": ra.get("assessed_at", ""),
+            "approved_by": ra.get("reviewed_by", "Head of Safety"),
+            "head_signature": "",
+            "approval_date": ra.get("reviewed_at", ""),
+        })
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="risk-assessment-{assessment_id}.pdf"'},
+        )
+    finally:
+        await db.close()
+
+
+@router.get("/missions/{mission_id}/pdf")
+async def download_mission_sheet_pdf(mission_id: str, request: Request):
+    """Download a KFL Drone Mission Sheet PDF for a given mission."""
+    _check(request, "safety:read")
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT * FROM missions WHERE mission_id = ?", (mission_id,)
+        )).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Mission not found")
+        m = dict(row)
+
+        # Try to get post-flight report for flight log data
+        flights = []
+        if m.get("post_flight_report_id"):
+            pfr = await (await db.execute(
+                "SELECT * FROM post_flight_reports WHERE report_id = ?", (m["post_flight_report_id"],)
+            )).fetchone()
+            if pfr:
+                flights = [{
+                    "start": "",
+                    "end": "",
+                    "total_run": "",
+                    "battery": "",
+                    "charge_cycles": pfr.get("battery_cycles", ""),
+                }]
+
+        pdf_bytes = render_mission_sheet_pdf({
+            "location": m.get("location", ""),
+            "date": m.get("planned_date", ""),
+            "pic_name": m.get("pic_name", ""),
+            "operation_type": m.get("mission_type", ""),
+            "kcaa_oa": m.get("kcaa_oa_reference", ""),
+            "drone_type": m.get("drone_type_model", ""),
+            "flights": flights,
+            "filed_by": m.get("created_by", ""),
+            "pic_full_name": m.get("pic_name", m.get("created_by", "")),
+            "date_filed": m.get("created_at", ""),
+        })
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="mission-sheet-{mission_id}.pdf"'},
+        )
     finally:
         await db.close()
