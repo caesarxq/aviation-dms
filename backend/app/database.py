@@ -1996,7 +1996,9 @@ async def _migrate_legacy_quality_findings(db):
 
 async def _rebuild_corrective_actions_finding_fk(db):
     fks = await (await db.execute("PRAGMA foreign_key_list(corrective_actions)")).fetchall()
-    if any(row["table"] == "quality_audit_findings" and row["from"] == "finding_id" and row["to"] == "finding_id" for row in fks):
+    has_quality_fk = any(row["table"] == "quality_audit_findings" and row["from"] == "finding_id" and row["to"] == "finding_id" for row in fks)
+    has_stale_audit_fk = any(row["table"] in ("audit_findings__upgrade", "audit_findings") and row["from"] == "audit_finding_id" for row in fks)
+    if has_quality_fk and not has_stale_audit_fk:
         return
 
     columns = await _table_columns(db, "corrective_actions")

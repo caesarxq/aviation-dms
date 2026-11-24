@@ -1,5 +1,5 @@
 """P2 API routes - Document Proposals/Annotations, Personnel Licenses, Aircraft Insurance."""
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile as FastAPIUploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Literal
@@ -33,6 +33,7 @@ from .upload_safety import (
     upload_request_limit,
 )
 from .upload_validation import UploadContentInvalid, UploadValidationUnavailable, validate_upload_content
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 router = APIRouter()
 
@@ -1235,7 +1236,7 @@ async def create_personnel_upload_file(request: Request):
         raise HTTPException(status_code=400, detail="Invalid multipart upload") from exc
 
     file = form.get("file")
-    if not isinstance(file, UploadFile):
+    if not isinstance(file, StarletteUploadFile):
         await form.close()
         raise HTTPException(status_code=422, detail="A credential file is required")
 
@@ -1596,7 +1597,7 @@ class ApplyIngestionRequest(BaseModel):
 
 
 @router.post("/ingest/document", response_model=IngestDocumentResponse)
-async def ingest_document(request: Request, file: UploadFile = File(...)) -> IngestDocumentResponse:
+async def ingest_document(request: Request, file: FastAPIUploadFile = File(...)) -> IngestDocumentResponse:
     """Upload a PDF credential/certificate, extract text, classify, and return extracted fields.
 
     The extracted data is returned for user review before being applied to the
