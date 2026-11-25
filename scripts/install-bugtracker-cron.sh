@@ -43,27 +43,47 @@ fi
 
 stale_entries=$(crontab -l 2>/dev/null | grep -c 'cron_bugtracker_sync\.py' || true)
 printf '  current-user crontab entries referencing the sync: %s\n' "$stale_entries"
+if [[ "$stale_entries" -gt 0 ]]; then
+  printf '  stale entry lines (a checkout path, not the container):\n'
+  crontab -l 2>/dev/null | grep 'cron_bugtracker_sync\.py' | sed 's/^/    /'
+fi
 
-printf '\nPending feedback that a sync would push to BugTracker:\n'
+cleanup_stale_crontab() {
+  local backup
+  backup="${HOME}/crontab.backup.$(date +%Y%m%dT%H%M%SZ)"
+  crontab -l > "$backup"
+  crontab -l | grep -v 'cron_bugtracker_sync\.py' | crontab -
+  printf 'Removed %s stale current-user crontab entr(y/ies); backup: %s\n' "$stale_entries" "$backup"
+}
+
+printf '\nFeedback that the next sync would push to BugTracker:\n'
 sudo docker exec -i "$CONTAINER" python - <<'PY'
 import os
 import sqlite3
+
+# Mirrors the selection in bugtracker_sync.sync_all_pending, so the count is
+# what the job would actually act on rather than a rough proxy.
+SELECTION = "(bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL)"
 
 db_path = os.getenv("DMS_DB_PATH", "/app/data/dms.db")
 try:
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        total, unsynced = connection.execute(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN bugtracker_id IS NULL THEN 1 ELSE 0 END), 0) "
-            "FROM feedback"
-        ).fetchone()
+        total = connection.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+        pushed = connection.execute(
+            f"SELECT COUNT(*) FROM feedback WHERE {SELECTION}"
+        ).fetchone()[0]
+        linked = connection.execute(
+            "SELECT COUNT(*) FROM feedback WHERE bugtracker_id IS NOT NULL"
+        ).fetchone()[0]
     finally:
         connection.close()
 except sqlite3.Error as exc:
     print(f"  unavailable: {type(exc).__name__} (cannot read the feedback table)")
 else:
     print(f"  feedback rows: {total}")
-    print(f"  without a BugTracker id: {unsynced}")
+    print(f"  would be pushed to BugTracker: {pushed}")
+    print(f"  already linked to a BugTracker bug: {linked}")
 PY
 
 case "$MODE" in
@@ -76,6 +96,9 @@ case "$MODE" in
       printf 'Removed %s. The sync is no longer scheduled.\n' "$CRON_FILE"
     else
       printf 'Nothing to remove: %s is already absent.\n' "$CRON_FILE"
+    fi
+    if [[ "$stale_entries" -gt 0 ]]; then
+      cleanup_stale_crontab
     fi
     ;;
   --install)
@@ -94,10 +117,7 @@ EOF
     printf 'Installed %s (log: %s/bugtracker-sync.log)\n' "$CRON_FILE" "$LOG_DIR"
 
     if [[ "$stale_entries" -gt 0 ]]; then
-      backup="${HOME}/crontab.backup.$(date +%Y%m%dT%H%M%SZ)"
-      crontab -l > "$backup"
-      crontab -l | grep -v 'cron_bugtracker_sync\.py' | crontab -
-      printf 'Removed %s stale current-user crontab entr(y/ies); backup: %s\n' "$stale_entries" "$backup"
+      cleanup_stale_crontab
     fi
 
     printf '\nScheduled. The first run happens within 15 minutes and is not forced here.\n'
