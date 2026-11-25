@@ -24,7 +24,7 @@ const proposals = [{
 
 function renderPage(permissions: string[], status = "submitted") {
   vi.mocked(api.get).mockImplementation((path: string) => Promise.resolve({
-    data: path === "/p0/documents" ? documents : proposals.map((proposal) => ({ ...proposal, status })),
+    data: path === "/p0/documents" ? { data: documents } : proposals.map((proposal) => ({ ...proposal, status })),
   }) as never);
   const profile = {
     user: { user_id: "u1", username: "user", email: "u@example.test", full_name: "User", role: "head_safety", active_role: "head_safety", roles: ["head_safety"] },

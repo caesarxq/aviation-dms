@@ -55,7 +55,7 @@ export function DocumentProposals() {
 
   const { data: docs = [] } = useQuery({
     queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
+    queryFn: () => api.get("/p0/documents").then((r: any) => r.data?.data || []),
   });
 
   useUnsavedChanges(showForm && dirty);

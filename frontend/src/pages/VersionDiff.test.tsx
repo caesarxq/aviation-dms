@@ -17,7 +17,7 @@ const versions = [
 
 function renderPage() {
   vi.mocked(api.get).mockImplementation((path: string) => {
-    if (path === "/p0/documents") return Promise.resolve({ data: docs }) as never;
+    if (path === "/p0/documents") return Promise.resolve({ data: { data: docs } }) as never;
     if (path === "/p0/documents/DOC-001/versions") return Promise.resolve({ data: versions }) as never;
     return Promise.resolve({ data: [] }) as never;
   });
@@ -71,7 +71,7 @@ describe("VersionDiff", () => {
 
   it("shows an explicit empty state when both selected versions have no content", async () => {
     vi.mocked(api.get).mockImplementation((path: string) => {
-      if (path === "/p0/documents") return Promise.resolve({ data: docs }) as never;
+      if (path === "/p0/documents") return Promise.resolve({ data: { data: docs } }) as never;
       if (path === "/p0/documents/DOC-001/versions") return Promise.resolve({ data: [
         { version_id: "v1", version_number: "01.01.00", state: "published", content: "" },
         { version_id: "v2", version_number: "01.01.01", state: "draft", content: "" },

@@ -17,7 +17,8 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
-from .upload_ingestion import extract_pdf_text, classify_and_extract, _compute_file_hash
+from .upload_safety import store_upload_file, _configured_roots
+from .upload_ingestion import extract_pdf_text, classify_and_extract, _compute_file_hash, _get_target_directory
 from .upload_safety import (
     UploadMalwareDetected,
     UploadQuotaExceeded,
@@ -1620,6 +1621,14 @@ async def ingest_document(request: Request, file: FastAPIUploadFile = File(...))
         raise HTTPException(status_code=422, detail="No text could be extracted from the PDF")
 
     result = classify_and_extract(text)
+
+    # Determine target subdirectory based on document type
+    target_subdir = _get_target_directory(result.document_type)
+    doc_storage_root = _configured_roots()[0]  # Primary upload directory
+    stored_path = store_upload_file(
+        doc_storage_root / target_subdir / f"{file_hash}_{file.filename}",
+        file_bytes,
+    )
 
     # Check for duplicate (same file hash already ingested)
     db = await get_db()

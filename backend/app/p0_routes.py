@@ -26,6 +26,7 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
+from .bugtracker_sync import handle_bugtracker_webhook, sync_bugtracker_updates
 from .upload_safety import (
     UploadMalwareDetected,
     UploadQuotaExceeded,
@@ -1079,6 +1080,111 @@ async def issue_invite(body: AuthInviteRequest, request: Request, response: Resp
         recipient_email=recipient,
         delivery_status=delivery_status,
         expires_at=expires.isoformat(),
+    )
+
+
+# --- Role-based multi-user invitation ---
+@router.post("/auth/invites/role", response_model=AuthInviteResponse, response_model_exclude_none=True)
+async def invite_user_by_role(body: RoleInviteRequest, request: Request, response: Response):
+    """
+    Invite a user by role (for multi-user per role support).
+    Creates a new user account with the specified role and sends an invitation.
+    """
+    _check(request, "settings:manage")
+    response.headers["Cache-Control"] = "no-store"
+
+    from . import notifications
+
+    if notifications.invite_email_configuration_error():
+        raise HTTPException(status_code=503, detail="Invite email delivery is disabled or not configured")
+
+    public_app_url = _validated_invite_public_url()
+    actor = _actor(request)
+    client_host = _client_ip(request)
+
+    # Validate role exists
+    valid_roles = set()
+    db = await get_db()
+    try:
+        role_rows = await (await db.execute("SELECT role FROM role_profiles")).fetchall()
+        valid_roles = {r["role"] for r in role_rows}
+    finally:
+        await db.close()
+
+    if body.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}. Valid roles: {', '.join(sorted(valid_roles))}")
+
+    # Generate a username for the new user (role-based)
+    # Format: role_timestamp
+    import time
+    username = f"{body.role}_{int(time.time())}"
+
+    # Create the user account
+    now = _auth_now()
+    user_id = _gen_id("USER")
+    setup_token = _gen_id("SETUP")
+    setup_token_hash = _token_hash(setup_token)
+    expires = now + timedelta(days=7)
+
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        # Check username doesn't exist
+        existing = await (await db.execute("SELECT user_id FROM users WHERE username = ?", (username,))).fetchone()
+        if existing:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Username already exists (try again)")
+
+        # Insert user with pending password
+        await db.execute(
+            """INSERT INTO users (user_id, username, full_name, role, department, is_active, password_hash, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)""",
+            (user_id, username, f"{body.role.replace('_', ' ').title()} User", body.role, "", 1, now.isoformat(), now.isoformat(), actor, actor),
+        )
+        # Insert into user_roles
+        await db.execute(
+            "INSERT INTO user_roles (user_id, role) VALUES (?, ?)",
+            (user_id, body.role),
+        )
+        # Create setup token
+        await db.execute(
+            """INSERT INTO auth_setup_tokens (setup_id, user_id, token_hash, invite_code, purpose, issued_by, created_at, expires_at)
+               VALUES (?, ?, ?, NULL, 'invite', ?, ?, ?)""",
+            (setup_id, user_id, setup_token_hash, actor, now.isoformat(), expires.isoformat()),
+        )
+        # Create invite delivery record
+        delivery_id = _gen_id("DEL")
+        await db.execute(
+            """INSERT INTO auth_invite_email_outbox (delivery_id, setup_id, user_id, recipient_email, status, attempt_count, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)""",
+            (delivery_id, setup_id, user_id, f"{username}@placeholder.invalid", now.isoformat(), now.isoformat(), actor, actor),
+        )
+        await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail=f"Authentication service unavailable: {e}")
+    finally:
+        await db.close()
+
+    setup_url = f"{public_app_url}/setup?username={quote(username, safe='')}#setup_token={setup_token}"
+
+    await log_audit_event(
+        "user_auth",
+        user_id,
+        "role_invite_issued",
+        actor,
+        {"delivery_id": delivery_id, "role": body.role, "expires_at": expires.isoformat()},
+    )
+
+    return AuthInviteResponse(
+        delivery_id=delivery_id,
+        recipient_email=f"{username}@placeholder.invalid",
+        delivery_status="manual",
+        expires_at=expires.isoformat(),
+        setup_url=setup_url,
     )
 
 
@@ -3435,6 +3541,139 @@ async def generate_evidence_pack(request: Request, entity_type: str = None, enti
     return {"entity_type": entity_type, "entity_id": entity_id, "events": events, "checksum": checksum}
 
 
+# --- Cross-Resource Search ---
+@router.get("/search")
+async def search_cross_resource(
+    request: Request,
+    q: str = "",
+    types: str = "document,audit,license,aircraft,mission",
+    limit: int = 10,
+):
+    """
+    Cross-resource search for FilterBar.
+    Searches across documents, audit findings, licenses, aircraft, and missions.
+    """
+    _check(request, "document:read")  # base permission
+    if not q or not q.strip():
+        return {"results": []}
+
+    query = q.strip().lower()
+    type_list = [t.strip() for t in types.split(",") if t.strip()]
+    results = []
+
+    db = await get_db()
+    try:
+        if "document" in type_list:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT document_id as id, title, 'document' as type, doc_class as subtitle
+                    FROM documents
+                    WHERE (lower(title) LIKE ? OR lower(document_id) LIKE ? OR lower(description) LIKE ?)
+                    AND merged_into_doc_id IS NULL
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", f"%{query}%", f"%{query}%", limit),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "document",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "Document",
+                    "url": f"/documents/{r['id']}",
+                })
+
+        if "audit" in type_list and len(results) < limit:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT finding_id as id, title, 'audit' as type, category as subtitle
+                    FROM audit_findings
+                    WHERE lower(title) LIKE ? OR lower(description) LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", f"%{query}%", limit - len(results)),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "audit",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "Audit Finding",
+                    "url": f"/audits/{r['id']}",
+                })
+
+        if "license" in type_list and len(results) < limit:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT license_id as id, license_type as title, 'license' as type, personnel_id as subtitle
+                    FROM personnel_licenses
+                    WHERE lower(license_type) LIKE ? OR lower(license_id) LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", f"%{query}%", limit - len(results)),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "license",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "License",
+                    "url": f"/licenses/{r['id']}",
+                })
+
+        if "aircraft" in type_list and len(results) < limit:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT aircraft_id as id, registration as title, 'aircraft' as type, type_model as subtitle
+                    FROM aircraft
+                    WHERE lower(registration) LIKE ? OR lower(type_model) LIKE ? OR lower(aircraft_id) LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", f"%{query}%", f"%{query}%", limit - len(results)),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "aircraft",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "Aircraft",
+                    "url": f"/aircraft/{r['id']}",
+                })
+
+        if "mission" in type_list and len(results) < limit:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT mission_id as id, title, 'mission' as type, mission_type as subtitle
+                    FROM missions
+                    WHERE lower(title) LIKE ? OR lower(mission_id) LIKE ? OR lower(location) LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", f"%{query}%", f"%{query}%", limit - len(results)),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "mission",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "Mission",
+                    "url": f"/missions/{r['id']}",
+                })
+
+    finally:
+        await db.close()
+
+    return {"results": results[:limit]}
+
 
 # --- Pilot Feedback / Ticketing ---
 
@@ -3545,9 +3784,9 @@ async def zoho_bugtracker_webhook(request: Request):
     if not bug_id or not new_status:
         raise HTTPException(status_code=422, detail="bug_id and status are required")
 
-    # Map BugTracker status to local status
-    from .bugtracker_sync import _map_bugtracker_to_status
-    local_status = _map_bugtracker_to_status(new_status)
+    # Map Zoho Feedback status to local status
+    from .feedback_sync import _map_zoho_to_local_status
+    local_status = _map_zoho_to_local_status(new_status)
 
     # If feedback_id not in payload, try to find by bugtracker_id
     if not feedback_id:
@@ -3586,3 +3825,40 @@ async def zoho_bugtracker_webhook(request: Request):
         raise HTTPException(status_code=500, detail="Webhook processing failed")
     finally:
         await db.close()
+
+
+# --- Zoho BugTracker Webhook & Cron ---
+@router.post("/zoho/webhook")
+async def bugtracker_webhook(request: Request):
+    """
+    Handle incoming webhook from Zoho BugTracker.
+    Updates local feedback status based on BugTracker bug changes.
+    """
+    try:
+        webhook_data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    result = await handle_bugtracker_webhook(webhook_data)
+    return result
+
+
+@router.post("/zoho/cron/sync")
+async def bugtracker_cron_sync(request: Request):
+    """
+    Cron endpoint to pull updated feedback from Zoho BugTracker.
+    Call this periodically (e.g., every 5 minutes via cron job).
+    Requires a shared secret in the Authorization header or query param.
+    """
+    # Simple shared secret auth for cron
+    import os
+    cron_secret = os.getenv("ZOHO_CRON_SECRET")
+    if cron_secret:
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing cron secret")
+        if auth[7:] != cron_secret:
+            raise HTTPException(status_code=403, detail="Invalid cron secret")
+
+    synced = await sync_bugtracker_updates()
+    return {"synced": synced}

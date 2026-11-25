@@ -892,6 +892,7 @@ class MaintenanceRecordResponse(BaseModel):
     notes: Optional[str] = None
     created_at: str
     updated_at: str
+    aircraft_operational_status: Optional[str] = None
 
 
 class CrewMemberCreate(BaseModel):
