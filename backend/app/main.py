@@ -57,12 +57,40 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 from .rate_limiter import RateLimitMiddleware
 
+# ETag middleware for conditional GET requests
+class ETagMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # Only add ETag for successful GET responses with JSON content
+        if request.method == "GET" and response.status_code == 200:
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type:
+                # Read response body from iterator
+                body = b""
+                async for chunk in response.body_iterator:
+                    body += chunk
+                if body:
+                    # Generate ETag from content hash
+                    import hashlib
+                    etag = hashlib.md5(body).hexdigest()
+                    # Check If-None-Match header
+                    if_none_match = request.headers.get("if-none-match")
+                    if if_none_match and if_none_match == f'"{etag}"':
+                        # Return 304 Not Modified
+                        return Response(status_code=304, headers={"ETag": f'"{etag}"'})
+                    # Add ETag header
+                    response.headers["ETag"] = f'"{etag}"'
+                # Reconstruct response with body
+                return Response(content=body, status_code=response.status_code, headers=dict(response.headers), media_type=response.media_type)
+        return response
+
 # Starlette executes the last-added middleware outermost. Keep CORS and security
 # headers outside the limiter so 429 responses retain browser-facing headers;
 # the limiter still runs before auth and covers unauthorized requests.
 app.add_middleware(P3RequestBodyLimitMiddleware)
 app.add_middleware(P0AuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(ETagMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
