@@ -44,6 +44,15 @@ Production promotion requires a separate dispatch with `environment=production`,
 | `scripts/deploy-staging.sh <TAG>` | Deploy image to staging instance |
 | `scripts/deploy-prod.sh <TAG>` | Deploy image to production (with pre-deploy backup) |
 | `scripts/promote-to-production.sh <TAG>` | Promote staging-validated image to production |
+| `scripts/configure-bugtracker-secrets.sh` | Prompt for and store protected Zoho BugTracker OAuth secret files on the host (paths only in `.env.staging`) |
+| `scripts/verify-bugtracker-staging.sh` | Read-only check of BugTracker configuration, schema, and image contents; `--refresh-token-check` tests OAuth refresh only |
+| `scripts/install-bugtracker-cron.sh` | Inspect (`--check`, default), install (`--install`), or remove (`--remove`) the scheduled BugTracker sync in `/etc/cron.d` |
+
+### Zoho BugTracker scheduling
+
+The backend image ships `/app/cron_bugtracker_sync.py`, but the container runs no cron daemon. The sync is scheduled from the host in `/etc/cron.d/kfl-aviation-dms-bugtracker-sync` and executes `docker exec <backend> python /app/cron_bugtracker_sync.py`.
+
+`--install` schedules a job that **creates real BugTracker tickets** for pending feedback, so it is a deliberate, separately authorized action. Run `--check` first: it reports the schedule (if any), stale user-crontab entries, and how many feedback rows still lack a BugTracker ID, without changing anything. The installer removes obsolete user-crontab entries that point at a checkout path instead of the container, backing up the crontab first.
 
 ## Runtime Version Surfacing
 
