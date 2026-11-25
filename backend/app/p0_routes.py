@@ -1310,7 +1310,7 @@ async def auth_logout(request: Request):
 
 
 # --- Documents ---
-@router.get("/documents", response_model=List[DocumentResponse])
+@router.get("/documents", response_model=PaginatedDocumentResponse)
 async def list_documents(request: Request, status: Optional[str] = None, doc_class: Optional[str] = None, limit: int = 50, offset: int = 0):
     _check_document_read(request)
     db = await get_db()
@@ -1324,9 +1324,15 @@ async def list_documents(request: Request, status: Optional[str] = None, doc_cla
             conditions.append("doc_class = ?")
             params.append(doc_class)
         where = " AND ".join(conditions) if conditions else "1=1"
+        
+        # Get total count
+        count_cursor = await db.execute(f"SELECT COUNT(*) FROM documents WHERE {where}", params)
+        total_row = await count_cursor.fetchone()
+        total = total_row[0] if total_row else 0
+        
         cursor = await db.execute(f"SELECT * FROM documents WHERE {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?", params + [limit, offset])
         rows = await cursor.fetchall()
-        return [DocumentResponse(**dict(r)) for r in rows]
+        return PaginatedDocumentResponse(data=[DocumentResponse(**dict(r)) for r in rows], total=total, limit=limit, offset=offset)
     finally:
         await db.close()
 

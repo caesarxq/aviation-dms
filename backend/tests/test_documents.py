@@ -84,7 +84,9 @@ class TestDocumentVersioning:
     def test_catalogue_labels_and_kcaa_requirements(self, client, librarian_headers):
         response = client.get("/api/p0/documents", headers=librarian_headers)
         assert response.status_code == 200
-        by_id = {item["document_id"]: item for item in response.json()}
+        data = response.json()
+        assert "data" in data and "total" in data
+        by_id = {item["document_id"]: item for item in data["data"]}
         assert by_id["DOC-006"]["title"] == "Security Management System Manual"
         assert by_id["DOC-007"]["title"] == "Dangerous Goods Manual"
         assert by_id["DOC-012"]["title"] == "Quality Management System Manual"
@@ -407,7 +409,9 @@ class TestDocumentVersioning:
 
         listed = client.get("/api/p0/documents", headers=proposal_only_headers)
         assert listed.status_code == 200
-        assert any(item["document_id"] == "DOC-006" for item in listed.json())
+        data = listed.json()
+        assert "data" in data
+        assert any(item["document_id"] == "DOC-006" for item in data["data"])
 
         detail = client.get("/api/p0/documents/DOC-006", headers=proposal_only_headers)
         assert detail.status_code == 200
@@ -498,7 +502,9 @@ class TestDocumentVersioning:
     def test_source_reconciliation_and_embedded_manual_mapping(self, client, librarian_headers):
         resp = client.get("/api/p0/documents", headers=librarian_headers)
         assert resp.status_code == 200
-        by_id = {d["document_id"]: d for d in resp.json()}
+        data = resp.json()
+        assert "data" in data
+        by_id = {d["document_id"]: d for d in data["data"]}
 
         assert by_id["DOC-001"]["source_sha256"] == "92a2509879ca39aafd88e69a5a7cbfdfb536715753da674e27689b2929af07b3"
         assert by_id["DOC-012"]["status"] == "published"

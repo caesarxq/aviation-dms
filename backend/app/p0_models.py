@@ -135,6 +135,13 @@ class DocumentResponse(BaseModel):
     created_by: str
 
 
+class PaginatedDocumentResponse(BaseModel):
+    data: List[DocumentResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class DocumentVersionCreate(BaseModel):
     document_id: str
     version_number: str
