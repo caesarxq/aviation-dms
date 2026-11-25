@@ -3481,9 +3481,9 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
     finally:
         await db.close()
 
-    # Enqueue Zoho sync (best-effort, never blocks)
+    # Enqueue Zoho BugTracker sync (best-effort, never blocks)
     try:
-        from .feedback_sync import enqueue_feedback_create
+        from .bugtracker_sync import enqueue_feedback_create
         await enqueue_feedback_create(feedback_id)
     except Exception:
         pass
