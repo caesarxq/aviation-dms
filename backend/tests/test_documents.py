@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import sqlite3
 import stat
 import uuid
 from io import BytesIO
@@ -7,7 +8,7 @@ import pytest
 from pypdf import PdfWriter
 
 from app import p0_auth, p0_routes
-from app.database import get_db
+from app.database import DB_PATH, get_db
 
 
 @pytest.fixture
@@ -542,3 +543,114 @@ class TestEvidencePack:
         resp1 = client.post("/api/p0/evidence-pack?entity_type=document&entity_id=DOC-001", headers=librarian_headers)
         resp2 = client.post("/api/p0/evidence-pack?entity_type=document&entity_id=DOC-001", headers=librarian_headers)
         assert resp1.json()["checksum"] == resp2.json()["checksum"]
+
+
+def test_document_list_pagination_is_bounded(client, admin_headers):
+    response = client.get("/api/p0/documents?limit=1000", headers=admin_headers)
+    assert response.status_code == 422
+
+    response = client.get("/api/p0/documents?offset=-1", headers=admin_headers)
+    assert response.status_code == 422
+
+    response = client.get("/api/p0/documents?limit=2&offset=0", headers=admin_headers)
+    assert response.status_code == 200
+    page = response.json()
+    assert len(page["data"]) <= 2
+    assert page["limit"] == 2
+    assert page["offset"] == 0
+    assert page["total"] >= len(page["data"])
+
+
+def test_document_category_filter_excludes_non_controlled_categories(client, admin_headers):
+    with sqlite3.connect(DB_PATH) as connection:
+        original_category = connection.execute(
+            "SELECT document_category FROM documents WHERE document_id = ?", ("DOC-005",)
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE documents SET document_category = 'roc_ops_spec' WHERE document_id = ?", ("DOC-005",)
+        )
+
+    try:
+        response = client.get(
+            "/api/p0/documents?document_category=controlled_manual", headers=admin_headers
+        )
+        assert response.status_code == 200
+        page = response.json()
+        assert "DOC-005" not in {document["document_id"] for document in page["data"]}
+        assert page["total"] == len(page["data"])
+    finally:
+        with sqlite3.connect(DB_PATH) as connection:
+            connection.execute(
+                "UPDATE documents SET document_category = ? WHERE document_id = ?",
+                (original_category, "DOC-005"),
+            )
+
+
+def test_roc_ops_document_class_is_read_only_for_direct_content_update(client, admin_headers):
+    with sqlite3.connect(DB_PATH) as connection:
+        original_class = connection.execute(
+            "SELECT doc_class FROM documents WHERE document_id = ?", ("DOC-005",)
+        ).fetchone()[0]
+        original_category = connection.execute(
+            "SELECT document_category FROM documents WHERE document_id = ?", ("DOC-005",)
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE documents SET doc_class = 'roc_spec', document_category = 'controlled_manual' WHERE document_id = ?",
+            ("DOC-005",),
+        )
+
+    try:
+        response = client.put(
+            "/api/p0/documents/DOC-005/content",
+            json={"content": "Not editable", "change_summary": "test"},
+            headers=admin_headers,
+        )
+        assert response.status_code == 403
+    finally:
+        with sqlite3.connect(DB_PATH) as connection:
+            connection.execute(
+                "UPDATE documents SET doc_class = ?, document_category = ? WHERE document_id = ?",
+                (original_class, original_category, "DOC-005"),
+            )
+
+
+def test_excluded_document_category_blocks_all_direct_mutations(client, admin_headers):
+    with sqlite3.connect(DB_PATH) as connection:
+        original_category = connection.execute(
+            "SELECT document_category FROM documents WHERE document_id = ?", ("DOC-005",)
+        ).fetchone()[0]
+        initial_drafts = connection.execute(
+            "SELECT COUNT(*) FROM document_versions WHERE document_id = ? AND state = 'draft'", ("DOC-005",)
+        ).fetchone()[0]
+        version_id = connection.execute(
+            "SELECT version_id FROM document_versions WHERE document_id = ? LIMIT 1", ("DOC-005",)
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE documents SET document_category = 'oem_publication' WHERE document_id = ?", ("DOC-005",)
+        )
+
+    try:
+        responses = [
+            client.patch("/api/p0/documents/DOC-005", json={"title": "Not editable"}, headers=admin_headers),
+            client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=admin_headers),
+            client.post("/api/p0/versions", json={
+                "document_id": "DOC-005", "version_number": "99.99.99", "content": "Not editable"
+            }, headers=admin_headers),
+            client.put("/api/p0/documents/DOC-005/content", json={
+                "content": "Not editable", "change_summary": "test"
+            }, headers=admin_headers),
+            client.post("/api/p0/documents/DOC-005/file", files={
+                "file": ("source.pdf", b"%PDF-1.4", "application/pdf")
+            }, headers=admin_headers),
+        ]
+        assert [response.status_code for response in responses] == [403, 403, 403, 403, 403]
+        with sqlite3.connect(DB_PATH) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM document_versions WHERE document_id = ? AND state = 'draft'", ("DOC-005",)
+            ).fetchone()[0] == initial_drafts
+    finally:
+        with sqlite3.connect(DB_PATH) as connection:
+            connection.execute(
+                "UPDATE documents SET document_category = ? WHERE document_id = ?",
+                (original_category, "DOC-005"),
+            )

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { listDocuments } from "../../../api/documents";
 import api from "../../../api/client";
 import { Modal } from "../Modal";
 import { InlineSuggestionView } from "../../documents/InlineSuggestionView";
@@ -10,10 +11,11 @@ export function VersionDiffModal({ open, onClose }: { open: boolean; onClose: ()
   const [versionA, setVersionA] = useState("");
   const [versionB, setVersionB] = useState("");
 
-  const { data: docs = [] } = useQuery({
+  const { data: documentPage } = useQuery({
     queryKey: ["version-diff-modal-docs"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
+    queryFn: () => listDocuments(),
   });
+  const docs = documentPage?.data ?? [];
 
   const { data: versions = [] } = useQuery({
     queryKey: ["version-diff-modal-versions", docId],

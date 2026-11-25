@@ -24,7 +24,15 @@ services:
       SESSION_ABSOLUTE_MAX_SECONDS: "7200"
       KFL_BOOTSTRAP_TOKEN_FILE: /run/secrets/kfl_bootstrap_token
       SMTP_PASS_FILE: /run/secrets/smtp_pass
-      SMTP_PASS: "${SMTP_PASS}"
+      ZOHO_CLIENT_ID_FILE: /run/secrets/zoho_client_id
+      ZOHO_CLIENT_SECRET_FILE: /run/secrets/zoho_client_secret
+      ZOHO_REFRESH_TOKEN_FILE: /run/secrets/zoho_refresh_token
+      ZOHO_BUGTRACKER_PORTAL: "${ZOHO_BUGTRACKER_PORTAL:-kfldotke}"
+      ZOHO_BUGTRACKER_PROJECT_ID: "${ZOHO_BUGTRACKER_PROJECT_ID:-2730932000000114802}"
+    secrets:
+      - zoho_client_id
+      - zoho_client_secret
+      - zoho_refresh_token
     volumes:
       - dms_data:/app/data
       - /opt/kfl-aviation-dms-staging/secrets/smtp_pass:/run/secrets/smtp_pass:ro
@@ -36,6 +44,14 @@ services:
   clamd:
     expose:
       - "3310"
+
+secrets:
+  zoho_client_id:
+    file: ${ZOHO_CLIENT_ID_SECRET_FILE:?Set ZOHO_CLIENT_ID_SECRET_FILE to a protected host-side secret file}
+  zoho_client_secret:
+    file: ${ZOHO_CLIENT_SECRET_SECRET_FILE:?Set ZOHO_CLIENT_SECRET_SECRET_FILE to a protected host-side secret file}
+  zoho_refresh_token:
+    file: ${ZOHO_REFRESH_TOKEN_SECRET_FILE:?Set ZOHO_REFRESH_TOKEN_SECRET_FILE to a protected host-side secret file}
 
 volumes:
   dms_data: {}

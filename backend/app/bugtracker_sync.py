@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -20,11 +21,22 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Configuration from environment
-ZOHO_ACCESS_TOKEN = os.getenv("ZOHO_ACCESS_TOKEN", "")
-ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN", "")
-ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "")
-ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET", "")
+# Configuration from environment or protected, read-only secret files.
+def _read_config_value(name: str, default: str = "") -> str:
+    secret_path = os.getenv(f"{name}_FILE")
+    if secret_path:
+        try:
+            return Path(secret_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            logger.error("Unable to read configured secret file for %s", name)
+            return ""
+    return os.getenv(name, default)
+
+
+ZOHO_ACCESS_TOKEN = _read_config_value("ZOHO_ACCESS_TOKEN")
+ZOHO_REFRESH_TOKEN = _read_config_value("ZOHO_REFRESH_TOKEN")
+ZOHO_CLIENT_ID = _read_config_value("ZOHO_CLIENT_ID")
+ZOHO_CLIENT_SECRET = _read_config_value("ZOHO_CLIENT_SECRET")
 ZOHO_BUGTRACKER_PORTAL = os.getenv("ZOHO_BUGTRACKER_PORTAL", "kfldotke")
 ZOHO_BUGTRACKER_PROJECT_ID = os.getenv("ZOHO_BUGTRACKER_PROJECT_ID", "2730932000000114802")
 ZOHO_API_BASE = "https://bugtracker.zoho.com/api/v1"
@@ -45,8 +57,10 @@ FIELD_MAP = {
 
 
 def _is_configured() -> bool:
-    """Check if BugTracker integration is minimally configured."""
-    return bool(ZOHO_ACCESS_TOKEN and ZOHO_BUGTRACKER_PROJECT_ID)
+    """Check whether BugTracker OAuth credentials and project configuration exist."""
+    has_access_token = bool(ZOHO_ACCESS_TOKEN)
+    has_refresh_credentials = bool(ZOHO_REFRESH_TOKEN and ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET)
+    return bool((has_access_token or has_refresh_credentials) and ZOHO_BUGTRACKER_PROJECT_ID)
 
 
 async def _get_access_token() -> str:
@@ -226,7 +240,7 @@ async def _update_feedback_bugtracker_id(feedback_id: str, bugtracker_id: str, s
     try:
         await db.execute(
             """UPDATE feedback
-               SET bugtracker_id = ?, bugtracker_url = ?, zoho_form_sync_state = ?
+               SET bugtracker_id = ?, bugtracker_url = ?, bugtracker_sync_state = ?
                WHERE feedback_id = ?""",
             (bugtracker_id, bugtracker_url, state, feedback_id),
         )
@@ -257,7 +271,7 @@ async def sync_all_pending() -> int:
     c = sqlite3.connect(db_path)
     c.row_factory = sqlite3.Row
     rows = c.execute(
-        "SELECT * FROM feedback WHERE (zoho_form_sync_state = 'pending' OR bugtracker_id IS NULL) LIMIT 50"
+        "SELECT * FROM feedback WHERE (bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL) LIMIT 50"
     ).fetchall()
     c.close()
 
@@ -310,7 +324,7 @@ async def sync_bugtracker_updates() -> int:
                 db2 = await get_db()
                 try:
                     await db2.execute(
-                        "UPDATE feedback SET status = ?, zoho_form_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
+                        "UPDATE feedback SET status = ?, bugtracker_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
                         (local_status, row["feedback_id"], local_status),
                     )
                     await db2.commit()
@@ -395,7 +409,7 @@ async def handle_bugtracker_webhook(webhook_data: dict) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             await db.execute(
                 """UPDATE feedback
-                   SET status = ?, zoho_form_sync_state = 'synced', updated_at = ?, updated_by = 'bugtracker_webhook'
+                   SET status = ?, bugtracker_sync_state = 'synced', updated_at = ?, updated_by = 'bugtracker_webhook'
                    WHERE feedback_id = ? AND status != ?""",
                 (local_status, now, feedback_id, local_status),
             )

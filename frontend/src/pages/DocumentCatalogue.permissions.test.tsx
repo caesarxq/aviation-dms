@@ -22,7 +22,7 @@ const documents = [
 ];
 
 function renderCatalogue(permissions: string[]) {
-  vi.mocked(api.get).mockResolvedValue({ data: documents } as never);
+  vi.mocked(api.get).mockResolvedValue({ data: { data: documents, total: documents.length, limit: 50, offset: 0 } } as never);
   const profile = {
     user: { user_id: "u1", username: "user", email: "u@example.test", full_name: "User", role: "head_safety", active_role: "head_safety", roles: ["head_safety"] },
     role: "head_safety",

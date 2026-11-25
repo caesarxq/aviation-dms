@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "../api/client";
+import { listDocuments } from "../api/documents";
 import { InlineSuggestionView } from "../components/documents/InlineSuggestionView";
 import { htmlToText } from "../utils/diff";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -12,7 +13,7 @@ export function VersionDiff() {
 
   const { data: docs = [] } = useQuery({
     queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data?.data || []),
+    queryFn: () => listDocuments().then((page) => page.data),
   });
 
   const { data: versions = [], isLoading } = useQuery({

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
+import { listDocuments } from "../api/documents";
 import { Eye, Save, ArrowLeft, Bold, Italic, Underline, ListOrdered, Link, Image as ImageIcon, UserCheck, X, GripVertical, Maximize2, Minimize2, ListTree } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import { DocumentOutline, buildOutlineFromHtml } from "../components/documents/DocumentOutline";
@@ -1003,10 +1004,13 @@ function DocumentEditorContent({ docId, setDocId }: { docId: string; setDocId: (
 }
 
 function DocumentSelector({ setDocId }: { setDocId: (id: string) => void }) {
-  const { data: docs = [], isLoading } = useQuery({
+  const { data: documentPage, isLoading } = useQuery({
     queryKey: ["documents", "controlled_manual"],
-    queryFn: () => api.get("/p0/documents?document_category=controlled_manual").then((r: any) => r.data),
+    queryFn: () => listDocuments({ document_category: "controlled_manual" }),
   });
+  const docs = (documentPage?.data ?? []).filter(
+    (doc) => !["roc_spec", "ops_spec", "oem_publication"].includes(doc.doc_class.toLowerCase()),
+  );
 
   if (isLoading) return <div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading documents…</div>;
 

@@ -504,9 +504,9 @@ export interface Feedback {
   status: string;
   priority: string;
   owner_id: string | null;
-  zoho_form_record_id: string | null;
-  zoho_form_sync_state: string;
-  zoho_sheet_row_id: string | null;
+  bugtracker_id: string | null;
+  bugtracker_url: string | null;
+  bugtracker_sync_state: string;
   next_update_at: string | null;
   created_at: string;
   updated_at: string;

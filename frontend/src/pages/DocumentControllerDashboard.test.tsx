@@ -21,7 +21,7 @@ const docs = [
 ];
 
 function renderPage(permissions: string[]) {
-  vi.mocked(api.get).mockResolvedValue({ data: docs } as never);
+  vi.mocked(api.get).mockResolvedValue({ data: { data: docs, total: docs.length, limit: 50, offset: 0 } } as never);
   vi.mocked(controlledDocumentApi.listDocumentClassifications).mockResolvedValue([] as never);
   vi.mocked(controlledDocumentApi.listExtractionRequests).mockResolvedValue([] as never);
   const profile = { user_id: "u-1", username: "tester", role: "librarian", permissions } as never;

@@ -1,5 +1,5 @@
 """P0 API routes."""
-from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -97,6 +97,27 @@ def _check_document_read(request: Request):
             status_code=403,
             detail="Permission denied: document:read, document:update, or document:propose",
         )
+
+
+_NON_EDITABLE_DOCUMENT_CATEGORIES = {"roc_ops_spec", "oem_publication"}
+_NON_EDITABLE_DOCUMENT_CLASSES = {"roc_spec", "ops_spec", "oem_publication"}
+
+
+async def _require_editable_document(db, doc_id: str):
+    cursor = await db.execute(
+        "SELECT * FROM documents WHERE document_id = ?", (doc_id,)
+    )
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    category = (row["document_category"] or "").strip().lower()
+    doc_class = (row["doc_class"] or "").strip().lower()
+    if category in _NON_EDITABLE_DOCUMENT_CATEGORIES or doc_class in _NON_EDITABLE_DOCUMENT_CLASSES:
+        raise HTTPException(
+            status_code=403,
+            detail="This document category is read-only; use a change proposal instead",
+        )
+    return row
 
 
 def _gen_id(prefix: str) -> str:
@@ -1417,7 +1438,14 @@ async def auth_logout(request: Request):
 
 # --- Documents ---
 @router.get("/documents", response_model=PaginatedDocumentResponse)
-async def list_documents(request: Request, status: Optional[str] = None, doc_class: Optional[str] = None, limit: int = 50, offset: int = 0):
+async def list_documents(
+    request: Request,
+    status: Optional[str] = None,
+    doc_class: Optional[str] = None,
+    document_category: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
     _check_document_read(request)
     db = await get_db()
     try:
@@ -1429,6 +1457,9 @@ async def list_documents(request: Request, status: Optional[str] = None, doc_cla
         if doc_class:
             conditions.append("doc_class = ?")
             params.append(doc_class)
+        if document_category:
+            conditions.append("document_category = ?")
+            params.append(document_category)
         where = " AND ".join(conditions) if conditions else "1=1"
         
         # Get total count
@@ -1482,9 +1513,7 @@ async def update_document(doc_id: str, update: DocumentUpdate, request: Request)
     actor = _actor(request)
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,))
-        if not await cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Document not found")
+        await _require_editable_document(db, doc_id)
         updates = []
         params = []
         for col, val in {"title": update.title, "doc_class": update.doc_class, "classification": update.classification, "description": update.description, "tags": update.tags, "owner_id": update.owner_id}.items():
@@ -1540,10 +1569,7 @@ async def create_version(ver: DocumentVersionCreate, request: Request):
     db = await get_db()
     try:
         # Check if parent document exists
-        cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (ver.document_id,))
-        doc_row = await cursor.fetchone()
-        if not doc_row:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc_row = await _require_editable_document(db, ver.document_id)
         kcaa_required = doc_row["kcaa_approval_required"]
         
         await db.execute(
@@ -1782,6 +1808,7 @@ async def transition_version_state(
         if not row:
             raise HTTPException(status_code=404, detail="Version not found")
         row = dict(row)
+        await _require_editable_document(db, row["document_id"])
         allowed_transitions = {
             "draft": {"in_review"},
             "in_review": {"approved", "rejected", "draft"},
@@ -1964,11 +1991,7 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
     now = now_iso()
     db = await get_db()
     try:
-        # Verify document exists
-        cursor = await db.execute("SELECT document_id, kcaa_approval_required FROM documents WHERE document_id = ?", (doc_id,))
-        doc_row = await cursor.fetchone()
-        if not doc_row:
-            raise HTTPException(status_code=404, detail="Document not found")
+        doc_row = await _require_editable_document(db, doc_id)
         kcaa_required = doc_row["kcaa_approval_required"]
 
         # Get latest version number to increment
@@ -2038,14 +2061,10 @@ async def upload_document_file(
     _check(request, "document:update")
     actor = _actor(request)
     db = await get_db()
+    file_path_local: Path | None = None
+    committed = False
     try:
-        cursor = await db.execute(
-            "SELECT document_id FROM documents WHERE document_id = ?", (doc_id,)
-        )
-        doc_row = await cursor.fetchone()
-        if not doc_row:
-            raise HTTPException(status_code=404, detail="Document not found")
-
+        await _require_editable_document(db, doc_id)
         content = await file.read()
         if not content:
             raise HTTPException(status_code=400, detail="Empty file upload")
@@ -2058,9 +2077,8 @@ async def upload_document_file(
         root = DMS_DOCUMENT_STORAGE_DIR.resolve()
         root.mkdir(parents=True, exist_ok=True)
         file_path = root / stored_filename
-        file_path_local: Path | None = file_path
+        file_path_local = file_path
 
-        committed = False
         try:
             async with upload_storage_lock():
                 try:
@@ -3700,7 +3718,7 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
             (feedback_id, ticket_number, actor_user_id, actor_role, source_route,
              issue_type, app_area, goal, reproduction_steps, expected_result, actual_result,
              impact, observation_time, screenshot_info, contact, status, priority,
-             owner_id, zoho_form_record_id, zoho_form_sync_state, zoho_sheet_row_id,
+             owner_id, bugtracker_id, bugtracker_url, bugtracker_sync_state,
              next_update_at, resolved_at, closed_at, resolution, resolution_note,
              verification, created_at, updated_at, created_by, updated_by)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -3710,8 +3728,8 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
                 feedback.reproduction_steps, feedback.expected_result, feedback.actual_result,
                 feedback.impact, feedback.observation_time, feedback.screenshot_info,
                 feedback.contact, "new", "P3",
-                None, None, "pending", None, None,
-                None, None, None, None, None,
+                None, None, None, "pending",
+                None, None, None, None, None, None,
                 now, now, actor, actor,
             ),
         )
@@ -3732,8 +3750,8 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
         actor_user_id=actor, actor_role=actor, source_route="web",
         issue_type=feedback.issue_type, app_area=feedback.app_area, goal=feedback.goal,
         impact=feedback.impact, status="new", priority="P3",
-        owner_id=None, zoho_form_record_id=None, zoho_form_sync_state="pending",
-        zoho_sheet_row_id=None, next_update_at=None,
+        owner_id=None, bugtracker_id=None, bugtracker_url=None, bugtracker_sync_state="pending",
+        next_update_at=None,
         created_at=now, updated_at=now, created_by=actor,
     )
 
@@ -3784,9 +3802,9 @@ async def zoho_bugtracker_webhook(request: Request):
     if not bug_id or not new_status:
         raise HTTPException(status_code=422, detail="bug_id and status are required")
 
-    # Map Zoho Feedback status to local status
-    from .feedback_sync import _map_zoho_to_local_status
-    local_status = _map_zoho_to_local_status(new_status)
+    # Map BugTracker status to local status.
+    from .bugtracker_sync import _map_bugtracker_to_status
+    local_status = _map_bugtracker_to_status(new_status)
 
     # If feedback_id not in payload, try to find by bugtracker_id
     if not feedback_id:
@@ -3810,7 +3828,7 @@ async def zoho_bugtracker_webhook(request: Request):
     try:
         await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
-            "UPDATE feedback SET status = ?, zoho_form_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
+            "UPDATE feedback SET status = ?, bugtracker_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
             (local_status, feedback_id, local_status),
         )
         await db.commit()
