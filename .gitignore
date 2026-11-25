@@ -2,6 +2,9 @@
 backend/data/dms.db
 backend/data/dms.db-*
 backend/data/uploads/
+backend/data/logs/
+backend/logs/
+logs/
 data/
 
 # Node
