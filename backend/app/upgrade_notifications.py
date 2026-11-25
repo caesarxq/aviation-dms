@@ -61,10 +61,6 @@ DEFAULT_IMPROVEMENTS: list[dict[str, str]] = [
         "title": "Search everything from one place",
         "description": "A new search bar at the top of every page lets you search across documents, audits, licenses, aircraft, and missions.",
     },
-    {
-        "title": "Faster issue tracking",
-        "description": "Feedback and issue reports are now tracked in Zoho BugTracker so they get resolved faster.",
-    },
 ]
 
 

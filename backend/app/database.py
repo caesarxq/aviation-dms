@@ -367,11 +367,6 @@ CREATE TABLE IF NOT EXISTS feedback (
     status TEXT NOT NULL DEFAULT 'new',
     priority TEXT NOT NULL DEFAULT 'P3',
     owner_id TEXT,
-    bugtracker_id TEXT,
-    bugtracker_url TEXT,
-    zoho_form_record_id TEXT,
-    zoho_form_sync_state TEXT NOT NULL DEFAULT 'pending',
-    zoho_sheet_row_id TEXT,
     next_update_at TEXT,
     resolved_at TEXT,
     closed_at TEXT,
@@ -2347,8 +2342,6 @@ async def init_db():
         await _add_column_if_missing(db, "audit_findings", "department", "TEXT")
         await _add_column_if_missing(db, "corrective_actions", "audit_finding_id", "TEXT")
         await _add_column_if_missing(db, "corrective_actions", "audit_report_id", "TEXT")
-        await _add_column_if_missing(db, "feedback", "bugtracker_id", "TEXT")
-        await _add_column_if_missing(db, "feedback", "bugtracker_url", "TEXT")
         # New columns for PDF-aligned risk assessments and missions
         await _add_column_if_missing(db, "risk_assessments", "pic_full_name", "TEXT")
         await _add_column_if_missing(db, "risk_assessments", "location_coordinates", "TEXT")

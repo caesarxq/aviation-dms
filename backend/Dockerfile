@@ -6,7 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
-COPY cron_bugtracker_sync.py .
 
 RUN mkdir -p /app/data && chown 10001:10001 /app/data
 

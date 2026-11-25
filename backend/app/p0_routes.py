@@ -3461,19 +3461,17 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
             (feedback_id, ticket_number, actor_user_id, actor_role, source_route,
              issue_type, app_area, goal, reproduction_steps, expected_result, actual_result,
              impact, observation_time, screenshot_info, contact, status, priority,
-             owner_id, zoho_form_record_id, zoho_form_sync_state, zoho_sheet_row_id,
-             next_update_at, resolved_at, closed_at, resolution, resolution_note,
+             owner_id, next_update_at, resolved_at, closed_at, resolution, resolution_note,
              verification, created_at, updated_at, created_by, updated_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 feedback_id, ticket_number, actor, actor, "web",
                 feedback.issue_type, feedback.app_area, feedback.goal,
                 feedback.reproduction_steps, feedback.expected_result, feedback.actual_result,
                 feedback.impact, feedback.observation_time, feedback.screenshot_info,
                 feedback.contact, "new", "P3",
-                None, None, "pending", None, None,
                 None, None, None, None, None,
-                now, now, actor, actor,
+                None, None, now, now, actor, actor,
             ),
         )
         await log_audit_event("feedback", feedback_id, "created", actor, {"ticket_number": ticket_number}, db=db)
@@ -3481,20 +3479,13 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
     finally:
         await db.close()
 
-    # Enqueue Zoho BugTracker sync (best-effort, never blocks)
-    try:
-        from .bugtracker_sync import enqueue_feedback_create
-        await enqueue_feedback_create(feedback_id)
-    except Exception:
-        pass
 
     return FeedbackResponse(
         feedback_id=feedback_id, ticket_number=ticket_number,
         actor_user_id=actor, actor_role=actor, source_route="web",
         issue_type=feedback.issue_type, app_area=feedback.app_area, goal=feedback.goal,
         impact=feedback.impact, status="new", priority="P3",
-        owner_id=None, zoho_form_record_id=None, zoho_form_sync_state="pending",
-        zoho_sheet_row_id=None, next_update_at=None,
+        owner_id=None, next_update_at=None,
         created_at=now, updated_at=now, created_by=actor,
     )
 
@@ -3519,70 +3510,5 @@ async def list_feedback(request: Request, status: Optional[str] = None, issue_ty
         )
         rows = await cursor.fetchall()
         return [FeedbackResponse(**dict(r)) for r in rows]
-    finally:
-        await db.close()
-
-
-# ==================== ZOHO BUGTRACKER WEBHOOK ====================
-
-@router.post("/webhook/zoho-bugtracker")
-async def zoho_bugtracker_webhook(request: Request):
-    """
-    Webhook endpoint for Zoho BugTracker bug status updates.
-    
-    Zoho BugTracker can POST to this endpoint when a bug status changes.
-    Expected payload: JSON with bug_id, status, and optionally feedback_id.
-    """
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    bug_id = payload.get("bug_id") or payload.get("id")
-    new_status = payload.get("status") or payload.get("bug_status")
-    feedback_id = payload.get("feedback_id")
-
-    if not bug_id or not new_status:
-        raise HTTPException(status_code=422, detail="bug_id and status are required")
-
-    # Map BugTracker status to local status
-    from .bugtracker_sync import _map_bugtracker_to_status
-    local_status = _map_bugtracker_to_status(new_status)
-
-    # If feedback_id not in payload, try to find by bugtracker_id
-    if not feedback_id:
-        db = await get_db()
-        try:
-            cursor = await db.execute(
-                "SELECT feedback_id FROM feedback WHERE bugtracker_id = ?", (str(bug_id),)
-            )
-            row = await cursor.fetchone()
-            if row:
-                feedback_id = row["feedback_id"]
-        finally:
-            await db.close()
-
-    if not feedback_id:
-        logger.warning("BugTracker webhook: no feedback found for bug_id %s", bug_id)
-        return {"status": "ignored", "reason": "no_feedback_found"}
-
-    # Update local feedback status
-    db = await get_db()
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        cursor = await db.execute(
-            "UPDATE feedback SET status = ?, zoho_form_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
-            (local_status, feedback_id, local_status),
-        )
-        await db.commit()
-        if cursor.rowcount > 0:
-            logger.info("BugTracker webhook: updated feedback %s to status %s", feedback_id, local_status)
-            return {"status": "updated", "feedback_id": feedback_id, "new_status": local_status}
-        else:
-            return {"status": "no_change", "feedback_id": feedback_id}
-    except Exception as exc:
-        await db.rollback()
-        logger.exception("BugTracker webhook failed for %s: %s", feedback_id, exc)
-        raise HTTPException(status_code=500, detail="Webhook processing failed")
     finally:
         await db.close()

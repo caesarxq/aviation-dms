@@ -522,9 +522,6 @@ class FeedbackResponse(BaseModel):
     status: str
     priority: str
     owner_id: Optional[str]
-    zoho_form_record_id: Optional[str]
-    zoho_form_sync_state: str
-    zoho_sheet_row_id: Optional[str]
     next_update_at: Optional[str]
     created_at: str
     updated_at: str
