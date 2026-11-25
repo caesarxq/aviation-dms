@@ -8,6 +8,16 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 
+function operationalStatusClass(status: string): string {
+  const map: Record<string, string> = {
+    serviceable: "bg-kfl-status-success-bg text-kfl-status-success",
+    unserviceable: "bg-kfl-status-danger-bg text-kfl-status-danger",
+    grounded: "bg-kfl-status-warning-bg text-kfl-status-warning",
+    deployed: "bg-kfl-status-info-bg text-kfl-status-info",
+  };
+  return map[status] || "bg-kfl-surface-subtle text-kfl-muted";
+}
+
 export function MaintenanceManagement() {
   const qc = useQueryClient();
   const [aircraftFilter, setAircraftFilter] = useState("");
@@ -121,6 +131,7 @@ export function MaintenanceManagement() {
                 <tr>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">ID</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Aircraft</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Operational Status</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Type</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Description</th>
                   <th className="px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-kfl-muted">Performed At</th>
@@ -134,8 +145,14 @@ export function MaintenanceManagement() {
                   <tr key={record.record_id} className="transition hover:bg-kfl-surface-subtle">
                     <td className="px-4 py-4 font-mono text-[12px] text-kfl-text">{record.record_id}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.aircraft_registration}</td>
+                    <td className="px-4 py-4 text-sm">
+                      {record.aircraft_operational_status && (
+                        <Badge variant="outline" className={operationalStatusClass(record.aircraft_operational_status)}>
+                          {record.aircraft_operational_status}
+                        </Badge>
+                      )}
+                    </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.maintenance_type}</td>
-                    <td className="px-4 py-4 text-sm text-kfl-secondary max-w-xs truncate">{record.description}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.performed_at}</td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{record.next_due || "—"}</td>
                     <td className="px-4 py-4"><Badge variant={record.status === "completed" ? "default" : record.status === "pending" ? "secondary" : "destructive"} className={`badge ${record.status === "completed" ? "bg-kfl-status-info-bg text-kfl-status-info" : record.status === "pending" ? "bg-kfl-status-warning-bg text-kfl-status-warning" : "bg-kfl-status-danger-bg text-kfl-status-danger"}`}>{record.status}</Badge></td>

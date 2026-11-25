@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
+from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -282,3 +283,147 @@ async def sync_all_pending() -> int:
             logger.exception("Failed to sync %s: %s", feedback["feedback_id"], exc)
 
     return synced
+
+
+async def handle_zoho_webhook(webhook_data: dict) -> dict:
+    """
+    Handle incoming webhook from Zoho Forms/Sheets.
+    
+    Expected webhook payload from Zoho:
+    - For Forms: { "form_id": "...", "submission_id": "...", "form_data": {...} }
+    - For Sheets: { "sheet_id": "...", "row_id": "...", "row_data": [...] }
+    """
+    logger.info("Received Zoho webhook: %s", webhook_data)
+    
+    # Extract feedback_id from webhook data
+    feedback_id = None
+    zoho_status = None
+    
+    # Try to find feedback_id in form_data
+    form_data = webhook_data.get("form_data", {})
+    if form_data:
+        feedback_id = form_data.get("Feedback_ID")
+        zoho_status = form_data.get("Status")
+    
+    # Try sheet row data
+    if not feedback_id:
+        row_data = webhook_data.get("row_data", [])
+        if row_data and len(row_data) > 0:
+            feedback_id = row_data[0]  # First column is feedback_id
+            zoho_status = row_data[8] if len(row_data) > 8 else None  # Status column
+    
+    if not feedback_id:
+        return {"success": False, "error": "No feedback_id found in webhook data"}
+    
+    # Update local feedback record with Zoho status
+    if zoho_status:
+        local_status = _map_zoho_to_local_status(zoho_status)
+        db = await get_db()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            await db.execute(
+                """UPDATE feedback SET 
+                    status = ?, 
+                    zoho_form_sync_state = 'synced',
+                    updated_at = ?,
+                    updated_by = 'zoho_webhook'
+                WHERE feedback_id = ?""",
+                (local_status, now, feedback_id),
+            )
+            await db.commit()
+            logger.info("Updated feedback %s status to %s from Zoho webhook", feedback_id, local_status)
+            return {"success": True, "feedback_id": feedback_id, "status": local_status}
+        except Exception as exc:
+            logger.exception("Failed to update feedback %s from webhook: %s", feedback_id, exc)
+            return {"success": False, "error": str(exc)}
+        finally:
+            await db.close()
+    
+    return {"success": True, "feedback_id": feedback_id, "status": "no_status_update"}
+
+
+async def sync_feedback_from_zoho(limit: int = 50) -> int:
+    """
+    Cron job: Pull updated feedback from Zoho Sheets.
+    Call this periodically (e.g., every 5 minutes) to sync Zoho -> local.
+    """
+    if not _is_configured():
+        logger.debug("Zoho integration not configured, skipping sync_from_zoho")
+        return 0
+
+    access_token = await _get_access_token()
+    if not access_token:
+        logger.warning("No Zoho access token available for sync_from_zoho")
+        return 0
+
+    # Read all rows from Zoho Sheet
+    url = f"{ZOHO_API_BASE}/sheet/v2/spreadsheets/{ZOHO_SHEET_ID}/rows"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, timeout=30)
+            if resp.status_code != 200:
+                logger.warning("Failed to fetch Zoho Sheet rows: %s %s", resp.status_code, resp.text[:200])
+                return 0
+            data = resp.json()
+    except Exception as exc:
+        logger.exception("Error fetching Zoho Sheet rows: %s", exc)
+        return 0
+
+    rows = data.get("data", [])
+    synced = 0
+    
+    for row in rows:
+        row_data = row.get("row_data", [])
+        if not row_data or len(row_data) < 9:
+            continue
+        
+        feedback_id = row_data[0]
+        zoho_status = row_data[8]  # Status column
+        
+        if zoho_status:
+            local_status = _map_zoho_to_local_status(zoho_status)
+            db = await get_db()
+            try:
+                # Check current status
+                cursor = await db.execute(
+                    "SELECT status FROM feedback WHERE feedback_id = ?", (feedback_id,)
+                )
+                current = await cursor.fetchone()
+                if current and current["status"] != local_status:
+                    now = datetime.now(timezone.utc).isoformat()
+                    await db.execute(
+                        """UPDATE feedback SET 
+                            status = ?, 
+                            updated_at = ?,
+                            updated_by = 'zoho_cron'
+                        WHERE feedback_id = ?""",
+                        (local_status, now, feedback_id),
+                    )
+                    await db.commit()
+                    logger.info("Cron synced feedback %s status to %s from Zoho", feedback_id, local_status)
+                    synced += 1
+            except Exception as exc:
+                logger.exception("Failed to cron-sync feedback %s: %s", feedback_id, exc)
+            finally:
+                await db.close()
+    
+    return synced
+
+
+def _map_zoho_to_local_status(zoho_status: str) -> str:
+    """Map Zoho Form/Sheet status back to local feedback status."""
+    mapping = {
+        "Open": "new",
+        "New": "new",
+        "In Progress": "in_progress",
+        "Fixed": "resolved",
+        "Resolved": "resolved",
+        "Closed": "closed",
+        "Rejected": "rejected",
+        "Duplicate": "duplicate",
+    }
+    return mapping.get(zoho_status, "new")

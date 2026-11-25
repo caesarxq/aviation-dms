@@ -218,6 +218,7 @@ export interface MaintenanceRecord {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  aircraft_operational_status: string | null;
 }
 
 export interface CrewMember {

@@ -1513,25 +1513,57 @@ async def download_risk_assessment_pdf(assessment_id: str, request: Request):
             raise HTTPException(status_code=404, detail="Risk assessment not found")
         ra = dict(row)
 
-        # Build hazards list from the assessment
+        # Build hazards list from the assessment's linked hazards
         hazards = []
-        hazard_fields = [
-            ("Trees", "Collision with canopy or branches.", "Survey canopy height and maintain clearance along the route.", "6 Medium", "L2 × S3"),
-            ("Buildings", "Collision with structures or roof obstacles.", "Survey the route and set a buffer from structures.", "6 Medium", "L2 × S3"),
-            ("Human traffic", "Injury to people in the flight area.", "Control access. Pause or land if people enter the flight area.", "4 Low", "L1 × S4"),
-            ("Wildlife", "Animal disturbance or bird strike.", "Maintain separation. Stop if wildlife approaches or shows distress.", "3 Low", "L1 × S3"),
-            ("Manned aircraft", "Mid-air collision.", "Check airspace, scan for traffic and yield immediately to crewed aircraft.", "5 Medium", "L1 × S5"),
-            ("Strong winds", "Loss of control or inability to return.", "Check gusts and return margin. Hold if wind exceeds operating limits.", "6 Medium", "L2 × S3"),
-            ("Communication towers", "Collision with towers or guy wires.", "Locate towers and guy wires. Keep the flight path clear of both.", "4 Low", "L1 × S4"),
-            ("Electric poles / power lines", "Wire strike or electrical contact.", "Identify poles and spans. Set a safe stand-off distance.", "4 Low", "L1 × S4"),
-        ]
-        for name, risk, mitigation, score, ls in hazard_fields:
+        hazard_rows = await (await db.execute(
+            """
+            SELECT h.* FROM hazards h
+            JOIN risk_assessment_hazards rah ON rah.hazard_id = h.hazard_id
+            WHERE rah.assessment_id = ?
+            """,
+            (assessment_id,)
+        )).fetchall()
+        for h in hazard_rows:
+            h = dict(h)
+            # Build risk score from likelihood and severity
+            likelihood_map = {"rare": 1, "unlikely": 2, "possible": 3, "likely": 4, "almost_certain": 5}
+            severity_map = {"negligible": 1, "minor": 2, "moderate": 3, "major": 4, "catastrophic": 5}
+            l_val = likelihood_map.get(h.get("likelihood", "").lower(), 3)
+            s_val = severity_map.get(h.get("severity", "").lower(), 3)
+            score = l_val * s_val
+            risk_labels = {(1,1): "1 Low", (1,2): "2 Low", (1,3): "3 Low", (1,4): "4 Medium", (1,5): "5 Medium",
+                           (2,1): "2 Low", (2,2): "4 Medium", (2,3): "6 Medium", (2,4): "8 High", (2,5): "10 High",
+                           (3,1): "3 Low", (3,2): "6 Medium", (3,3): "9 High", (3,4): "12 High", (3,5): "15 High",
+                           (4,1): "4 Medium", (4,2): "8 High", (4,3): "12 High", (4,4): "16 High", (4,5): "20 High",
+                           (5,1): "5 Medium", (5,2): "10 High", (5,3): "15 High", (5,4): "20 High", (5,5): "25 High"}
+            risk_label = risk_labels.get((l_val, s_val), f"{score}")
+            ls = f"L{l_val} × S{s_val}"
             hazards.append({
-                "hazard": name,
-                "risk": risk,
-                "mitigation": mitigation,
-                "score": score,
+                "hazard": h.get("title", ""),
+                "risk": h.get("description", ""),
+                "mitigation": h.get("mitigation", ""),
+                "score": risk_label,
             })
+
+        # If no linked hazards, fall back to template defaults (for backward compatibility)
+        if not hazards:
+            hazard_fields = [
+                ("Trees", "Collision with canopy or branches.", "Survey canopy height and maintain clearance along the route.", "6 Medium", "L2 × S3"),
+                ("Buildings", "Collision with structures or roof obstacles.", "Survey the route and set a buffer from structures.", "6 Medium", "L2 × S3"),
+                ("Human traffic", "Injury to people in the flight area.", "Control access. Pause or land if people enter the flight area.", "4 Low", "L1 × S4"),
+                ("Wildlife", "Animal disturbance or bird strike.", "Maintain separation. Stop if wildlife approaches or shows distress.", "3 Low", "L1 × S3"),
+                ("Manned aircraft", "Mid-air collision.", "Check airspace, scan for traffic and yield immediately to crewed aircraft.", "5 Medium", "L1 × S5"),
+                ("Strong winds", "Loss of control or inability to return.", "Check gusts and return margin. Hold if wind exceeds operating limits.", "6 Medium", "L2 × S3"),
+                ("Communication towers", "Collision with towers or guy wires.", "Locate towers and guy wires. Keep the flight path clear of both.", "4 Low", "L1 × S4"),
+                ("Electric poles / power lines", "Wire strike or electrical contact.", "Identify poles and spans. Set a safe stand-off distance.", "4 Low", "L1 × S4"),
+            ]
+            for name, risk, mitigation, score, ls in hazard_fields:
+                hazards.append({
+                    "hazard": name,
+                    "risk": risk,
+                    "mitigation": mitigation,
+                    "score": score,
+                })
 
         pdf_bytes = render_risk_assessment_pdf({
             "location": ra.get("location_coordinates", ra.get("location", "")),

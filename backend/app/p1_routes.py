@@ -2975,13 +2975,23 @@ async def list_maintenance_records(request: Request, aircraft_registration: Opti
         conditions = []
         params = []
         if aircraft_registration:
-            conditions.append("aircraft_registration = ?")
+            conditions.append("m.aircraft_registration = ?")
             params.append(aircraft_registration)
         if status:
-            conditions.append("status = ?")
+            conditions.append("m.status = ?")
             params.append(status)
         where = " AND ".join(conditions) if conditions else "1=1"
-        cursor = await db.execute(f"SELECT * FROM maintenance_records WHERE {where} ORDER BY performed_at DESC LIMIT ? OFFSET ?", params + [limit, offset])
+        cursor = await db.execute(
+            f"""
+            SELECT m.*, a.operational_status as aircraft_operational_status
+            FROM maintenance_records m
+            LEFT JOIN aircraft a ON a.registration = m.aircraft_registration
+            WHERE {where}
+            ORDER BY m.performed_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [limit, offset],
+        )
         rows = await cursor.fetchall()
         return [MaintenanceRecordResponse(**dict(r)) for r in rows]
     finally:

@@ -340,3 +340,73 @@ async def _get_bugtracker_bug_status(access_token: str, bug_id: str) -> Optional
     except Exception as exc:
         logger.exception("Error fetching BugTracker bug %s status: %s", bug_id, exc)
     return None
+
+
+async def handle_bugtracker_webhook(webhook_data: dict) -> dict:
+    """
+    Handle incoming webhook from Zoho BugTracker.
+
+    Expected webhook payload from BugTracker:
+    {
+        "bug": {
+            "bug_id": "2730932000000123456",
+            "status": "Fixed",
+            "project_id": "2730932000000114802",
+            ...
+        },
+        "event": "bug_updated",
+        "timestamp": "2024-01-15T10:30:00Z"
+    }
+    """
+    logger.info("Received BugTracker webhook: %s", webhook_data)
+
+    # Extract bug info from webhook
+    bug = webhook_data.get("bug", {})
+    bug_id = bug.get("bug_id") or bug.get("id")
+    bt_status = bug.get("status") or bug.get("bug_status")
+
+    if not bug_id:
+        # Try alternative field names
+        bug_id = webhook_data.get("bug_id") or webhook_data.get("id")
+
+    if not bt_status:
+        bt_status = webhook_data.get("status") or webhook_data.get("bug_status")
+
+    if not bug_id:
+        return {"success": False, "error": "No bug_id found in webhook data"}
+
+    # Find local feedback by bugtracker_id
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT feedback_id FROM feedback WHERE bugtracker_id = ?", (str(bug_id),)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            logger.warning("BugTracker webhook: no local feedback found for bug_id %s", bug_id)
+            return {"success": False, "error": f"No local feedback for bug {bug_id}", "bug_id": str(bug_id)}
+
+        feedback_id = row["feedback_id"]
+
+        if bt_status:
+            local_status = _map_bugtracker_to_status(bt_status)
+            now = datetime.now(timezone.utc).isoformat()
+            await db.execute(
+                """UPDATE feedback
+                   SET status = ?, zoho_form_sync_state = 'synced', updated_at = ?, updated_by = 'bugtracker_webhook'
+                   WHERE feedback_id = ? AND status != ?""",
+                (local_status, now, feedback_id, local_status),
+            )
+            await db.commit()
+            logger.info("Updated feedback %s status to %s from BugTracker webhook", feedback_id, local_status)
+            return {"success": True, "feedback_id": feedback_id, "bug_id": str(bug_id), "status": local_status}
+
+    except Exception as exc:
+        logger.exception("Failed to process BugTracker webhook for bug %s: %s", bug_id, exc)
+        return {"success": False, "error": str(exc), "bug_id": str(bug_id)}
+    finally:
+        await db.close()
+
+    return {"success": True, "bug_id": str(bug_id), "status": "no_status_update"}
