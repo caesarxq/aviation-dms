@@ -259,19 +259,61 @@ jobs:
             exit 1
           fi
 
-      - name: Set up SSH
+      - name: Set up pinned SSH trust
+        env:
+          PRODUCTION_HOST_KEY: ${{ secrets.PRODUCTION_HOST_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
-          echo "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          echo "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_prod
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_prod
-          ssh-keyscan -H ${{ env.BASTION_HOST }} >> ~/.ssh/known_hosts
+          chmod 700 ~/.ssh
+
+          if [ -z "${PRODUCTION_HOST_KEY}" ]; then
+            echo "ERROR: PRODUCTION_HOST_KEY is not set." >&2
+            echo "Add the production host's public key line (as it appears in known_hosts)" >&2
+            echo "as a repository secret. Refusing to promote over an unverified host key." >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${{ secrets.BASTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_bastion
+          printf '%s\n' "${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}" > ~/.ssh/id_prod
+          chmod 600 ~/.ssh/id_bastion ~/.ssh/id_prod
+
+          # Bastion: prove the presented key matches the fingerprint already
+          # pinned for this shared VM, instead of trusting whatever answers.
+          scan=$(ssh-keyscan -T 10 -t ed25519 "${{ env.BASTION_HOST }}" 2>/dev/null || true)
+          if [ -z "${scan}" ]; then
+            echo "ERROR: could not read the bastion host key" >&2
+            exit 1
+          fi
+          actual=$(printf '%s\n' "${scan}" | ssh-keygen -lf - | awk '{print $2}' | head -1)
+          if [ "${actual}" != "${{ env.ROC_DIS_HOST_KEY_FINGERPRINT }}" ]; then
+            echo "ERROR: bastion host key fingerprint mismatch (got ${actual})" >&2
+            exit 1
+          fi
+          printf '%s\n' "${scan}" > ~/.ssh/known_hosts_bastion
+
+          printf '%s\n' "${PRODUCTION_HOST_KEY}" > ~/.ssh/known_hosts_prod
+          chmod 600 ~/.ssh/known_hosts_bastion ~/.ssh/known_hosts_prod
+          echo "Pinned SSH trust configured for the bastion and the production host"
+
+      - name: Verify production backup helper
+        run: |
+          ssh -i ~/.ssh/id_prod \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts_prod" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ProxyCommand="ssh -i ~/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_bastion -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
+            "test -f /opt/kfl-aviation-dms-prod/scripts/full-stack-backup.sh && echo 'production backup helper: present'"
 
       - name: Promote image to production
         run: |
           ssh -i ~/.ssh/id_prod \
             -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=no \
-            -o ProxyCommand="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts_prod" \
+            -o GlobalKnownHostsFile=/dev/null \
+            -o ProxyCommand="ssh -i ~/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_bastion -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
             ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
             "./scripts/promote-to-production.sh $IMAGE_TAG"
