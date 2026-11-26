@@ -21,13 +21,15 @@ def test_audit_import_and_provenance_verification_are_separate_capabilities():
 
 
 def test_librarian_cannot_approve():
+    # Document controller: publishes, but never approves.
     assert not has_permission("librarian", "document:approve")
-    assert not has_permission("librarian", "document:publish")
+    assert has_permission("librarian", "document:publish")
 
 
-def test_head_quality_can_approve_and_publish():
+def test_head_quality_approves_but_does_not_publish():
+    # Approval is the Head of Quality's; publication is the controller's.
     assert has_permission("head_quality", "document:approve")
-    assert has_permission("head_quality", "document:publish")
+    assert not has_permission("head_quality", "document:publish")
 
 
 def test_head_quality_cannot_update():

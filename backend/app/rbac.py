@@ -38,11 +38,11 @@ ROLE_PERMISSIONS = {
     # import operator, even though system_admin has broad control-plane access.
     "system_admin": set(PERMISSIONS) - {"audit_report:provenance_verify"},
     "accountable_manager": {
-        "document:read", "document:approve", "document:publish", "document:propose",
+        "document:read", "document:approve", "document:propose",
         "document:download", "document.section.view", "document.section.extract",
-        # Change requests for controlled manuals are approved and published by the
-        # Head of Quality only; the accountable manager keeps document-level
-        # approve/publish for documents outside the manual ownership scheme.
+        # Approval of manual changes belongs to the Head of Quality; publication
+        # belongs to the document controller (librarian). The accountable manager
+        # keeps document:approve so it can verify KCAA evidence independently.
         "change_request:review", "compliance:read", "compliance:manage",
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
@@ -51,13 +51,16 @@ ROLE_PERMISSIONS = {
     },
     "librarian": {
         "document:create", "document:read", "document:update", "document:propose", "document:review", "document:annotate",
+        # Document controller: registers, publishes and distributes controlled
+        # documents. Publication is separate from approval (Head of Quality).
+        "document:publish",
         "document:download", "document.section.view", "document.section.extract",
         "document.section.manage", "document.policy.manage",
         "change_request:create", "distribution:manage", "retention:manage", "legal_hold:manage",
         "compliance:read", "audit:read", "safety:read", "roc:read", "aircraft:read", "feedback:create", "feedback:read",
     },
     "head_quality": {
-        "document:read", "document:approve", "document:publish", "document:propose", "document:review", "document:annotate",
+        "document:read", "document:approve", "document:propose", "document:review", "document:annotate",
         "document:download", "document.section.view", "document.section.extract",
         "document.extract.approve",
         "change_request:create", "change_request:review", "change_request:approve",

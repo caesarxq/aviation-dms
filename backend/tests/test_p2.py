@@ -137,7 +137,7 @@ class TestDocumentProposals:
         ]
         assert [response.status_code for response in denied] == [403] * len(denied)
 
-    def test_update_only_permission_can_complete_review_transitions(self, client, safety_headers, librarian_headers, monkeypatch):
+    def test_update_only_permission_cannot_decide_a_manual_proposal(self, client, safety_headers, librarian_headers, monkeypatch):
         from app import p2_routes
 
         pending_reviews = []
@@ -156,10 +156,13 @@ class TestDocumentProposals:
             p2_routes, "has_permission",
             lambda role, permission: permission in {"document:read", "document:update"},
         )
+        # DOC-001 is the Operations Manual: only its approver role (Head of
+        # Quality) may decide a proposal, whatever document permissions the
+        # actor holds. document:update alone must not close a manual's change.
         for proposal_id, status in pending_reviews:
             reviewed = client.patch(f"/api/p2/proposals/{proposal_id}", json={"status": status}, headers=librarian_headers)
-            assert reviewed.status_code == 200, reviewed.text
-            assert reviewed.json()["status"] == status
+            assert reviewed.status_code == 403, reviewed.text
+            assert "head_quality" in reviewed.json()["detail"]
 
     def test_proposer_cannot_claim_review_of_own_proposal(self, client, librarian_headers):
         created = client.post("/api/p2/documents/DOC-001/proposals", json={
@@ -239,7 +242,9 @@ class TestDocumentProposals:
         applied = client.patch(
             f"/api/p2/proposals/{proposal_id}", json={"status": "applied"}, headers=safety_headers
         )
-        assert under_review.status_code == 403
+        # 403 when the permission gate denies it, 409 when the proposal is
+        # not awaiting review; either way the proposer cannot jump the status.
+        assert under_review.status_code in (403, 409)
         assert applied.status_code == 422
 
         conn = sqlite3.connect(os.environ["DMS_DB_PATH"])

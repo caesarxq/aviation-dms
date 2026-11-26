@@ -17,6 +17,13 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod
 from .p0_auth import same_principal
 from .proposal_engine import detect_proposals
+from .manual_authority import (
+    authority_for_document,
+    can_approve,
+    can_review,
+    approve_denial,
+    review_denial,
+)
 from .upload_safety import store_upload_file, _configured_roots
 from .upload_ingestion import extract_pdf_text, classify_and_extract, _compute_file_hash, _get_target_directory
 from .upload_safety import (
@@ -307,8 +314,18 @@ async def update_proposal(proposal_id: str, request: Request):
     if has_content_edits and review_status:
         raise HTTPException(status_code=400, detail="Proposal content cannot be edited during review")
     if review_status or has_review_metadata:
-        if not (has_permission(role, "document:update") or has_permission(role, "document:approve")):
-            raise HTTPException(status_code=403, detail="Permission denied: document:update or document:approve")
+        # Review is ultimately decided by manual authority (owner reviews,
+        # approver decides), so document:review is sufficient here; requiring
+        # document:update excluded the manual owners from reviewing proposals.
+        if not (
+            has_permission(role, "document:update")
+            or has_permission(role, "document:approve")
+            or has_permission(role, "document:review")
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Permission denied: document:update, document:approve or document:review",
+            )
     if has_content_edits or status == "submitted":
         _check_proposal_editor(request)
     if not ("status" in body or has_content_edits or has_review_metadata):
@@ -327,6 +344,16 @@ async def update_proposal(proposal_id: str, request: Request):
             raise HTTPException(status_code=409, detail="Only draft proposals can be submitted")
         if review_status and row["status"] not in ("submitted", "under_review"):
             raise HTTPException(status_code=409, detail="Proposal is not awaiting review")
+
+        if review_status:
+            # A manual's proposal follows the same authority as a change
+            # request: the owner reviews, the approver role makes the decision.
+            authority = await authority_for_document(db, row["document_id"])
+            if status == "under_review":
+                if not can_review(role, authority):
+                    raise HTTPException(status_code=403, detail=review_denial(role, authority))
+            elif not can_approve(role, authority):
+                raise HTTPException(status_code=403, detail=approve_denial(role, authority))
 
         actor = _actor(request)
         # SoD: proposer cannot claim review or make a final decision on their own proposal.
@@ -402,6 +429,8 @@ async def apply_proposal(proposal_id: str, request: Request):
         if prop["status"] != "approved":
             raise HTTPException(status_code=400, detail="Proposal must be approved before applying")
 
+        # Applying a proposal publishes its content: the document controller's
+        # act (document:publish), after the Head of Quality approved it.
         actor = _actor(request)
         now = now_iso()
         doc_id = prop["document_id"]
