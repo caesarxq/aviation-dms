@@ -20,6 +20,8 @@ and this project adheres to Semantic Versioning where applicable.
 - Manual owners can raise and review change requests (`change_request:create`, `change_request:review`) and review proposals on their own manual
 - Direct content writes and new draft versions on an ownership-managed manual return 409; changes must go through a proposal
 - `head_operations` gained `audit_finding:read/create/update/close`
+- The quality manual (DOC-012) is approved by the `accountable_manager`: its owner is the Head of Quality, and an author cannot approve their own change. Other manuals remain Head of Quality approvals; documents outside the ownership scheme now default to the Head of Quality instead of falling open
+- Ownership-managed manuals publish by `system` on approval (KCAA manuals on KCAA approval, after independent evidence verification), so a one-person quality function can release without an approver/publisher conflict
 
 ### Fixed
 - BugTracker API base corrected to `/restapi/portal/{portal}/projects/{project}/bugs/`; create payload no longer sent as `custom_fields`; sync accounting uses row counts

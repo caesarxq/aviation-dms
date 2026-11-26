@@ -40,10 +40,11 @@ ROLE_PERMISSIONS = {
     "accountable_manager": {
         "document:read", "document:approve", "document:propose",
         "document:download", "document.section.view", "document.section.extract",
-        # Approval of manual changes belongs to the Head of Quality; publication
-        # belongs to the document controller (librarian). The accountable manager
-        # keeps document:approve so it can verify KCAA evidence independently.
-        "change_request:review", "compliance:read", "compliance:manage",
+        # Approval of manual changes belongs to the Head of Quality, except the
+        # quality manual, whose owner is the Head of Quality and whose approver
+        # is the accountable manager. Publication belongs to the document
+        # controller. manual_authority confines each approval to its own manual.
+        "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
         "flight:release", "risk_assessment:approve", "security:read_sensitive", "security:manage",

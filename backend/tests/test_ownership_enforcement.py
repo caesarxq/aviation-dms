@@ -367,3 +367,67 @@ def test_approval_does_not_publish_documents_outside_the_scheme(client):
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "approved"
     assert not response.json()["published_at"]
+
+
+# --- Quality manual: the accountable manager approves -------------------------
+
+QUALITY = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+
+
+def _hoq_authored_quality_version(version_id: str, number: str) -> str:
+    """A DOC-012 version authored by the Head of Quality, awaiting approval."""
+    import os
+    import sqlite3
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO document_versions "
+            "(version_id, document_id, version_number, state, content, change_summary, "
+            " kcaa_approved, created_at, updated_at, created_by, updated_by) "
+            "VALUES (?, 'DOC-012', ?, 'in_review', 'qms probe', 'qms probe', 0, 'now', 'now', 'u-quality', 'u-quality')",
+            (version_id, number),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return version_id
+
+
+def test_quality_manual_is_approved_by_the_accountable_manager(client):
+    import os
+    import sqlite3
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    try:
+        row = conn.execute(
+            "SELECT owner_role, approver_role FROM manual_ownership WHERE doc_class = 'quality_manual'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ("head_quality", "accountable_manager")
+
+
+def test_head_of_quality_cannot_approve_their_own_quality_manual_change(client):
+    version_id = _hoq_authored_quality_version("VER-QMS-SOD-1", "95.01.01")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=QUALITY
+    )
+
+    assert response.status_code == 403, response.text
+    # Refused by approval authority first; the SoD rule remains a second gate.
+    assert "accountable_manager" in response.json()["detail"]
+
+
+def test_accountable_manager_approves_a_head_of_quality_authored_change(client):
+    version_id = _hoq_authored_quality_version("VER-QMS-AM-1", "95.02.01")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=ACCOUNTABLE
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "approved"
+    assert response.json()["approved_by"] == "u-accountable"

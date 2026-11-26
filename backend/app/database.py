@@ -2560,7 +2560,10 @@ async def apply_catalogue_corrections():
         ownership_rows = [
             ("operations_manual", "head_operations", "u-ops", "head_quality"),
             ("safety_manual", "head_safety", "u-safety/security", "head_quality"),
-            ("quality_manual", "head_quality", "u-quality", "head_quality"),
+            # The quality manual's owner is the Head of Quality, and an author
+            # cannot approve their own change, so the accountable manager
+            # approves the quality system.
+            ("quality_manual", "head_quality", "u-quality", "accountable_manager"),
             ("security_manual", "head_security", "u-safety/security", "head_quality"),
             ("training_manual", "head_training", "u-training", "head_quality"),
             ("maintenance_manual", "head_maintenance", "u-maintenance", "head_quality"),
@@ -2571,6 +2574,20 @@ async def apply_catalogue_corrections():
                    (doc_class, owner_role, head_of_department_user_id, approver_role, updated_at, updated_by)
                    VALUES (?,?,?,?,?,?)""",
                 (doc_class, owner_role, head_user_id, approver_role, now, "system"),
+            )
+        # Existing databases already hold the original mapping (the insert above
+        # is INSERT OR IGNORE), so apply the quality-manual approver change once.
+        cursor = await db.execute(
+            "SELECT value FROM app_settings WHERE key = 'manual_ownership_quality_approver'"
+        )
+        if not await cursor.fetchone():
+            await db.execute(
+                "UPDATE manual_ownership SET approver_role = 'accountable_manager', updated_at = ?, updated_by = 'system' WHERE doc_class = 'quality_manual'",
+                (now,),
+            )
+            await db.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES ('manual_ownership_quality_approver', 'accountable_manager', ?)",
+                (now,),
             )
         # Assign manual_owner_role to existing documents based on doc_class
         for doc_class, owner_role, head_user_id, approver_role in ownership_rows:
