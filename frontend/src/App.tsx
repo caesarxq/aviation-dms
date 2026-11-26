@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AppShell } from "./components/layout/AppShell";
 import { ToastProvider } from "./components/ui/Toast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
+import { ErrorToaster } from "./components/ui/ErrorToaster";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { getPostLoginPath } from "./auth/permissions";
 import { RequireAccess, RequireAuth } from "./auth/RequireAccess";
@@ -86,6 +87,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ToastProvider>
+        <ErrorToaster />
         <AuthProvider>
           <Suspense fallback={<RouteLoading />}>
           <Routes>

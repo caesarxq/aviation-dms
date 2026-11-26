@@ -30,8 +30,30 @@ api.interceptors.response.use(
     if (status === 401 && !credentialRoute && typeof window !== "undefined") {
       window.dispatchEvent(new Event("kfl:session-expired"));
     }
+    // Surface unexpected API errors globally so users are never left staring
+    // at a silent failure. Components that show their own inline error UI
+    // handle 400/422 themselves; we surface 403/404/429/500 here as a safety net.
+    if (
+      typeof window !== "undefined" &&
+      status &&
+      status !== 401 &&
+      [403, 404, 429, 500].includes(status)
+    ) {
+      const detail =
+        (error.response?.data as { detail?: string } | undefined)?.detail ||
+        (typeof error.response?.data === "string" ? error.response.data : undefined) ||
+        error.message;
+      const evt = new CustomEvent("kfl:api-error", {
+        detail: { status, url, message: String(detail || `Request failed (${status})`) } as unknown as CustomEventInit<{
+          status: number;
+          url: string;
+          message: string;
+        }>["detail"],
+      });
+      window.dispatchEvent(evt);
+    }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;

@@ -133,8 +133,7 @@ test.describe("Navigation", () => {
 
     const results = await new AxeBuilder({ page })
       .exclude("iframe")
-      .disableRules(["color-contrast"])
-      .analyze();
+.analyze();
     const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
     expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
 
@@ -499,8 +498,7 @@ test.describe("Audit report provenance import", () => {
     const results = await new AxeBuilder({ page })
       .exclude("iframe")
       .exclude('[contenteditable="true"]')
-      .disableRules(["color-contrast"])
-      .analyze();
+.analyze();
     const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
     expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
   });
@@ -515,7 +513,6 @@ test.describe("Accessibility", () => {
       const results = await new AxeBuilder({ page })
         .exclude("iframe")
         .exclude('[contenteditable="true"]')
-        .disableRules(["color-contrast"])
         .analyze();
       const blockingViolations = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
       expect(blockingViolations, JSON.stringify(blockingViolations, null, 2)).toEqual([]);
