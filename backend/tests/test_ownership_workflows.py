@@ -26,10 +26,12 @@ def test_every_manual_owner_can_raise_and_review_change_requests():
         assert rbac.has_permission(role, "change_request:review"), role
 
 
-def test_only_quality_approves_change_requests():
+def test_only_quality_and_the_accountable_manager_approve_change_requests():
     holders = {role for role, perms in rbac.ROLE_PERMISSIONS.items()
                if "change_request:approve" in perms}
-    assert holders == {"head_quality", "system_admin"}
+    # The accountable manager approves the quality manual only; every other
+    # manual is approved by the Head of Quality (enforced per document).
+    assert holders == {"head_quality", "accountable_manager", "system_admin"}
 
 
 def test_head_operations_leads_its_department_findings():

@@ -91,11 +91,13 @@ class TestChangeRequests:
         quality_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
         client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=quality_headers)
 
-        # DOC-012 is the quality manual, so its owner is also the approving role.
+        # DOC-012 is the quality manual: the Head of Quality owns it but the
+        # accountable manager approves it, so the owner may not decide it.
+        accountable_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
         rj = client.post(
             f"/api/p1/change-requests/{cr['cr_id']}/reject",
             json={"rejection_reason": "Needs more justification."},
-            headers=quality_headers,
+            headers=accountable_headers,
         )
         assert rj.status_code == 200
         assert rj.json()["status"] == "rejected"

@@ -318,3 +318,116 @@ def test_direct_write_still_allowed_outside_the_ownership_scheme(client):
     )
 
     assert response.status_code == 200, response.text
+
+
+# --- System publication on approval -----------------------------------------
+
+def _draft_in_review(client, doc_id):
+    import uuid as _uuid
+
+    created = client.post(
+        "/api/p0/versions",
+        json={
+            "document_id": doc_id,
+            "version_number": f"97.{_uuid.uuid4().int % 90 + 10:02d}.{_uuid.uuid4().int % 90 + 10:02d}",
+            "content": "system publication probe",
+        },
+        headers=ADMIN,
+    )
+    assert created.status_code == 201, created.text
+    version_id = created.json()["version_id"]
+    submitted = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=in_review", headers=ADMIN
+    )
+    assert submitted.status_code == 200, submitted.text
+    return version_id
+
+
+def test_approving_a_non_kcaa_manual_publishes_it_as_the_system(client):
+    """DOC-004 is the training manual: owned, but no KCAA approval gate."""
+    version_id = _draft_in_review(client, "DOC-004")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=APPROVER
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "published"
+    assert response.json()["published_at"]
+
+
+def test_approval_does_not_publish_documents_outside_the_scheme(client):
+    """DOC-010 is a form with no owner: the controller still publishes it."""
+    version_id = _draft_in_review(client, "DOC-010")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=APPROVER
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "approved"
+    assert not response.json()["published_at"]
+
+
+# --- Quality manual: the accountable manager approves -------------------------
+
+QUALITY = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+
+
+def _hoq_authored_quality_version(version_id: str, number: str) -> str:
+    """A DOC-012 version authored by the Head of Quality, awaiting approval."""
+    import os
+    import sqlite3
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO document_versions "
+            "(version_id, document_id, version_number, state, content, change_summary, "
+            " kcaa_approved, created_at, updated_at, created_by, updated_by) "
+            "VALUES (?, 'DOC-012', ?, 'in_review', 'qms probe', 'qms probe', 0, 'now', 'now', 'u-quality', 'u-quality')",
+            (version_id, number),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return version_id
+
+
+def test_quality_manual_is_approved_by_the_accountable_manager(client):
+    import os
+    import sqlite3
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    try:
+        row = conn.execute(
+            "SELECT owner_role, approver_role FROM manual_ownership WHERE doc_class = 'quality_manual'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == ("head_quality", "accountable_manager")
+
+
+def test_head_of_quality_cannot_approve_their_own_quality_manual_change(client):
+    version_id = _hoq_authored_quality_version("VER-QMS-SOD-1", "95.01.01")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=QUALITY
+    )
+
+    assert response.status_code == 403, response.text
+    # Refused by approval authority first; the SoD rule remains a second gate.
+    assert "accountable_manager" in response.json()["detail"]
+
+
+def test_accountable_manager_approves_a_head_of_quality_authored_change(client):
+    version_id = _hoq_authored_quality_version("VER-QMS-AM-1", "95.02.01")
+
+    response = client.patch(
+        f"/api/p0/versions/{version_id}/state?state=approved", headers=ACCOUNTABLE
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "approved"
+    assert response.json()["approved_by"] == "u-accountable"

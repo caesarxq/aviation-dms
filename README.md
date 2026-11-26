@@ -121,7 +121,7 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | Role | Access | Key capabilities |
 |------|--------|------------------|
 | `system_admin` | L4 | Broad administration and audit import; cannot verify provenance |
-| `accountable_manager` | L4 | Organization overview, document approval, KCAA evidence verification |
+| `accountable_manager` | L4 | Organization overview, document approval, KCAA evidence verification, approves the quality manual |
 | `head_quality` | L3 | Document approval and change-request approval, QA, audits |
 | `head_safety` | L3 | Safety SMS, occurrences, investigations, safety audit closure |
 | `head_security` | L3 | Security records, security audit closure |
@@ -147,12 +147,12 @@ New users should follow the [User Onboarding Procedure](docs/USER-ONBOARDING-PRO
 
 ### Manual ownership
 
-Each controlled manual is owned by a department head (`manual_ownership`, keyed by `doc_class`): operations → `head_operations`, safety → `head_safety`, security → `head_security`, quality → `head_quality`, training → `head_training`, maintenance → `head_maintenance`. `head_quality` is the approver for all six.
+Each controlled manual is owned by a department head (`manual_ownership`, keyed by `doc_class`): operations → `head_operations`, safety → `head_safety`, security → `head_security`, quality → `head_quality`, training → `head_training`, maintenance → `head_maintenance`. `head_quality` approves all of them **except the quality manual**, whose approver is the `accountable_manager`: its owner is the Head of Quality, an author cannot approve their own change, and the quality system is signed off by top management.
 
 The rule the workflow enforces:
 
 - **The owner reviews** change requests and proposals for their manual.
-- **Only `head_quality` approves** a manual change (`change_request:approve`, KCAA approval).
+- **Only the manual's approver role approves** (`change_request:approve`, KCAA approval): `head_quality` for every manual, `accountable_manager` for the quality manual. Documents outside the scheme also default to `head_quality`.
 - **The document controller publishes** (`librarian` holds `document:publish`).
 - **Direct content writes are refused.** A new draft version or in-place content update on an ownership-managed manual returns `409`; the change must go through a proposal so the owner sees it before approval. `system_admin` keeps break-glass access.
 

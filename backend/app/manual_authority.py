@@ -5,10 +5,13 @@ Ownership lives as data (`manual_ownership` seeded per `doc_class`, plus
 change-request workflow can enforce:
 
 - the manual owner reviews change requests for that manual
-- the approver role (Head of Quality) approves, rejects, and publishes
+- the approver role approves and rejects: the Head of Quality for every manual,
+  except the quality manual, whose owner is the Head of Quality and whose
+  approver is the accountable manager (an author cannot approve their own change)
 
-Documents outside the ownership scheme fall through unchanged, so the existing
-permission checks continue to govern them.
+Documents outside the ownership scheme still require the Head of Quality to
+approve, so a holding of `document:approve` alone does not confer approval
+authority.
 """
 from typing import Optional
 
@@ -34,7 +37,9 @@ async def authority_for_document(db, document_id: str) -> dict:
         return {}
 
     owner_role = row["manual_owner_role"] or row["mapped_owner"] or ""
-    approver_role = row["mapped_approver"] or (DEFAULT_APPROVER_ROLE if owner_role else "")
+    # Approval always has a named owner of the decision; documents outside the
+    # scheme default to the Head of Quality rather than falling open.
+    approver_role = row["mapped_approver"] or DEFAULT_APPROVER_ROLE
     return {
         "document_id": row["document_id"],
         "doc_class": row["doc_class"] or "",

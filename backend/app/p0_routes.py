@@ -104,6 +104,53 @@ _NON_EDITABLE_DOCUMENT_CATEGORIES = {"roc_ops_spec", "oem_publication"}
 _NON_EDITABLE_DOCUMENT_CLASSES = {"roc_spec", "ops_spec", "oem_publication"}
 
 
+async def _apply_publication(db, document_id: str, version_id: str, actor: str, now: str, from_state: str) -> None:
+    """Make a version the effective published one.
+
+    Used both for an explicit publish and for the system publication that
+    follows approval of an ownership-managed manual.
+    """
+    await db.execute(
+        "UPDATE document_versions SET state = 'published', published_at = ?, updated_at = ?, updated_by = ? WHERE version_id = ?",
+        (now, now, actor, version_id),
+    )
+    await db.execute(
+        "UPDATE document_versions SET state = 'obsolete', updated_at = ?, updated_by = ? WHERE document_id = ? AND version_id != ? AND state = 'published'",
+        (now, actor, document_id, version_id),
+    )
+    await db.execute(
+        "UPDATE documents SET current_version_id = ?, status = 'published', updated_at = ?, updated_by = ? WHERE document_id = ?",
+        (version_id, now, actor, document_id),
+    )
+    await log_audit_event(
+        "document_version",
+        version_id,
+        "state_changed",
+        actor,
+        {
+            "from_state": from_state,
+            "to_state": "published",
+            "document_id": document_id,
+            "system_published": actor == "system",
+        },
+        db=db,
+    )
+
+
+def _publishes_on_approval(doc_row, state: str, kcaa_required: int) -> bool:
+    """True when reaching this state publishes the document without a human publisher.
+
+    A one-person quality function holds both the approver and the document
+    controller role, so demanding a separate human publisher would deadlock the
+    release. For ownership-managed manuals the publisher is therefore the
+    system: KCAA-controlled manuals publish on KCAA approval (the evidence is
+    already verified by a different principal), the rest publish on approval.
+    """
+    if not (doc_row["manual_owner_role"] or "").strip():
+        return False
+    return state == ("kcaa_approved" if kcaa_required else "approved")
+
+
 async def _require_change_path_for_owned_manual(db, doc_id: str, role: str) -> None:
     """Owned manuals are changed through a proposal, never by a direct write.
 
@@ -1875,7 +1922,7 @@ async def transition_version_state(
             if not check_sod("version", "approve", actor, row["created_by"], getattr(request.state, "actor_aliases", None)):
                 raise HTTPException(status_code=403, detail="Cannot approve own version (SoD)")
         # Check if parent document requires KCAA approval
-        cursor = await db.execute("SELECT kcaa_approval_required FROM documents WHERE document_id = ?", (row["document_id"],))
+        cursor = await db.execute("SELECT kcaa_approval_required, manual_owner_role FROM documents WHERE document_id = ?", (row["document_id"],))
         doc_row = await cursor.fetchone()
         kcaa_required = doc_row["kcaa_approval_required"] if doc_row else 0
         evidence_id_for_transition = ""
@@ -1941,25 +1988,20 @@ async def transition_version_state(
             updates.append("published_at = ?")
             params.append(now_iso())
         params.append(version_id)
-        await db.execute(f"UPDATE document_versions SET {', '.join(updates)} WHERE version_id = ?", params)
         if state == "published":
-            now_val = now_iso()
-            await db.execute(
-                "UPDATE document_versions SET state = 'obsolete', updated_at = ?, updated_by = ? WHERE document_id = ? AND version_id != ? AND state = 'published'",
-                (now_val, actor, row["document_id"], version_id),
+            await _apply_publication(db, row["document_id"], version_id, actor, now_iso(), row["state"])
+        else:
+            await db.execute(f"UPDATE document_versions SET {', '.join(updates)} WHERE version_id = ?", params)
+            await log_audit_event(
+                "document_version",
+                version_id,
+                "state_changed",
+                actor,
+                {"from_state": row["state"], "to_state": state, "document_id": row["document_id"]},
+                db=db,
             )
-            await db.execute(
-                "UPDATE documents SET current_version_id = ?, status = 'published', updated_at = ?, updated_by = ? WHERE document_id = ?",
-                (version_id, now_val, actor, row["document_id"]),
-            )
-        await log_audit_event(
-            "document_version",
-            version_id,
-            "state_changed",
-            actor,
-            {"from_state": row["state"], "to_state": state, "document_id": row["document_id"]},
-            db=db,
-        )
+            if _publishes_on_approval(doc_row, state, kcaa_required):
+                await _apply_publication(db, row["document_id"], version_id, "system", now_iso(), state)
         await db.commit()
         cursor = await db.execute("SELECT * FROM document_versions WHERE version_id = ?", (version_id,))
         row = await cursor.fetchone()
