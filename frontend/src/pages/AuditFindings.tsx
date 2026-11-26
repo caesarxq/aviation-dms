@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { auditApi } from "../api/audit";
+import { auditApi, correctiveActionApi } from "../api/audit";
 import type { AuditFinding, AuditFindingStatus, AuditReport } from "../api/audit";
 import { AlertTriangle, Plus, RefreshCw } from "lucide-react";
 import FormField from "../components/ui/FormField";
@@ -51,6 +51,13 @@ export function AuditFindings() {
   const [mutationError, setMutationError] = useState("");
   const [closureEvidence, setClosureEvidence] = useState("");
   const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showCARModal, setShowCARModal] = useState(false);
+  const [carTitle, setCarTitle] = useState("");
+  const [carDescription, setCarDescription] = useState("");
+  const [carRootCause, setCarRootCause] = useState("");
+  const [carAction, setCarAction] = useState("");
+  const [carOwnerId, setCarOwnerId] = useState("");
+  const [carDueDate, setCarDueDate] = useState("");
 
   const DEPARTMENTS = [
     { value: "quality", label: "Quality" },
@@ -89,6 +96,25 @@ export function AuditFindings() {
     onError: () => setMutationError("Unable to close audit finding. Please check the details and try again."),
   });
 
+  const linkCARMutation = useMutation({
+    mutationFn: (data: any) =>
+      correctiveActionApi.createCorrectiveAction({
+        ...data,
+        audit_finding_id: detailFinding!.finding_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audit-finding", detailFinding!.finding_id] });
+      setShowCARModal(false);
+      setCarTitle("");
+      setCarDescription("");
+      setCarRootCause("");
+      setCarAction("");
+      setCarOwnerId("");
+      setCarDueDate("");
+    },
+    onError: () => setMutationError("Unable to link corrective action. Please try again."),
+  });
+
   useEffect(() => {
     if (!detailLoading && !detailError && !detailFinding) {
       navigate("/audit-findings", { replace: true });
@@ -105,6 +131,29 @@ export function AuditFindings() {
             <p className="text-sm text-kfl-secondary">{detailFinding.description || "No description provided."}</p>
             <p className="text-sm text-kfl-secondary">Department: {detailFinding.department || "—"} · Area: {detailFinding.area} · Level {detailFinding.level}</p>
             <p className="text-sm text-kfl-secondary">Status: {detailFinding.status.replace(/_/g, " ")}{detailFinding.closed_at ? ` · Closed ${detailFinding.closed_at.slice(0, 10)} by ${detailFinding.closed_by || "—"}` : ""}</p>
+            {detailFinding.corrective_action_id ? (
+              <div className="app-surface p-4 mb-3 border border-kfl-status-info-bg bg-kfl-status-info-bg/10">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="app-label mb-1">Corrective Action</div>
+                    <div className="text-sm font-medium text-kfl-text">{detailFinding.corrective_action_id}</div>
+                  </div>
+                  <Badge variant="default" className="bg-kfl-status-info-bg text-kfl-status-info">
+                    Linked
+                  </Badge>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => setShowCARModal(true)}
+                disabled={linkCARMutation.isPending}
+                variant="outline"
+                size="sm"
+              >
+                {linkCARMutation.isPending ? "Linking…" : "Link Corrective Action"}
+              </Button>
+            )}
             {detailFinding.status === "open" && hasPermission("audit_finding:update") && (
               <Button
                 type="button"
@@ -162,9 +211,114 @@ export function AuditFindings() {
                     </Button>
                   </div>
                 </div>
-              </div>
-            )}
-          </section>
+                </div>
+                )}
+                {showCARModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="app-surface w-full max-w-md p-5">
+                  <h3 className="text-lg font-bold text-kfl-text mb-3">
+                    Link Corrective Action to Finding {detailFinding.finding_number}
+                  </h3>
+                  <p className="text-sm text-kfl-secondary mb-4">
+                    Create a corrective action to address this finding. The backend closure
+                    gate requires a linked CAR to be closed before the finding can be closed.
+                  </p>
+                  <FormField htmlFor="car_title" label="CAR Title" required>
+                    <input
+                      id="car_title"
+                      name="car_title"
+                      className="app-input"
+                      placeholder="e.g. Revise maintenance procedure"
+                      value={carTitle}
+                      onChange={(e) => setCarTitle(e.target.value)}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_description" label="Description" required>
+                    <textarea
+                      id="car_description"
+                      name="car_description"
+                      className="app-input"
+                      placeholder="Describe the corrective action"
+                      value={carDescription}
+                      onChange={(e) => setCarDescription(e.target.value)}
+                      rows={3}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_root_cause" label="Root Cause">
+                    <input
+                      id="car_root_cause"
+                      name="car_root_cause"
+                      className="app-input"
+                      placeholder="Root cause of the finding"
+                      value={carRootCause}
+                      onChange={(e) => setCarRootCause(e.target.value)}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_action" label="Corrective Action">
+                    <input
+                      id="car_action"
+                      name="car_action"
+                      className="app-input"
+                      placeholder="Planned corrective action"
+                      value={carAction}
+                      onChange={(e) => setCarAction(e.target.value)}
+                    />
+                  </FormField>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField htmlFor="car_owner" label="Owner User ID">
+                      <input
+                        id="car_owner"
+                        name="car_owner"
+                        className="app-input"
+                        placeholder="e.g. u-head-maintenance"
+                        value={carOwnerId}
+                        onChange={(e) => setCarOwnerId(e.target.value)}
+                        autoComplete="off"
+                      />
+                    </FormField>
+                    <FormField htmlFor="car_due_date" label="Due Date">
+                      <input
+                        id="car_due_date"
+                        name="car_due_date"
+                        type="date"
+                        className="app-input"
+                        value={carDueDate}
+                        onChange={(e) => setCarDueDate(e.target.value)}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" size="sm" onClick={() => setShowCARModal(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      id="link_car_submit"
+                      variant="default"
+                      size="sm"
+                      disabled={
+                        linkCARMutation.isPending ||
+                        !carTitle.trim() ||
+                        !carDescription.trim() ||
+                        !carOwnerId.trim()
+                      }
+                      onClick={() =>
+                        linkCARMutation.mutate({
+                          title: carTitle.trim(),
+                          description: carDescription.trim(),
+                          root_cause: carRootCause.trim() || undefined,
+                          corrective_action: carAction.trim() || undefined,
+                          owner_id: carOwnerId.trim(),
+                          due_date: carDueDate || undefined,
+                        })
+                      }
+                    >
+                      {linkCARMutation.isPending ? "Linking…" : "Link CAR"}
+                    </Button>
+                  </div>
+                </div>
+                </div>
+                )}
+                </section>
         ) : null}
       </div>
     );

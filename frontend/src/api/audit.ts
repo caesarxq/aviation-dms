@@ -255,3 +255,62 @@ export const qualityAuditApi = {
   deleteAuditResource: (auditId: string, resourceId: string): Promise<void> =>
     api.delete(`/p1/quality-audits/${encodeURIComponent(auditId)}/resources/${encodeURIComponent(resourceId)}`).then(() => undefined),
 };
+
+/* ============ Corrective Actions (CAR) ============ */
+
+export interface CorrectiveAction {
+  car_id: string;
+  finding_id: string | null;
+  audit_finding_id: string | null;
+  audit_id: string | null;
+  audit_report_id: string | null;
+  title: string;
+  description: string;
+  finding_level: string;
+  root_cause: string | null;
+  corrective_action: string | null;
+  preventive_action: string | null;
+  owner_id: string;
+  due_date: string | null;
+  status: string;
+  verification: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
+}
+
+export interface CorrectiveActionCreate {
+  title: string;
+  description: string;
+  finding_id?: string;
+  audit_finding_id?: string;
+  audit_id?: string;
+  audit_report_id?: string;
+  finding_level?: string;
+  root_cause?: string;
+  corrective_action?: string;
+  preventive_action?: string;
+  owner_id: string;
+  due_date?: string;
+}
+
+export interface CorrectiveActionUpdate {
+  title?: string;
+  description?: string;
+  finding_level?: string;
+  root_cause?: string;
+  corrective_action?: string;
+  preventive_action?: string;
+  owner_id?: string;
+  due_date?: string;
+}
+
+export const correctiveActionApi = {
+  listCorrectiveActions: (params?: { status?: string; owner_id?: string; audit_id?: string; limit?: number; offset?: number }): Promise<CorrectiveAction[]> =>
+    api.get<CorrectiveAction[]>("/p1/corrective-actions", { params }).then((r: any) => r.data),
+  createCorrectiveAction: (data: CorrectiveActionCreate): Promise<CorrectiveAction> =>
+    api.post<CorrectiveAction>("/p1/corrective-actions", data).then((r: any) => r.data),
+  updateCorrectiveAction: (carId: string, data: CorrectiveActionUpdate): Promise<CorrectiveAction> =>
+    api.patch<CorrectiveAction>(`/p1/corrective-actions/${encodeURIComponent(carId)}`, data).then((r: any) => r.data),
+  closeCorrectiveAction: (carId: string): Promise<CorrectiveAction> =>
+    api.post<CorrectiveAction>(`/p1/corrective-actions/${encodeURIComponent(carId)}/close`).then((r: any) => r.data),
+};
