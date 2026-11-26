@@ -408,6 +408,9 @@ class MissionCreate(BaseModel):
     max_altitude_agl: Optional[int] = Field(default=None, ge=0)
     bvlos_required: bool = False
     night_required: bool = False
+    kcaa_oa_reference: Optional[str] = None
+    pic_name: Optional[str] = None
+    drone_type_model: Optional[str] = None
 
     @field_validator("planned_date")
     @classmethod
@@ -432,6 +435,9 @@ class MissionUpdate(BaseModel):
     bvlos_required: Optional[bool] = None
     night_required: Optional[bool] = None
     risk_assessment_id: Optional[str] = None
+    kcaa_oa_reference: Optional[str] = None
+    pic_name: Optional[str] = None
+    drone_type_model: Optional[str] = None
 
     @field_validator("planned_date")
     @classmethod
@@ -459,6 +465,9 @@ class MissionResponse(BaseModel):
     flight_plan_id: Optional[str] = None
     release_id: Optional[str] = None
     post_flight_report_id: Optional[str] = None
+    kcaa_oa_reference: Optional[str] = None
+    pic_name: Optional[str] = None
+    drone_type_model: Optional[str] = None
     created_at: str
     updated_at: str
     created_by: str

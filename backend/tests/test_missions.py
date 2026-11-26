@@ -977,7 +977,8 @@ class TestMissionStateTransitions:
         second = client.post("/api/p1/missions", json={"title": "Second mission"}, headers=admin_headers).json()
         assessment = client.post("/api/p1/risk-assessments", json={
             "title": "First mission risk", "mission_id": first["mission_id"],
-            "risk_model": "sms_5x5", "likelihood": "rare", "severity": "negligible", "risk_level": "low",
+            "risk_model": "om_flight_26", "likelihood": "rare", "severity": "negligible",
+            "exposure": "rare", "risk_level": "low",
         }, headers=admin_headers)
         assert assessment.status_code == 201, assessment.text
 

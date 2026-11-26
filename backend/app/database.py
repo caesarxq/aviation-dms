@@ -1891,6 +1891,7 @@ async def _create_external_audit_findings(db):
             title TEXT NOT NULL,
             description TEXT NOT NULL,
             regulatory_reference TEXT,
+            department TEXT,
             status TEXT NOT NULL DEFAULT 'open',
             corrective_action_id TEXT,
             due_date TEXT,
@@ -2084,8 +2085,8 @@ async def _rebuild_external_audit_findings(db):
     has_closure_evidence = "closure_evidence" in columns
     known_columns = {
         "finding_id", "audit_id", "finding_number", "area", "level", "title", "description",
-        "regulatory_reference", "status", "corrective_action_id", "due_date", "closed_at", "closed_by",
-        "closure_evidence", "created_at", "updated_at",
+        "regulatory_reference", "department", "status", "corrective_action_id", "due_date",
+        "closed_at", "closed_by", "closure_evidence", "created_at", "updated_at",
     }
     extra_columns = columns - known_columns
     if correct_audit_fk and correct_car_fk and has_closure_evidence and not extra_columns:
@@ -2123,14 +2124,15 @@ async def _rebuild_external_audit_findings(db):
         item = dict(row)
         values = tuple(item.get(key) for key in (
             "finding_id", "audit_id", "finding_number", "area", "level", "title", "description",
-            "regulatory_reference", "status", "corrective_action_id", "due_date", "closed_at", "closed_by",
-            "closure_evidence", "created_at", "updated_at",
+            "regulatory_reference", "department", "status", "corrective_action_id", "due_date",
+            "closed_at", "closed_by", "closure_evidence", "created_at", "updated_at",
         ))
         await db.execute(
             """INSERT INTO audit_findings
                (finding_id, audit_id, finding_number, area, level, title, description, regulatory_reference,
-                status, corrective_action_id, due_date, closed_at, closed_by, closure_evidence, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", values,
+                department, status, corrective_action_id, due_date, closed_at, closed_by, closure_evidence,
+                created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", values,
         )
     await db.execute("DROP TABLE audit_findings__upgrade")
 

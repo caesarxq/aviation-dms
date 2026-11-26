@@ -197,12 +197,19 @@ class TestManualWorkflowControls:
         )
         assert self_verify.status_code == 403
 
-        # Independent quality/auditor verifies and closes CAR
+        # Independent quality/auditor verifies the CAP was effective
         verified = client.post(
             f"/api/p1/corrective-actions/{cid}/verify?verification=Satisfactory+CAP+implementation+verified",
             headers=auditor_headers,
         )
         assert verified.status_code == 200
-        closed = client.post(f"/api/p1/corrective-actions/{cid}/close", headers=auditor_headers)
+
+        # The verifier cannot also close (QM-KFL §2.10.6)
+        self_close = client.post(f"/api/p1/corrective-actions/{cid}/close", headers=auditor_headers)
+        assert self_close.status_code == 403
+
+        # A third principal closes: neither owner nor verifier
+        closer_headers = {"X-Role": "head_safety", "X-Actor": "u-safety"}
+        closed = client.post(f"/api/p1/corrective-actions/{cid}/close", headers=closer_headers)
         assert closed.status_code == 200
         assert closed.json()["status"] == "closed"

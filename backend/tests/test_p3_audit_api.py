@@ -245,7 +245,7 @@ def _create_finding(client, headers):
     audit_id = _create_report(client, headers)
     response = client.post(
         "/api/p3/audit-findings",
-        json={"audit_id": audit_id, "finding_number": "1", "area": "Safety", "level": 2,
+        json={"department": "quality", "audit_id": audit_id, "finding_number": "1", "area": "Safety", "level": 2,
               "title": "Finding", "description": "Evidence of a control gap"},
         headers=headers,
     )
@@ -269,7 +269,7 @@ def test_p3_rejects_invalid_payload_status_and_unbounded_pagination(client, admi
 
     assert client.post("/api/p3/audit-reports", json={"audit_number": "EXT-1", "audit_date": datetime.now(timezone.utc).date().isoformat(), "auditor_id": "u-auditor", "auditee_id": "u-admin", "status": "bogus"}, headers=admin_headers).status_code == 422
     assert client.post("/api/p3/audit-findings", json={"audit_id": "x", "finding_number": "1", "area": "Safety", "level": 5, "title": "Bad", "description": "Bad"}, headers=admin_headers).status_code == 422
-    assert client.post("/api/p3/audit-findings", json={"audit_id": "x"}, headers=admin_headers).status_code == 422
+    assert client.post("/api/p3/audit-findings", json={"department": "quality", "audit_id": "x"}, headers=admin_headers).status_code == 422
     assert client.get("/api/p3/audit-findings?status=unknown", headers=admin_headers).status_code == 422
     assert client.get("/api/p3/audit-findings?limit=1000", headers=admin_headers).status_code == 422
     assert client.get("/api/p3/audit-reports?limit=-1", headers=admin_headers).status_code == 422
@@ -419,7 +419,7 @@ def test_p3_read_permissions_and_atomic_audit_events(client, admin_headers):
     assert any(row["finding_id"] == finding_id for row in findings.json())
     forbidden_finding_create = client.post(
         "/api/p3/audit-findings",
-        json={"audit_id": audit_id, "finding_number": "X", "area": "Safety", "level": 2, "title": "Finding", "description": "Description"},
+        json={"department": "quality", "audit_id": audit_id, "finding_number": "X", "area": "Safety", "level": 2, "title": "Finding", "description": "Description"},
         headers=independent_auditor,
     )
     assert forbidden_finding_create.status_code == 403
@@ -457,7 +457,7 @@ def test_internal_audit_readers_can_list_reports_without_create_access(client, a
 def test_p3_finding_creation_requires_existing_report_and_status_filter_is_bounded(client, admin_headers):
     response = client.post(
         "/api/p3/audit-findings",
-        json={"audit_id": "MISSING", "finding_number": "1", "area": "Safety", "level": 1,
+        json={"department": "quality", "audit_id": "MISSING", "finding_number": "1", "area": "Safety", "level": 1,
               "title": "Finding", "description": "Description"},
         headers=admin_headers,
     )
@@ -470,14 +470,14 @@ def test_p3_audit_finding_search_and_status_filters_apply_before_pagination(clie
     for index in range(50):
         response = client.post(
             "/api/p3/audit-findings",
-            json={"audit_id": audit_id, "finding_number": f"{index:03d}", "area": "Safety", "level": 2,
+            json={"department": "quality", "audit_id": audit_id, "finding_number": f"{index:03d}", "area": "Safety", "level": 2,
                   "title": f"Routine finding {index:03d}", "description": "Routine evidence"},
             headers=admin_headers,
         )
         assert response.status_code == 201, response.text
     target = client.post(
         "/api/p3/audit-findings",
-        json={"audit_id": audit_id, "finding_number": "050", "area": "Security", "level": 3,
+        json={"department": "quality", "audit_id": audit_id, "finding_number": "050", "area": "Security", "level": 3,
               "title": "Unique perimeter control gap", "description": "Evidence of a perimeter issue"},
         headers=admin_headers,
     )
@@ -507,7 +507,7 @@ def test_p3_audit_findings_with_equal_numbers_are_stable_across_pages(client, ad
     for index in range(4):
         response = client.post(
             "/api/p3/audit-findings",
-            json={"audit_id": audit_id, "finding_number": "7", "area": "Safety", "level": 2,
+            json={"department": "quality", "audit_id": audit_id, "finding_number": "7", "area": "Safety", "level": 2,
                   "title": f"Tied finding {index}", "description": "Equal finding number"},
             headers=admin_headers,
         )

@@ -559,6 +559,11 @@ async def create_risk_assessment(ra: RiskAssessmentCreate, request: Request):
                 raise HTTPException(status_code=404, detail="Mission not found for risk assessment")
             if mission_row["status"] != "planned" or mission_row["release_id"]:
                 raise HTTPException(status_code=409, detail="Risk assessment cannot be linked after the mission lifecycle has advanced")
+            if ra.risk_model != "om_flight_26":
+                raise HTTPException(
+                    status_code=422,
+                    detail="A mission risk assessment must use the OM §2.6 flight risk model (om_flight_26)",
+                )
         for hazard_id in hazard_ids:
             cursor = await db.execute("SELECT 1 FROM hazards WHERE hazard_id = ?", (hazard_id,))
             if not await cursor.fetchone():
@@ -1465,15 +1470,15 @@ async def create_mission(mission: MissionCreate, request: Request):
         # Hard-block on expiry: verify crew licenses and aircraft insurance
         await _check_mission_eligibility(db, mission.aircraft_id, mission.rpas_pilot_id, mission.visual_observer_id)
         await db.execute(
-            """INSERT INTO missions (mission_id, title, description, mission_type, status, priority, planned_date, location, aircraft_id, roc_id, rpas_pilot_id, visual_observer_id, dg_category, max_altitude_agl, bvlos_required, night_required, created_at, updated_at, created_by, updated_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (mission_id, mission.title, mission.description, mission.mission_type, "planned", mission.priority, mission.planned_date, mission.location, mission.aircraft_id, mission.roc_id, mission.rpas_pilot_id, mission.visual_observer_id, mission.dg_category, mission.max_altitude_agl, 1 if mission.bvlos_required else 0, 1 if mission.night_required else 0, now, now, actor, actor),
+            """INSERT INTO missions (mission_id, title, description, mission_type, status, priority, planned_date, location, aircraft_id, roc_id, rpas_pilot_id, visual_observer_id, dg_category, max_altitude_agl, bvlos_required, night_required, kcaa_oa_reference, pic_name, drone_type_model, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (mission_id, mission.title, mission.description, mission.mission_type, "planned", mission.priority, mission.planned_date, mission.location, mission.aircraft_id, mission.roc_id, mission.rpas_pilot_id, mission.visual_observer_id, mission.dg_category, mission.max_altitude_agl, 1 if mission.bvlos_required else 0, 1 if mission.night_required else 0, mission.kcaa_oa_reference, mission.pic_name, mission.drone_type_model, now, now, actor, actor),
         )
         await log_audit_event("mission", mission_id, "created", actor, {"title": mission.title}, db=db)
         await db.commit()
     finally:
         await db.close()
-    return MissionResponse(mission_id=mission_id, title=mission.title, description=mission.description, mission_type=mission.mission_type, status="planned", priority=mission.priority, planned_date=mission.planned_date, location=mission.location, aircraft_id=mission.aircraft_id, roc_id=mission.roc_id, rpas_pilot_id=mission.rpas_pilot_id, visual_observer_id=mission.visual_observer_id, dg_category=mission.dg_category, max_altitude_agl=mission.max_altitude_agl, bvlos_required=mission.bvlos_required, night_required=mission.night_required, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
+    return MissionResponse(mission_id=mission_id, title=mission.title, description=mission.description, mission_type=mission.mission_type, status="planned", priority=mission.priority, planned_date=mission.planned_date, location=mission.location, aircraft_id=mission.aircraft_id, roc_id=mission.roc_id, rpas_pilot_id=mission.rpas_pilot_id, visual_observer_id=mission.visual_observer_id, dg_category=mission.dg_category, max_altitude_agl=mission.max_altitude_agl, bvlos_required=mission.bvlos_required, night_required=mission.night_required, kcaa_oa_reference=mission.kcaa_oa_reference, pic_name=mission.pic_name, drone_type_model=mission.drone_type_model, created_at=now, updated_at=now, created_by=actor, updated_by=actor)
 
 
 @router.get("/missions", response_model=List[MissionResponse])
@@ -1581,6 +1586,9 @@ async def update_mission(mission_id: str, update: MissionUpdate, request: Reques
             "bvlos_required": None if update.bvlos_required is None else int(update.bvlos_required),
             "night_required": None if update.night_required is None else int(update.night_required),
             "risk_assessment_id": update.risk_assessment_id,
+            "kcaa_oa_reference": update.kcaa_oa_reference,
+            "pic_name": update.pic_name,
+            "drone_type_model": update.drone_type_model,
         }
         if mission.get("release_id") or mission.get("status") != "planned":
             changed_fields = [
@@ -2365,6 +2373,11 @@ async def close_corrective_action(car_id: str, request: Request):
         current = dict(row)
         if current.get("status") != "verified" or not current.get("verification") or not current.get("verified_by"):
             raise HTTPException(status_code=400, detail="CAR must be independently verified before closure (QM-KFL §2.10.6)")
+        if same_principal(request, current.get("verified_by")):
+            raise HTTPException(
+                status_code=403,
+                detail="The verifier cannot also close the corrective action (QM-KFL §2.10.6)",
+            )
         await db.execute(
             "UPDATE corrective_actions SET status = 'closed', closed_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?",
             (now, now, actor, car_id),

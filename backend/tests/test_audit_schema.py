@@ -38,7 +38,7 @@ def test_quality_and_external_audit_findings_use_distinct_working_tables(client,
 
     external_finding = client.post(
         "/api/p3/audit-findings",
-        json={
+        json={"department": "quality", 
             "audit_id": external_id,
             "finding_number": "1",
             "area": "Safety",
@@ -121,3 +121,57 @@ def test_legacy_quality_findings_are_preserved_during_schema_upgrade(tmp_path, m
     finally:
         upgraded.close()
 
+
+
+def test_restart_with_a_department_tagged_finding_does_not_break_startup(client, admin_headers):
+    """A finding carrying `department` must survive init_db(), not abort it.
+
+    The rebuild guard treated any column outside its allowlist as unknown data,
+    so one department-tagged finding made the next startup raise.
+    """
+    import asyncio
+    import os
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from app.database import init_db
+
+    report = client.post(
+        "/api/p3/audit-reports",
+        json={
+            "audit_number": f"RESTART-{_uuid.uuid4().hex[:8]}",
+            "audit_date": datetime.now(timezone.utc).date().isoformat(),
+            "scope": "Restart probe",
+            "auditor_id": "u-auditor",
+            "auditee_id": "u-admin",
+        },
+        headers=admin_headers,
+    )
+    assert report.status_code == 201, report.text
+
+    finding = client.post(
+        "/api/p3/audit-findings",
+        json={
+            "audit_id": report.json()["audit_id"],
+            "finding_number": f"R-{_uuid.uuid4().hex[:6]}",
+            "area": "Safety",
+            "level": 2,
+            "title": "Department tagged",
+            "description": "Must survive a restart",
+            "department": "quality",
+        },
+        headers=admin_headers,
+    )
+    assert finding.status_code == 201, finding.text
+    finding_id = finding.json()["finding_id"]
+
+    asyncio.run(init_db())
+
+    conn = sqlite3.connect(os.environ["DMS_DB_PATH"])
+    try:
+        row = conn.execute(
+            "SELECT department FROM audit_findings WHERE finding_id = ?", (finding_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row[0] == "quality"
