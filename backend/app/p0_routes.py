@@ -3567,6 +3567,64 @@ async def list_app_versions(request: Request, limit: int = 10):
         await db.close()
 
 
+@router.post("/app-versions/{version_id}/notify")
+async def send_upgrade_notification(version_id: str, request: Request):
+    """Send plain-English upgrade notification email to all active users for a released version."""
+    if _role(request) != "system_admin":
+        raise HTTPException(status_code=403, detail="System administrator permission required")
+
+    from .notifications import send_email
+    from .upgrade_notifications import build_upgrade_email_body, get_default_improvements
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT version_number, changelog_non_technical FROM app_versions WHERE version_id = ?",
+            (version_id,),
+        )
+        version = await cursor.fetchone()
+        if not version:
+            raise HTTPException(status_code=404, detail="Version not found")
+
+        version_number = version["version_number"]
+        improvements = get_default_improvements()
+
+        cursor = await db.execute(
+            "SELECT user_id, full_name, email FROM users WHERE is_active = 1 AND email IS NOT NULL AND email != ''"
+        )
+        users = await cursor.fetchall()
+
+        sent_count = 0
+        for user in users:
+            recipient_name = user["full_name"] or user["user_id"]
+            body = build_upgrade_email_body(recipient_name, version_number, improvements)
+            subject = f"KFL Aviation DMS updated to version {version_number}"
+            if send_email(
+                user["email"],
+                subject,
+                body,
+                entity_type="app_version",
+                entity_id=version_id,
+                priority="medium",
+            ):
+                sent_count += 1
+
+        await db.execute(
+            "UPDATE app_versions SET notification_sent = 1 WHERE version_id = ?",
+            (version_id,),
+        )
+        await db.commit()
+
+        return {
+            "version_id": version_id,
+            "version_number": version_number,
+            "notifications_sent": sent_count,
+            "total_users": len(users),
+        }
+    finally:
+        await db.close()
+
+
 async def _probe_scanner_status() -> dict:
     """Lightweight clamd connectivity probe: attempt a TCP handshake.
 

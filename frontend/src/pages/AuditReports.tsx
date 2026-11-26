@@ -193,20 +193,22 @@ export function AuditReports() {
       )}
 
       <section className="app-surface overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between md:gap-4">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" value={search} onChange={(event) => { setSearch(event.target.value); setReportOffset(0); }} placeholder="Search audit reports…" />
           </div>
-          <Select onValueChange={(e) => { setStatusFilter(e); setReportOffset(0); }}>
-            <SelectTrigger id="audit-report-status" name="status" aria-label="Filter audit reports by status">
-              <SelectValue placeholder={statusFilter || "All statuses"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
-              {AUDIT_REPORT_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <div className="text-sm font-semibold text-kfl-text">Audit Reports</div>
+          <div className="md:shrink-0">
+            <Select onValueChange={(e) => { setStatusFilter(e); setReportOffset(0); }}>
+              <SelectTrigger id="audit-report-status" name="status" aria-label="Filter audit reports by status">
+                <SelectValue placeholder={statusFilter || "All statuses"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                {AUDIT_REPORT_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="text-sm font-semibold text-kfl-text md:shrink-0">Audit Reports</div>
         </div>
 
         {isError ? (

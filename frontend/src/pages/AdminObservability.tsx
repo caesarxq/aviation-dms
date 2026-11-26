@@ -14,6 +14,7 @@ import {
   Wifi,
 } from "lucide-react";
 import api from "../api/client";
+import { auditApi } from "../api/audit";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -80,6 +81,19 @@ export default function AdminObservability() {
     },
     onError: (cause: any) => {
       setScannerTestResult({ configured: false, reachable: null, detail: cause?.response?.data?.detail || "Scanner test failed" });
+    },
+  });
+
+  // Upgrade notification mutation
+  const [sendingNotification, setSendingNotification] = useState<string | null>(null);
+  const sendNotificationMutation = useMutation({
+    mutationFn: (versionId: string) => auditApi.sendUpgradeNotification(versionId),
+    onSuccess: (_result, _versionId) => {
+      setSendingNotification(null);
+      queryClient.invalidateQueries({ queryKey: ["app-versions"] });
+    },
+    onError: (_cause, _versionId) => {
+      setSendingNotification(null);
     },
   });
 
@@ -702,13 +716,25 @@ export default function AdminObservability() {
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => alert(v.changelog_non_technical)}
-                          className="text-xs text-kfl-blue hover:underline"
-                        >
-                          View changelog
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          {!v.notification_sent && (
+                            <button
+                              type="button"
+                              disabled={sendingNotification === v.version_id || sendNotificationMutation.isPending}
+                              onClick={() => void sendNotificationMutation.mutate(v.version_id)}
+                              className="text-xs text-kfl-blue hover:underline"
+                            >
+                              {sendingNotification === v.version_id ? "Sending…" : "Send notification"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => alert(v.changelog_non_technical)}
+                            className="text-xs text-kfl-blue hover:underline"
+                          >
+                            View changelog
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

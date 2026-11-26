@@ -98,9 +98,9 @@ export function MaintenanceManagement() {
       </section>
 
       <section className="app-surface overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-semibold text-kfl-text">Maintenance Records</div>
-          <div className="flex gap-2">
+        <div className="flex flex-col gap-4 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between md:gap-4">
+          <div className="text-sm font-semibold text-kfl-text md:shrink-0">Maintenance Records</div>
+          <div className="flex gap-2 md:shrink-0">
             <Input id="maintenance_aircraft_filter" name="aircraft_registration" placeholder="Aircraft registration" value={aircraftFilter} onChange={(e) => setAircraftFilter(e.target.value)} className="w-full md:w-auto" />
             <Select onValueChange={(e) => setStatusFilter(e)}>
               <SelectTrigger id="maintenance_status_filter" name="status" aria-label="Filter by status">

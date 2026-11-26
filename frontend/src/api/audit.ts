@@ -166,6 +166,9 @@ export const auditApi = {
     api
       .get<any>("/p3/audit-findings/summary", { params: { department } })
       .then((r: any) => r.data),
+
+  sendUpgradeNotification: (versionId: string): Promise<any> =>
+    api.post(`/p0/app-versions/${encodeURIComponent(versionId)}/notify`).then((r: any) => r.data),
 };
 
 /* ============ Quality Audits (Audit Planning) ============ */

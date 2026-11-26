@@ -14,11 +14,12 @@ import FormField from "../components/ui/FormField";
 
 const AUDIT_PAGE_SIZE = 50;
 const AUDIT_STATUSES = ["planned", "in_progress", "completed", "cancelled"];
-const RESOURCE_TYPES = ["data_source", "interview", "document", "other"];
+const RESOURCE_TYPES = ["data_source", "interview", "document", "checklist", "other"];
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
   data_source: "Data Source",
   interview: "Interview",
   document: "Document",
+  checklist: "Checklist",
   other: "Other",
 };
 
@@ -315,7 +316,7 @@ export function AuditPlanning() {
         )}
 
         <section className="app-surface overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-4 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between md:gap-4">
             <div className="relative min-w-0 flex-1 md:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-kfl-muted" />
               <Input
@@ -329,9 +330,10 @@ export function AuditPlanning() {
                 className="pl-9 relative z-10"
               />
             </div>
-            <Select
-              onValueChange={(e) => { setStatusFilter(e); setOffset(0); }}
-            >
+            <div className="md:shrink-0">
+              <Select
+                onValueChange={(e) => { setStatusFilter(e); setOffset(0); }}
+              >
               <SelectTrigger id="audit-planning-status" name="status" aria-label="Filter audit plans by status">
                 <SelectValue placeholder={statusFilter || "All statuses"} />
               </SelectTrigger>
@@ -344,7 +346,8 @@ export function AuditPlanning() {
                 ))}
               </SelectContent>
             </Select>
-            <div className="text-sm font-semibold text-kfl-text">Audit Plans</div>
+            </div>
+            <div className="text-sm font-semibold text-kfl-text md:shrink-0">Audit Plans</div>
           </div>
 
           {isError ? (
