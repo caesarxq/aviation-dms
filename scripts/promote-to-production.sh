@@ -31,7 +31,7 @@ echo "============================================================"
 # --- Verify image exists in registry ---
 echo "--- Verifying image in registry ---"
 REGISTRY="${REGISTRY:-ghcr.io}"
-REPO_NAME="${REPO_NAME:-kfl-aviation-dms}"
+REPO_NAME="${REPO_NAME:-caesarxq/aviation-dms}"
 if ! sudo docker manifest inspect "${REGISTRY}/${REPO_NAME}/backend:${IMAGE_TAG}" >/dev/null 2>&1; then
   echo "ERROR: Image backend:${IMAGE_TAG} not found in registry"
   exit 1
