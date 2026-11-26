@@ -28,6 +28,7 @@ services:
       ZOHO_CLIENT_SECRET_FILE: /run/secrets/zoho_client_secret
       ZOHO_REFRESH_TOKEN_FILE: /run/secrets/zoho_refresh_token
       ZOHO_BUGTRACKER_PORTAL: "${ZOHO_BUGTRACKER_PORTAL:-kfldotke}"
+      ZOHO_BUGTRACKER_PORTAL_ID: "${ZOHO_BUGTRACKER_PORTAL_ID:-}"
       ZOHO_BUGTRACKER_PROJECT_ID: "${ZOHO_BUGTRACKER_PROJECT_ID:-2730932000000114802}"
     secrets:
       - zoho_client_id

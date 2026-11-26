@@ -45,6 +45,8 @@ else:
     print("ZOHO_ACCESS_TOKEN: not set (OAuth refresh credentials incomplete)")
 print(f"ZOHO_BUGTRACKER_PORTAL: {'configured' if sync.ZOHO_BUGTRACKER_PORTAL else 'missing'}")
 print(f"ZOHO_BUGTRACKER_PROJECT_ID: {'configured' if sync.ZOHO_BUGTRACKER_PROJECT_ID else 'missing'}")
+print(f"BugTracker API portal segment: {sync._api_portal()}")
+print(f"BugTracker API collection URL: {sync._bug_collection_url()}")
 
 async def check_schema():
     db = await get_db()
