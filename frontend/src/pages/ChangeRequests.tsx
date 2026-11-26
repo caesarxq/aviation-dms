@@ -8,9 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { useAuth } from "../auth/AuthContext";
 
 export function ChangeRequests() {
   const qc = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission("change_request:create");
+  const canReview = hasPermission("change_request:review");
+  const canApprove = hasPermission("change_request:approve");
   const [statusFilter, setStatusFilter] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [viewingCr, setViewingCr] = useState<ChangeRequest | null>(null);
@@ -23,9 +28,11 @@ export function ChangeRequests() {
   });
   const [commentForm, setCommentForm] = useState("");
 
+  // The register is restricted to reviewers; do not fire a request that would 403.
   const { data: crs = [], isLoading } = useQuery({
     queryKey: ["change-requests", statusFilter],
     queryFn: () => safetyApi.listChangeRequests({ status: statusFilter || undefined }),
+    enabled: canReview,
   });
 
   const createMutation = useMutation({
@@ -113,9 +120,11 @@ export function ChangeRequests() {
           <h1 className="app-title">Change Requests</h1>
           <p className="app-subtitle">Propose, review, approve, and track controlled document changes.</p>
         </div>
-        <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
-          <Plus size={16} /> New Change Request
-        </Button>
+        {canCreate && (
+          <Button onClick={() => setIsCreating(true)} variant="default" size="sm">
+            <Plus size={16} /> New Change Request
+          </Button>
+        )}
       </header>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-6">
@@ -165,7 +174,14 @@ export function ChangeRequests() {
           </div>
         </div>
 
-        {isLoading ? (
+        {!canReview ? (
+          <div className="p-10 text-center">
+            <p className="text-sm font-bold text-kfl-text">The change-request register is restricted.</p>
+            <p className="mt-1 text-xs text-kfl-muted">
+              Viewing it requires the review permission. You can still raise a change request.
+            </p>
+          </div>
+        ) : isLoading ? (
           <div className="p-10 text-center text-sm text-kfl-muted">Loading change requests…</div>
         ) : crs.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
@@ -200,7 +216,7 @@ export function ChangeRequests() {
                       <Button variant="outline" size="sm" onClick={() => setViewingCr(cr)}>
                         View
                       </Button>
-                      {cr.status === "open" && (
+                      {canCreate && cr.status === "open" && (
                         <>
                           <Button variant="outline" size="sm" onClick={() => {
                             setForm({
@@ -323,7 +339,7 @@ export function ChangeRequests() {
                   <Button variant="outline" size="sm" onClick={() => setViewingCr(null)}>
                     Close
                   </Button>
-                  {viewingCr.status === "open" && (
+                  {canCreate && viewingCr.status === "open" && (
                     <Button
                       id="cr_submit"
                       variant="default"
@@ -334,7 +350,7 @@ export function ChangeRequests() {
                       {submitMutation.isPending ? "Submitting…" : "Submit for Review"}
                     </Button>
                   )}
-                  {viewingCr.status === "submitted" && (
+                  {canReview && viewingCr.status === "submitted" && (
                     <>
                       <Button
                         id="cr_review"
@@ -347,7 +363,7 @@ export function ChangeRequests() {
                       </Button>
                     </>
                   )}
-                  {viewingCr.status === "under_review" && (
+                  {canApprove && viewingCr.status === "under_review" && (
                     <>
                       <Button
                         id="cr_approve"
