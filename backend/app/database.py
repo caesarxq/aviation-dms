@@ -2397,6 +2397,23 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_risk_assessment_hazards_hazard ON risk_assessment_hazards(hazard_id)"
         )
+        # Migration: per-integration sync health, so a silently stalled job is
+        # visible in the app instead of only in a host log file.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS integration_sync_status (
+                integration TEXT PRIMARY KEY,
+                last_started_at TEXT,
+                last_finished_at TEXT,
+                last_status TEXT,
+                last_success_at TEXT,
+                last_failure_at TEXT,
+                last_error TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                last_created INTEGER NOT NULL DEFAULT 0,
+                last_updated INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )"""
+        )
         # Migration: add missing columns to existing audit_findings table
         for column, column_type in (
             ("finding_number", "TEXT"),
