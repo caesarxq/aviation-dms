@@ -204,19 +204,25 @@ async def _create_bug_in_bugtracker(feedback: dict) -> Optional[str]:
     url = _bug_collection_url()
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
-        "Content-Type": "application/json",
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, headers=headers, json=payload, timeout=30)
+            # Zoho Projects/BugTracker REST v1 reads create fields from a
+            # form-encoded body. A JSON body is not parsed at all and the API
+            # replies 400 {"error":{"code":6831,"message":"Input Parameter Missing"}}.
+            resp = await client.post(url, headers=headers, data=payload, timeout=30)
             if resp.status_code in (200, 201):
-                data = resp.json()
-                bug_id = data.get("bug_id") or data.get("id") or data.get("bug", {}).get("bug_id")
+                bug_id = _extract_bug_id(resp.json())
                 if bug_id:
-                    await _update_feedback_bugtracker_id(feedback["feedback_id"], str(bug_id), "synced")
+                    await _update_feedback_bugtracker_id(feedback["feedback_id"], bug_id, "synced")
                     logger.info("Created BugTracker bug %s for feedback %s", bug_id, feedback["feedback_id"])
-                    return str(bug_id)
+                    return bug_id
+                logger.warning(
+                    "BugTracker create returned %s without a bug id: %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
             else:
                 logger.warning(
                     "BugTracker bug creation failed: %s %s",
@@ -337,6 +343,31 @@ async def sync_bugtracker_updates() -> int:
             logger.exception("Failed to pull BugTracker status for bug %s: %s", bug_id, exc)
 
     return updated
+
+
+def _extract_bug_id(payload: Any) -> Optional[str]:
+    """Return the new bug's id from a BugTracker create response.
+
+    Zoho answers `POST .../bugs/` with `{"bugs": [{"id_string": "..."}]}`; older
+    payloads and wrappers use `id`, `bug_id`, or a single `bug` object.
+    """
+    candidates = []
+    if isinstance(payload, dict):
+        bugs = payload.get("bugs")
+        if isinstance(bugs, list) and bugs:
+            candidates.append(bugs[0])
+        elif isinstance(payload.get("bug"), dict):
+            candidates.append(payload["bug"])
+        candidates.append(payload)
+
+    for node in candidates:
+        if not isinstance(node, dict):
+            continue
+        for key in ("id_string", "bug_id", "id"):
+            value = node.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+    return None
 
 
 def _extract_bug_status(payload: Any) -> Optional[str]:

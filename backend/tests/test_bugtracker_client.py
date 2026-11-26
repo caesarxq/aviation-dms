@@ -5,6 +5,8 @@ Zoho's BugTracker REST API mounts bugs under
 /api/v1/projects/{project}/bugs, which returns Zoho's HTML "Page Not Found"
 (observed as HTTP 404 on staging), so these tests pin the documented path.
 """
+import asyncio
+
 import pytest
 
 from app import bugtracker_sync
@@ -96,6 +98,113 @@ def test_extract_bug_status_accepts_wrapped_bug_and_legacy_key():
 def test_extract_bug_status_returns_none_when_absent():
     assert bugtracker_sync._extract_bug_status({"bugs": []}) is None
     assert bugtracker_sync._extract_bug_status({"unexpected": True}) is None
+
+
+def test_extract_bug_id_handles_zoho_create_response():
+    payload = {"bugs": [{"id_string": "170876000001851001", "title": "x"}]}
+
+    assert bugtracker_sync._extract_bug_id(payload) == "170876000001851001"
+
+
+def test_extract_bug_id_accepts_alternate_keys_and_wrapper():
+    assert bugtracker_sync._extract_bug_id({"bug": {"bug_id": 42}}) == "42"
+    assert bugtracker_sync._extract_bug_id({"id": "7"}) == "7"
+    assert bugtracker_sync._extract_bug_id({"bugs": []}) is None
+    assert bugtracker_sync._extract_bug_id({"error": {"code": 6831}}) is None
+
+
+def test_create_posts_form_encoded_not_json(monkeypatch):
+    """Zoho returns 400/6831 'Input Parameter Missing' when the body is JSON."""
+    captured = {}
+
+    class _Response:
+        status_code = 201
+
+        def json(self):
+            return {"bugs": [{"id_string": "999"}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            captured.update(url=url, **kwargs)
+            return _Response()
+
+    async def fake_token():
+        return "token"
+
+    async def fake_store(feedback_id, bugtracker_id, state):
+        captured["stored"] = (feedback_id, bugtracker_id, state)
+
+    monkeypatch.setattr(bugtracker_sync.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(bugtracker_sync, "_get_access_token", fake_token)
+    monkeypatch.setattr(bugtracker_sync, "_update_feedback_bugtracker_id", fake_store)
+
+    bug_id = asyncio.run(
+        bugtracker_sync._create_bug_in_bugtracker(
+            {
+                "feedback_id": "FBK-1",
+                "ticket_number": "FBK-20260101-0001",
+                "issue_type": "bug",
+                "app_area": "Document Viewer",
+                "goal": "Open a document",
+                "priority": "P2",
+            }
+        )
+    )
+
+    assert bug_id == "999"
+    assert captured["url"].endswith("/restapi/portal/kfldotke/projects/2730932000000114802/bugs/")
+    assert "json" not in captured, "must not send a JSON body"
+    assert captured["data"]["title"].startswith("[FBK-20260101-0001]")
+    assert captured["data"]["priority"] == "Medium"
+    assert captured["stored"] == ("FBK-1", "999", "synced")
+
+
+def test_create_reports_failure_without_raising(monkeypatch):
+    captured = {}
+
+    class _Response:
+        status_code = 400
+        text = '{"error":{"code":6831,"message":"Input Parameter Missing"}}'
+
+        def json(self):
+            return {"error": {"code": 6831}}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            return _Response()
+
+    async def fake_token():
+        return "token"
+
+    async def fake_store(feedback_id, bugtracker_id, state):
+        captured["stored"] = bugtracker_id
+
+    monkeypatch.setattr(bugtracker_sync.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(bugtracker_sync, "_get_access_token", fake_token)
+    monkeypatch.setattr(bugtracker_sync, "_update_feedback_bugtracker_id", fake_store)
+
+    assert asyncio.run(
+        bugtracker_sync._create_bug_in_bugtracker({"feedback_id": "FBK-1", "priority": "P3"})
+    ) is None
+    assert "stored" not in captured
 
 
 @pytest.mark.parametrize(
