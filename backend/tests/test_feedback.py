@@ -217,3 +217,83 @@ def test_list_feedback_with_issue_type_filter():
     assert response.status_code == 200, response.text
     data = response.json()
     assert isinstance(data, list)
+
+
+def test_upload_feedback_media():
+    """Test uploading media to a feedback record."""
+    payload = {
+        "issue_type": "bug",
+        "app_area": "media-test",
+        "goal": "Test media upload",
+        "impact": "workaround",
+        "observation_time": "2026-01-15T10:00:00Z",
+        "contact": "pilot1",
+    }
+    create_response = client.post("/api/p0/feedback", json=payload, headers=_admin_headers())
+    assert create_response.status_code == 201, create_response.text
+    feedback_id = create_response.json()["feedback_id"]
+
+    files = {"file": ("screenshot.png", b"\x89PNG\r\n\x1a\nfake-png-data", "image/png")}
+    response = client.post(
+        f"/api/p0/feedback/{feedback_id}/media",
+        files=files,
+        headers=_admin_headers(),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "media_path" in data
+    assert "media_url" in data
+    assert feedback_id in data["media_path"]
+
+
+def test_upload_feedback_media_feedback_not_found():
+    """Test uploading media to a non-existent feedback record."""
+    files = {"file": ("screenshot.png", b"fake-data", "image/png")}
+    response = client.post(
+        "/api/p0/feedback/FBK-NONEXISTENT/media",
+        files=files,
+        headers=_admin_headers(),
+    )
+    assert response.status_code == 404, response.text
+
+
+def test_upload_feedback_media_no_file():
+    """Test uploading media without providing a file."""
+    payload = {
+        "issue_type": "bug",
+        "app_area": "no-file-test",
+        "goal": "Test no file upload",
+        "impact": "workaround",
+        "observation_time": "2026-01-15T10:00:00Z",
+        "contact": "pilot1",
+    }
+    create_response = client.post("/api/p0/feedback", json=payload, headers=_admin_headers())
+    assert create_response.status_code == 201, create_response.text
+    feedback_id = create_response.json()["feedback_id"]
+
+    response = client.post(
+        f"/api/p0/feedback/{feedback_id}/media",
+        headers=_admin_headers(),
+    )
+    assert response.status_code == 400, response.text
+
+
+def test_get_feedback():
+    """Test getting a single feedback record by ID."""
+    payload = {
+        "issue_type": "bug",
+        "app_area": "get-test",
+        "goal": "Test get feedback",
+        "impact": "workaround",
+        "observation_time": "2026-01-15T10:00:00Z",
+        "contact": "pilot1",
+    }
+    create_response = client.post("/api/p0/feedback", json=payload, headers=_admin_headers())
+    assert create_response.status_code == 201, create_response.text
+    feedback_id = create_response.json()["feedback_id"]
+
+    response = client.get(f"/api/p0/feedback/{feedback_id}", headers=_admin_headers())
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["feedback_id"] == feedback_id
+    assert data["goal"] == "Test get feedback"

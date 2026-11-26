@@ -3902,7 +3902,7 @@ async def upload_feedback_media(feedback_id: str, request: Request):
     filename = upload.filename or "feedback-media"
     # Sanitize filename
     safe_name = "".join(c for c in filename if c.isalnum() or c in "._-") or "feedback-media"
-    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(DB_PATH.parent / "feedback_media")))
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
     media_path = media_dir / f"{feedback_id}_{safe_name}"
 
     try:
@@ -3932,13 +3932,29 @@ async def download_feedback_media(feedback_id: str, filename: str, request: Requ
     from pathlib import Path
     from fastapi.responses import FileResponse
 
-    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(DB_PATH.parent / "feedback_media")))
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
     media_path = media_dir / f"{feedback_id}_{filename}"
 
     if not media_path.exists():
         raise HTTPException(status_code=404, detail="Media not found")
 
     return FileResponse(path=str(media_path))
+
+
+@router.get("/feedback/{feedback_id}", response_model=FeedbackResponse)
+async def get_feedback(feedback_id: str, request: Request):
+    """Get a single feedback record by ID, including its media path."""
+    _check(request, "feedback:read")
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT * FROM feedback WHERE feedback_id = ?", (feedback_id,),
+        )).fetchone()
+    finally:
+        await db.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return FeedbackResponse(**dict(row))
 
 
 @router.get("/feedback", response_model=List[FeedbackResponse])
