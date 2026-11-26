@@ -431,3 +431,54 @@ def test_accountable_manager_approves_a_head_of_quality_authored_change(client):
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "approved"
     assert response.json()["approved_by"] == "u-accountable"
+
+
+def test_quality_manual_approver_migration_upgrades_an_existing_database(client):
+    """Staging already held the old mapping; the seed cannot update it."""
+    import asyncio
+    import os
+    import sqlite3
+
+    from app import database as dbmod
+
+    db_path = os.environ["DMS_DB_PATH"]
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE manual_ownership SET approver_role = 'head_quality' WHERE doc_class = 'quality_manual'"
+        )
+        conn.execute("DELETE FROM app_settings WHERE key = 'manual_ownership_quality_approver'")
+        conn.commit()
+        legacy = conn.execute(
+            "SELECT approver_role FROM manual_ownership WHERE doc_class = 'quality_manual'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert legacy == "head_quality"
+
+    asyncio.run(dbmod.apply_catalogue_corrections())
+
+    conn = sqlite3.connect(db_path)
+    try:
+        upgraded = conn.execute(
+            "SELECT approver_role FROM manual_ownership WHERE doc_class = 'quality_manual'"
+        ).fetchone()[0]
+        marker = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'manual_ownership_quality_approver'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert upgraded == "accountable_manager"
+    assert marker[0] == "accountable_manager"
+
+    # Idempotent: a second startup must not change it back or fail.
+    asyncio.run(dbmod.apply_catalogue_corrections())
+    conn = sqlite3.connect(db_path)
+    try:
+        again = conn.execute(
+            "SELECT approver_role FROM manual_ownership WHERE doc_class = 'quality_manual'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert again == "accountable_manager"
