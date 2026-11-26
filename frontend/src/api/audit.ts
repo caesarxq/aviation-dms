@@ -136,35 +136,35 @@ export interface AuditFindingListParams {
 
 export const auditApi = {
   listAuditReports: (params?: AuditReportListParams) =>
-    api.get<AuditReport[]>("/p3/audit-reports", { params }).then((r: any) => r.data),
+    api.get<AuditReport[]>("/p0/audit-reports", { params }).then((r: any) => r.data),
   createAuditReport: (data: any) =>
-    api.post<AuditReport>("/p3/audit-reports", data).then((r: any) => r.data),
+    api.post<AuditReport>("/p0/audit-reports", data).then((r: any) => r.data),
 
   listAuditReportImports: (params?: { status?: AuditReportImportStatus; limit?: number; offset?: number }): Promise<AuditReportImport[]> =>
-    api.get<AuditReportImport[]>("/p3/audit-report-imports", { params }).then((response) => response.data),
+    api.get<AuditReportImport[]>("/p0/audit-report-imports", { params }).then((response) => response.data),
   getAuditReportImport: (id: string): Promise<AuditReportImport> =>
-    api.get<AuditReportImport>(`/p3/audit-report-imports/${encodeURIComponent(id)}`).then((response) => response.data),
+    api.get<AuditReportImport>(`/p0/audit-report-imports/${encodeURIComponent(id)}`).then((response) => response.data),
   createAuditReportImport: (data: AuditReportImportCreate): Promise<AuditReportImport> =>
-    api.post<AuditReportImport>("/p3/audit-report-imports", data).then((response) => response.data),
+    api.post<AuditReportImport>("/p0/audit-report-imports", data).then((response) => response.data),
   verifyAuditReportImport: (id: string, data: AuditReportImportReview): Promise<AuditReportImportVerificationResult> =>
-    api.post<AuditReportImportVerificationResult>(`/p3/audit-report-imports/${encodeURIComponent(id)}/verify`, data).then((response) => response.data),
+    api.post<AuditReportImportVerificationResult>(`/p0/audit-report-imports/${encodeURIComponent(id)}/verify`, data).then((response) => response.data),
   rejectAuditReportImport: (id: string, reason: string): Promise<AuditReportImportRejectionResult> =>
-    api.post<AuditReportImportRejectionResult>(`/p3/audit-report-imports/${encodeURIComponent(id)}/reject`, { reason }).then((response) => response.data),
+    api.post<AuditReportImportRejectionResult>(`/p0/audit-report-imports/${encodeURIComponent(id)}/reject`, { reason }).then((response) => response.data),
 
   listAuditFindings: (params?: AuditFindingListParams) =>
-    api.get<AuditFinding[]>("/p3/audit-findings", { params }).then((r: any) => r.data),
+    api.get<AuditFinding[]>("/p0/audit-findings", { params }).then((r: any) => r.data),
   getAuditFinding: (id: string) =>
-    api.get<AuditFinding>(`/p3/audit-findings/${encodeURIComponent(id)}`).then((r: any) => r.data),
+    api.get<AuditFinding>(`/p0/audit-findings/${encodeURIComponent(id)}`).then((r: any) => r.data),
   createAuditFinding: (data: any) =>
-    api.post<AuditFinding>("/p3/audit-findings", data).then((r: any) => r.data),
+    api.post<AuditFinding>("/p0/audit-findings", data).then((r: any) => r.data),
   updateAuditFinding: (id: string, data: any) =>
-    api.patch<AuditFinding>(`/p3/audit-findings/${id}`, data).then((r: any) => r.data),
+    api.patch<AuditFinding>(`/p0/audit-findings/${id}`, data).then((r: any) => r.data),
   linkCorrectiveAction: (id: string, data: any) =>
-    api.post(`/p3/audit-findings/${id}/car`, data).then((r: any) => r.data),
+    api.post(`/p0/audit-findings/${id}/car`, data).then((r: any) => r.data),
 
   getAuditFindingsSummary: (department?: string) =>
     api
-      .get<any>("/p3/audit-findings/summary", { params: { department } })
+      .get<any>("/p0/audit-findings/summary", { params: { department } })
       .then((r: any) => r.data),
 };
 
