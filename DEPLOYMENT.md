@@ -47,6 +47,7 @@ Production promotion requires a separate dispatch with `environment=production`,
 | `scripts/configure-bugtracker-secrets.sh` | Prompt for and store protected Zoho BugTracker OAuth secret files on the host (paths only in `.env.staging`) |
 | `scripts/verify-bugtracker-staging.sh` | Read-only check of BugTracker configuration, schema, and image contents; `--refresh-token-check` tests OAuth refresh only |
 | `scripts/install-bugtracker-cron.sh` | Inspect (`--check`, default), install (`--install`), or remove (`--remove`) the scheduled BugTracker sync in `/etc/cron.d` |
+| `scripts/test-bugtracker-create.sh` | `--check` (default), `--create`, `--cleanup` — proves the BugTracker create path with one labelled disposable feedback row |
 
 ### Zoho BugTracker scheduling
 
