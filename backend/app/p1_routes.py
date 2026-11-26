@@ -14,6 +14,13 @@ from .notifications import send_email, get_notifications, mark_notification_read
 from .audit import log_audit_event
 from .rbac import has_permission
 from .p0_auth import same_principal
+from .manual_authority import (
+    authority_for_document,
+    can_approve,
+    can_review,
+    approve_denial,
+    review_denial,
+)
 from .p1_models import *
 from .p1_models import _validate_canonical_date
 from .asset_service import render_html_template, render_asset_png, get_template_info, list_templates
@@ -3555,6 +3562,11 @@ async def review_change_request(cr_id: str, request: Request, payload: Optional[
             raise HTTPException(status_code=400, detail="Only submitted change requests can be reviewed")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot review their own change request (separation of duties)")
+        authority = await authority_for_document(db, cr["document_id"])
+        if not authority:
+            raise HTTPException(status_code=404, detail="Change request targets a document that does not exist")
+        if not can_review(_role(request), authority):
+            raise HTTPException(status_code=403, detail=review_denial(_role(request), authority))
         await db.execute(
             "UPDATE change_requests SET status = 'under_review', reviewer_id = ?, reviewed_at = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
             (actor, now, now, actor, cr_id),
@@ -3581,6 +3593,9 @@ async def approve_change_request(cr_id: str, request: Request, payload: Optional
             raise HTTPException(status_code=400, detail="Only change requests under review can be approved")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot approve their own change request (separation of duties)")
+        authority = await authority_for_document(db, cr["document_id"])
+        if not can_approve(_role(request), authority):
+            raise HTTPException(status_code=403, detail=approve_denial(_role(request), authority))
         await db.execute(
             "UPDATE change_requests SET status = 'approved', approver_id = ?, approved_at = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
             (actor, now, now, actor, cr_id),
@@ -3607,6 +3622,9 @@ async def reject_change_request(cr_id: str, request: Request, payload: Optional[
             raise HTTPException(status_code=400, detail="Only change requests under review can be rejected")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot reject their own change request (separation of duties)")
+        authority = await authority_for_document(db, cr["document_id"])
+        if not can_approve(_role(request), authority):
+            raise HTTPException(status_code=403, detail=approve_denial(_role(request), authority))
         await db.execute(
             "UPDATE change_requests SET status = 'rejected', approver_id = ?, rejected_at = ?, rejection_reason = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
             (actor, now, payload.rejection_reason if payload else None, now, actor, cr_id),
@@ -3634,6 +3652,9 @@ async def publish_change_request(cr_id: str, request: Request):
             raise HTTPException(status_code=400, detail="Only approved change requests can be published")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot publish their own change request (separation of duties)")
+        authority = await authority_for_document(db, cr["document_id"])
+        if not can_approve(_role(request), authority):
+            raise HTTPException(status_code=403, detail=approve_denial(_role(request), authority))
         await db.execute(
             "UPDATE change_requests SET status = 'published', updated_at = ?, updated_by = ? WHERE cr_id = ?",
             (now, actor, cr_id),
