@@ -4,13 +4,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/check-bundle-size.js",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test": "vitest run",
     "test:watch": "vitest",
     "mutation:pilot": "stryker run",
-    "audit:forms": "node scripts/audit-form-controls.mjs"
+    "audit:forms": "node scripts/audit-form-controls.mjs",
+    "check-bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.4.1",
