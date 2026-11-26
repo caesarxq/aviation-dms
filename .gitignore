@@ -24,6 +24,7 @@ __pycache__/
 .env.local
 .env.staging
 .env.prod
+.env.zoho
 
 # IDE
 .vscode/
