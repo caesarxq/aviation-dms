@@ -26,7 +26,7 @@ from .audit import log_audit_event
 from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
-from .bugtracker_sync import handle_bugtracker_webhook, sync_bugtracker_updates
+from .bugtracker_sync import handle_bugtracker_webhook, run_full_sync
 from .upload_safety import (
     UploadMalwareDetected,
     UploadQuotaExceeded,
@@ -3403,6 +3403,9 @@ async def system_admin_observability(request: Request):
         scheduler_task = getattr(scheduler, "_task", None) if scheduler else None
         scheduler_running = bool(scheduler and getattr(scheduler, "_running", False) and scheduler_task and not scheduler_task.done())
         from .version_info import get_version_info
+
+        from .bugtracker_sync import get_sync_status
+        bugtracker_status = await get_sync_status()
         return {
             "generated_at": now_iso(),
             "version": get_version_info(),
@@ -3422,6 +3425,7 @@ async def system_admin_observability(request: Request):
                     ),
                 },
                 "scanner": scanner_status,
+                "bugtracker_sync": bugtracker_status,
             },
             "database": {"status": "ok" if integrity and integrity[0] == "ok" else "degraded", "integrity": integrity[0] if integrity else "unknown"},
             "tables": table_counts,
@@ -3841,5 +3845,10 @@ async def bugtracker_cron_sync(request: Request):
     if not hmac.compare_digest(auth[7:], cron_secret):
         raise HTTPException(status_code=403, detail="Invalid cron secret")
 
-    synced = await sync_bugtracker_updates()
-    return {"synced": synced}
+    result = await run_full_sync()
+    return {
+        "status": result["status"],
+        "created": result["created"],
+        "synced": result["updated"],
+        "error": result["error"],
+    }

@@ -82,29 +82,29 @@ logger = logging.getLogger(__name__)
 
 
 async def run_sync():
-    """Run both sync operations."""
+    """Run both sync operations and record the outcome for observability."""
     start_time = datetime.now()
     logger.info("=" * 60)
     logger.info("Starting BugTracker sync at %s", start_time.isoformat())
-    
+
     # Import after setting up path
-    from app.bugtracker_sync import sync_all_pending, sync_bugtracker_updates
-    
+    from app.bugtracker_sync import run_full_sync
+
     try:
-        # 1. Sync pending feedback to BugTracker
-        logger.info("Running sync_all_pending...")
-        synced_count = await sync_all_pending()
-        logger.info("sync_all_pending completed: %d records synced", synced_count)
-        
-        # 2. Pull status updates from BugTracker
-        logger.info("Running sync_bugtracker_updates...")
-        updated_count = await sync_bugtracker_updates()
-        logger.info("sync_bugtracker_updates completed: %d records updated", updated_count)
-        
+        result = await run_full_sync()
     except Exception as exc:
         logger.exception("BugTracker sync failed: %s", exc)
         return 1
-    
+
+    logger.info("sync_all_pending completed: %d records synced", result["created"])
+    logger.info("sync_bugtracker_updates completed: %d records updated", result["updated"])
+    if result["status"] == "failed":
+        logger.error("BugTracker sync status: failed (%s)", result["error"])
+        return 1
+    if result["status"] == "skipped":
+        logger.warning("BugTracker sync skipped: %s", result["error"])
+        return 0
+
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
     logger.info("BugTracker sync completed in %.2f seconds at %s", duration, end_time.isoformat())

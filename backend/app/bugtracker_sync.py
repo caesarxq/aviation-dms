@@ -492,6 +492,142 @@ async def _get_bugtracker_bug_status(access_token: str, bug_id: str) -> Optional
     return None
 
 
+async def record_sync_result(
+    *,
+    started_at: str,
+    finished_at: str,
+    created: int,
+    updated: int,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    """Persist the outcome of a sync run for the observability view.
+
+    A sync that silently stops is otherwise only visible by tailing a host log,
+    which is how a wrong API path and a rejected payload stayed invisible.
+    """
+    from app.database import get_db
+
+    now = datetime.now(timezone.utc).isoformat()
+    succeeded = status == "success"
+    failed = status == "failed"
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO integration_sync_status
+               (integration, last_started_at, last_finished_at, last_status,
+                last_success_at, last_failure_at, last_error, consecutive_failures,
+                last_created, last_updated, updated_at)
+               VALUES ('bugtracker', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(integration) DO UPDATE SET
+                 last_started_at = excluded.last_started_at,
+                 last_finished_at = excluded.last_finished_at,
+                 last_status = excluded.last_status,
+                 last_success_at = COALESCE(excluded.last_success_at, integration_sync_status.last_success_at),
+                 last_failure_at = COALESCE(excluded.last_failure_at, integration_sync_status.last_failure_at),
+                 last_error = excluded.last_error,
+                 consecutive_failures = CASE
+                   WHEN ? = 1 THEN 0
+                   WHEN ? = 1 THEN integration_sync_status.consecutive_failures + 1
+                   ELSE integration_sync_status.consecutive_failures
+                 END,
+                 last_created = excluded.last_created,
+                 last_updated = excluded.last_updated,
+                 updated_at = excluded.updated_at""",
+            (
+                started_at, finished_at, status,
+                finished_at if succeeded else None,
+                finished_at if failed else None,
+                (error or "")[:500] if failed else None,
+                1 if failed else 0,
+                created, updated, now,
+                1 if succeeded else 0,
+                1 if failed else 0,
+            ),
+        )
+        await db.commit()
+    except Exception as exc:
+        logger.exception("Failed to record BugTracker sync status: %s", exc)
+    finally:
+        await db.close()
+
+
+async def get_sync_status() -> dict:
+    """Return the last recorded sync outcome, or a never-run shape."""
+    from app.database import get_db
+
+    status = {
+        "integration": "bugtracker",
+        "configured": _is_configured(),
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_status": "never_run",
+        "last_success_at": None,
+        "last_failure_at": None,
+        "last_error": None,
+        "consecutive_failures": 0,
+        "last_created": 0,
+        "last_updated": 0,
+    }
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT * FROM integration_sync_status WHERE integration = 'bugtracker'"
+        )).fetchone()
+    except Exception as exc:
+        logger.exception("Failed to read BugTracker sync status: %s", exc)
+        row = None
+    finally:
+        await db.close()
+
+    if row:
+        record = dict(row)
+        for key in status:
+            if key in record and key not in ("integration", "configured"):
+                status[key] = record[key]
+    status["healthy"] = status["last_status"] in ("success", "skipped") and status["consecutive_failures"] == 0
+    return status
+
+
+async def run_full_sync() -> dict:
+    """Run push then pull once, recording the outcome for observability."""
+    started_at = datetime.now(timezone.utc).isoformat()
+    created = 0
+    updated = 0
+    error = None
+
+    if not _is_configured():
+        status = "skipped"
+        error = "not_configured"
+    else:
+        status = "success"
+        try:
+            created = await sync_all_pending()
+            updated = await sync_bugtracker_updates()
+        except Exception as exc:
+            status = "failed"
+            error = f"{type(exc).__name__}: {exc}"
+            logger.exception("BugTracker sync failed: %s", exc)
+
+    finished_at = datetime.now(timezone.utc).isoformat()
+    await record_sync_result(
+        started_at=started_at,
+        finished_at=finished_at,
+        created=created,
+        updated=updated,
+        status=status,
+        error=error,
+    )
+    return {
+        "status": status,
+        "created": created,
+        "updated": updated,
+        "error": error,
+        "started_at": started_at,
+        "finished_at": finished_at,
+    }
+
+
 async def handle_bugtracker_webhook(webhook_data: dict) -> dict:
     """
     Handle incoming webhook from Zoho BugTracker.

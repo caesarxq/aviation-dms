@@ -185,6 +185,118 @@ async def _run_pending_without_config_guard(monkeypatch_ignored=None):
         bugtracker_sync._is_configured = original
 
 
+# --- sync health -------------------------------------------------------------
+
+def test_sync_status_defaults_before_any_run(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    async def clear():
+        db = await get_db()
+        try:
+            await db.execute("DELETE FROM integration_sync_status")
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(clear())
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+
+    assert status["last_status"] == "never_run"
+    assert status["consecutive_failures"] == 0
+    assert status["healthy"] is False
+
+
+def test_successful_run_is_recorded(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    async def fake_push():
+        return 2
+
+    async def fake_pull():
+        return 1
+
+    monkeypatch.setattr(bugtracker_sync, "sync_all_pending", fake_push)
+    monkeypatch.setattr(bugtracker_sync, "sync_bugtracker_updates", fake_pull)
+
+    result = asyncio.run(bugtracker_sync.run_full_sync())
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+
+    assert result["status"] == "success"
+    assert result["created"] == 2 and result["updated"] == 1
+    assert status["last_status"] == "success"
+    assert status["last_created"] == 2
+    assert status["last_updated"] == 1
+    assert status["last_success_at"]
+    assert status["consecutive_failures"] == 0
+    assert status["healthy"] is True
+
+
+def test_failing_run_records_error_and_increments_failures(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    async def boom():
+        raise RuntimeError("zoho exploded")
+
+    monkeypatch.setattr(bugtracker_sync, "sync_all_pending", boom)
+
+    first = asyncio.run(bugtracker_sync.run_full_sync())
+    second = asyncio.run(bugtracker_sync.run_full_sync())
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+
+    assert first["status"] == "failed"
+    assert "zoho exploded" in first["error"]
+    assert second["status"] == "failed"
+    assert status["consecutive_failures"] == 2
+    assert status["last_failure_at"]
+    assert "zoho exploded" in status["last_error"]
+    assert status["healthy"] is False
+
+
+def test_success_clears_the_failure_counter(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    async def boom():
+        raise RuntimeError("nope")
+
+    async def ok():
+        return 0
+
+    monkeypatch.setattr(bugtracker_sync, "sync_all_pending", boom)
+    asyncio.run(bugtracker_sync.run_full_sync())
+
+    monkeypatch.setattr(bugtracker_sync, "sync_all_pending", ok)
+    monkeypatch.setattr(bugtracker_sync, "sync_bugtracker_updates", ok)
+    asyncio.run(bugtracker_sync.run_full_sync())
+
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+    assert status["consecutive_failures"] == 0
+    assert status["last_status"] == "success"
+    assert status["last_error"] is None
+    assert status["healthy"] is True
+
+
+def test_unconfigured_run_is_skipped_not_failed(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: False)
+
+    result = asyncio.run(bugtracker_sync.run_full_sync())
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+
+    assert result["status"] == "skipped"
+    assert status["last_status"] == "skipped"
+    assert status["consecutive_failures"] == 0
+
+
+def test_observability_exposes_bugtracker_sync(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    response = client.get("/api/p0/admin/observability", headers=_admin_headers())
+
+    assert response.status_code == 200, response.text
+    block = response.json()["health"]["bugtracker_sync"]
+    assert block["integration"] == "bugtracker"
+    assert "last_status" in block and "consecutive_failures" in block
+
+
 # --- routes ------------------------------------------------------------------
 
 def test_cron_sync_endpoint_fails_closed_without_secret(monkeypatch):
