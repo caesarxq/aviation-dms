@@ -2353,6 +2353,7 @@ async def init_db():
         await _add_column_if_missing(db, "corrective_actions", "audit_report_id", "TEXT")
         await _add_column_if_missing(db, "feedback", "bugtracker_id", "TEXT")
         await _add_column_if_missing(db, "feedback", "bugtracker_url", "TEXT")
+        await _add_column_if_missing(db, "feedback", "media_path", "TEXT")
         feedback_column_cursor = await db.execute("PRAGMA table_info(feedback)")
         feedback_columns = {row["name"] for row in await feedback_column_cursor.fetchall()}
         if "bugtracker_sync_state" not in feedback_columns:

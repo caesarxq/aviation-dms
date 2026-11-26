@@ -176,6 +176,11 @@ def _map_feedback_to_bugtracker(feedback: dict) -> dict:
     part of the URL, and Zoho rejects unknown members such as a nested
     `custom_fields` object, so the remaining detail goes into the description.
     """
+    media_line = ""
+    media_path = feedback.get("media_path")
+    if media_path:
+        media_line = f"**Media:** {media_path}\n"
+
     return {
         "title": (
             f"[{feedback.get('ticket_number', '')}] "
@@ -192,6 +197,7 @@ def _map_feedback_to_bugtracker(feedback: dict) -> dict:
             f"**Actual Result:** {feedback.get('actual_result', '')}\n"
             f"**Impact:** {feedback.get('impact', '')}\n"
             f"**Contact:** {feedback.get('contact', '')}\n"
+            f"{media_line}"
             f"**Created:** {feedback.get('created_at', '')}\n"
         ),
         "priority": _map_priority(feedback.get("priority", "P3")),

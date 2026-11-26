@@ -26,6 +26,7 @@ export interface AuditFinding {
   audit_id: string;
   finding_number: string;
   area: string;
+  department: string | null;
   level: number;
   title: string;
   description: string | null;

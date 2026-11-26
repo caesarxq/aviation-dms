@@ -43,11 +43,23 @@ export function AuditFindings() {
   const [showForm, setShowForm] = useState(false);
   const [findingNumber, setFindingNumber] = useState("");
   const [area, setArea] = useState("");
+  const [department, setDepartment] = useState("");
   const [level, setLevel] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [auditId, setAuditId] = useState(auditFilter);
   const [mutationError, setMutationError] = useState("");
+  const [closureEvidence, setClosureEvidence] = useState("");
+  const [showCloseModal, setShowCloseModal] = useState(false);
+
+  const DEPARTMENTS = [
+    { value: "quality", label: "Quality" },
+    { value: "safety", label: "Safety" },
+    { value: "security", label: "Security" },
+    { value: "operations", label: "Operations" },
+    { value: "maintenance", label: "Maintenance" },
+    { value: "training", label: "Training" },
+  ];
 
   const createMutation = useMutation({
     mutationFn: (data: any) => auditApi.createAuditFinding(data),
@@ -56,6 +68,7 @@ export function AuditFindings() {
       setShowForm(false);
       setFindingNumber("");
       setArea("");
+      setDepartment("");
       setLevel("");
       setTitle("");
       setDescription("");
@@ -65,16 +78,86 @@ export function AuditFindings() {
     onError: () => setMutationError("Unable to create audit finding. Please check the details and try again."),
   });
 
+  const closeMutation = useMutation({
+    mutationFn: (data: any) => auditApi.updateAuditFinding(detailFinding!.finding_id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audit-findings"] });
+      qc.invalidateQueries({ queryKey: ["audit-finding", detailFinding!.finding_id] });
+      setShowCloseModal(false);
+      setClosureEvidence("");
+    },
+    onError: () => setMutationError("Unable to close audit finding. Please check the details and try again."),
+  });
+
   if (findingId) {
     return (
       <div className="app-page">
         <header className="app-page-header"><div><div className="app-eyebrow">Audit Management</div><h1 className="app-title">Audit Finding Details</h1></div></header>
         {detailError ? <div role="alert" className="app-surface p-5 text-rose-800">Unable to load audit finding details.</div> : detailLoading ? <div className="app-surface p-5">Loading finding…</div> : detailFinding ? (
-          <section className="app-surface space-y-3 p-5">
+          <section className="app-surface space-y-4 p-5">
             <h2 className="text-lg font-bold text-kfl-text">{detailFinding.finding_number}: {detailFinding.title}</h2>
             <p className="text-sm text-kfl-secondary">{detailFinding.description || "No description provided."}</p>
-            <p className="text-sm text-kfl-secondary">Area: {detailFinding.area} · Level {detailFinding.level} · {detailFinding.status.replace(/_/g, " ")}</p>
+            <p className="text-sm text-kfl-secondary">Department: {detailFinding.department || "—"} · Area: {detailFinding.area} · Level {detailFinding.level}</p>
+            <p className="text-sm text-kfl-secondary">Status: {detailFinding.status.replace(/_/g, " ")}{detailFinding.closed_at ? ` · Closed ${detailFinding.closed_at.slice(0, 10)} by ${detailFinding.closed_by || "—"}` : ""}</p>
+            {detailFinding.status === "open" && hasPermission("audit_finding:update") && (
+              <Button
+                type="button"
+                onClick={() =>
+                  closeMutation.mutate({ status: "in_progress" })
+                }
+                disabled={closeMutation.isPending}
+                variant="default"
+                size="sm"
+              >
+                {closeMutation.isPending ? "Starting…" : "Start Investigation"}
+              </Button>
+            )}
+            {detailFinding.status === "in_progress" && hasPermission("audit_finding:close") && (
+              <Button
+                type="button"
+                onClick={() => setShowCloseModal(true)}
+                disabled={closeMutation.isPending}
+                variant="default"
+                size="sm"
+                className="bg-kfl-status-danger-bg text-white hover:bg-kfl-status-danger/90"
+              >
+                {closeMutation.isPending ? "Closing…" : "Close Finding"}
+              </Button>
+            )}
             <Link className="text-sm font-semibold text-kfl-blue underline" to={`/audit-findings?audit_id=${encodeURIComponent(detailFinding.audit_id)}`}>Back to audit findings</Link>
+            {showCloseModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="app-surface w-full max-w-md p-5">
+                  <h3 className="text-lg font-bold text-kfl-text mb-3">Close Finding {detailFinding.finding_number}</h3>
+                  <p className="text-sm text-kfl-secondary mb-4">Closure evidence is required to close this finding.</p>
+                  <FormField htmlFor="closure_evidence" label="Closure Evidence" hint="Describe how the finding was resolved" required>
+                    <textarea
+                      id="closure_evidence"
+                      name="closure_evidence"
+                      className="app-input"
+                      placeholder="Evidence of closure…"
+                      value={closureEvidence}
+                      onChange={(e) => setClosureEvidence(e.target.value)}
+                      rows={3}
+                    />
+                  </FormField>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" size="sm" onClick={() => setShowCloseModal(false)}>Cancel</Button>
+                    <Button
+                      id="fb_submit"
+                      variant="default"
+                      size="sm"
+                      disabled={closeMutation.isPending || !closureEvidence.trim()}
+                      onClick={() =>
+                        closeMutation.mutate({ status: "closed", closure_evidence: closureEvidence })
+                      }
+                    >
+                      {closeMutation.isPending ? "Closing…" : "Close Finding"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         ) : <div className="app-surface p-5">Audit finding not found.</div>}
       </div>
@@ -162,6 +245,22 @@ export function AuditFindings() {
                 onChange={(e) => setArea(e.target.value)}
               />
             </FormField>
+            <FormField htmlFor="department" label="Department" hint="Accountable department for closure authority" required>
+              <select
+                id="department"
+                name="department"
+                className="app-input"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+              >
+                <option value="">Select department</option>
+                {DEPARTMENTS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
             <FormField htmlFor="level" label="Level" hint="2 or 3" required>
               <select
                 id="level"
@@ -208,6 +307,7 @@ export function AuditFindings() {
               createMutation.isPending || !auditId || auditsLoading || auditsError ||
               !findingNumber ||
               !area ||
+              !department ||
               !level ||
               !title ||
               !description
@@ -217,6 +317,7 @@ export function AuditFindings() {
                 finding_number: findingNumber,
                 audit_id: auditId,
                 area,
+                department,
                 level: parseInt(level, 10),
                 title,
                 description,

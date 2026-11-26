@@ -32,6 +32,7 @@ describe("AuditFindings", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Audit engagement" }), "audit-1");
     await user.type(screen.getByLabelText(/Finding Number/), "2");
     await user.type(screen.getByLabelText(/Area/), "Safety");
+    await user.selectOptions(screen.getByLabelText(/Department/), "Safety");
     await user.selectOptions(screen.getByLabelText(/Level/), "2");
     await user.type(screen.getByLabelText(/Title/), "Inspection records incomplete");
     await user.type(screen.getByLabelText(/Description/), "Inspection evidence was not retained.");
@@ -126,6 +127,7 @@ describe("AuditFindings", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Audit engagement" }), "audit-1");
     await user.type(screen.getByLabelText(/Finding Number/), "2");
     await user.type(screen.getByLabelText(/Area/), "Safety");
+    await user.selectOptions(screen.getByLabelText(/Department/), "Safety");
     await user.selectOptions(screen.getByLabelText(/Level/), "2");
     await user.type(screen.getByLabelText(/Title/), "Missing evidence");
     await user.type(screen.getByLabelText(/Description/), "Evidence unavailable.");
