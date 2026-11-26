@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
-import { ScrollText } from "lucide-react";
+import { List } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export function AuditTrail() {
@@ -10,43 +10,49 @@ export function AuditTrail() {
   const [limit] = useState(100);
 
   const { data: events = [], isLoading } = useQuery({
-    queryKey: ["audit-events", entityType, entityId, limit],
-    queryFn: () => safetyApi.listAuditEvents({ entity_type: entityType || undefined, entity_id: entityId || undefined, limit }),
+    queryKey: ["audit-events-aviation", entityType, entityId, limit],
+    queryFn: () =>
+      safetyApi.listAuditEvents({
+        ...(entityType ? { entity_type: entityType } : {}),
+        ...(entityId ? { entity_id: entityId } : {}),
+        limit,
+      }),
   });
+
+  const ACTION_BADGES: Record<string, string> = {
+    created: "bg-kfl-status-info-bg text-kfl-status-info",
+    updated: "bg-kfl-status-info-bg text-kfl-status-info",
+    approved: "bg-kfl-status-info-bg text-kfl-status-info",
+    published: "bg-kfl-status-info-bg text-kfl-status-info",
+    closed: "bg-kfl-status-success-bg text-kfl-status-success",
+    deleted: "bg-kfl-status-danger-bg text-kfl-status-danger",
+    rejected: "bg-kfl-status-danger-bg text-kfl-status-danger",
+    submitted: "bg-kfl-status-warning-bg text-kfl-status-warning",
+    linked: "bg-kfl-status-warning-bg text-kfl-status-warning",
+  };
 
   return (
     <div className="app-page">
       <header className="app-page-header">
         <div>
-          <div className="app-eyebrow">Compliance & Governance</div>
-          <h1 className="app-title">Audit Trail</h1>
-          <p className="app-subtitle">Business audit records plus transaction-bound database row changes. Integrity depends on database access controls.</p>
+          <div className="app-eyebrow">Audit Management</div>
+          <h1 className="app-title">Aviation Audit Trail</h1>
+          <p className="app-subtitle">
+            Aviation audit events: findings, corrective actions, risk assessments,
+            missions, occurrences, hazards, and safety actions. Department heads see
+            events for their aviation entity types only.
+          </p>
         </div>
       </header>
 
-      <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="app-surface p-4">
-          <div className="app-label">Total Events</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-text">{events.length}</div>
-        </div>
-        <div className="app-surface p-4">
-          <div className="app-label">Entity Types</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-text">{new Set(events.map((e: any) => e.entity_type)).size}</div>
-        </div>
-        <div className="app-surface p-4">
-          <div className="app-label">Recent Actions</div>
-          <div className="mt-2 text-2xl font-bold text-kfl-text">{events.filter((e: any) => new Date(e.timestamp).getTime() > Date.now() - 86400000).length}</div>
-        </div>
-      </section>
-
       <section className="app-surface overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-semibold text-kfl-text">Audit Events</div>
+          <div className="text-sm font-semibold text-kfl-text">Aviation Audit Events</div>
           <div className="flex gap-2">
             <input
               id="audit_entity_type"
               name="entity_type"
-              placeholder="Entity type (e.g. document)"
+              placeholder="Entity type (e.g. audit_finding)"
               className="app-input w-full md:w-auto"
               value={entityType}
               onChange={(e) => setEntityType(e.target.value)}
@@ -63,12 +69,14 @@ export function AuditTrail() {
         </div>
 
         {isLoading ? (
-          <div className="p-10 text-center text-sm text-kfl-muted">Loading audit trail…</div>
+          <div className="p-10 text-center text-sm text-kfl-muted">Loading audit trail</div>
         ) : events.length === 0 ? (
           <div className="app-surface border-dashed p-10 text-center">
-            <ScrollText size={26} className="mx-auto mb-2 text-kfl-muted" />
-            <p className="text-sm font-bold text-kfl-text">No audit events found.</p>
-            <p className="mt-1 text-xs text-kfl-muted">Adjust filters or perform actions to generate audit records.</p>
+            <List size={26} className="mx-auto mb-2 text-kfl-muted" />
+            <p className="text-sm font-bold text-kfl-text">No aviation audit events found.</p>
+            <p className="mt-1 text-xs text-kfl-muted">
+              Adjust filters or perform actions to generate audit records.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto" tabIndex={0}>
@@ -93,18 +101,22 @@ export function AuditTrail() {
                       <span className="text-kfl-muted ml-1">{ev.entity_id}</span>
                     </td>
                     <td className="px-4 py-4">
-                      <Badge variant={ev.action === "deleted" || ev.action === "rejected" ? "destructive" : ev.action === "created" || ev.action === "approved" || ev.action === "published" ? "default" : "secondary"} className={`badge ${ev.action === "deleted" || ev.action === "rejected" ? "bg-kfl-status-danger-bg text-kfl-status-danger" : ev.action === "created" || ev.action === "approved" || ev.action === "published" ? "bg-kfl-status-info-bg text-kfl-status-info" : "bg-kfl-status-warning-bg text-kfl-status-warning"}`}>
+                      <Badge
+                        variant="default"
+                        className={`badge ${ACTION_BADGES[ev.action] ?? "bg-kfl-surface-subtle text-kfl-muted"}`}
+                      >
                         {ev.action}
                       </Badge>
                     </td>
                     <td className="px-4 py-4 text-sm text-kfl-secondary">{ev.actor_id}</td>
-                    <td className="px-4 py-4 text-xs text-kfl-muted max-w-xs truncate">{ev.details || "—"}</td>
+                    <td className="px-4 py-4 text-xs text-kfl-muted max-w-xs truncate">{ev.details || "N/A"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
+        )
+      }
       </section>
     </div>
   );

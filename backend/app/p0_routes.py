@@ -3430,8 +3430,26 @@ async def list_regulatory_references(request: Request):
 # --- Audit Events ---
 @router.get("/audit-events", response_model=List[AuditEventResponse])
 async def list_audit_events(request: Request, entity_type: Optional[str] = None, entity_id: Optional[str] = None, limit: int = 100, offset: int = 0):
-    _check(request, "audit:read")
     from .audit import query_audit_events
+    actor_role = _role(request)
+
+    # System admin sees all audit events (system integrity / change log).
+    # Department heads see aviation audit events only (operational audits).
+    aviation_entity_types = {
+        "audit_finding", "corrective_action", "risk_assessment",
+        "mission", "occurrence", "hazard", "safety_action",
+    }
+
+    if actor_role == "system_admin":
+        pass  # full access
+    elif actor_role in {"head_quality", "head_safety", "head_security",
+                        "head_operations", "head_maintenance", "head_training"}:
+        # Department heads: restrict to aviation-related entity types.
+        if entity_type and entity_type not in aviation_entity_types:
+            raise HTTPException(status_code=403, detail="Department heads may only view aviation audit events.")
+    else:
+        raise HTTPException(status_code=403, detail="System administrator or department head permission required.")
+
     events = await query_audit_events(entity_type=entity_type, entity_id=entity_id, limit=limit, offset=offset)
     return [AuditEventResponse(**e) for e in events]
 
@@ -3843,6 +3861,100 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
         next_update_at=None,
         created_at=now, updated_at=now, created_by=actor,
     )
+
+
+@router.post("/feedback/{feedback_id}/media")
+async def upload_feedback_media(feedback_id: str, request: Request):
+    """Upload a media file (screenshot, photo) for a feedback record.
+
+    Accepts multipart/form-data with a single "file" field. The file is stored
+    privately and its path is recorded on the feedback row. The media URL is
+    included in subsequent Zoho BugTracker descriptions.
+    """
+    _check(request, "feedback:read")  # reporter can upload to their own feedback
+    actor = _actor(request)
+
+    from .upload_safety import store_upload_file
+    from .database import DB_PATH
+    from pathlib import Path
+
+    # Verify feedback exists and actor can access it
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT feedback_id, actor_user_id FROM feedback WHERE feedback_id = ?",
+            (feedback_id,),
+        )).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+        if row["actor_user_id"] != actor and _role(request) != "system_admin":
+            raise HTTPException(status_code=403, detail="Not your feedback record")
+    finally:
+        await db.close()
+
+    # Parse multipart form
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    content = await upload.read()
+    filename = upload.filename or "feedback-media"
+    # Sanitize filename
+    safe_name = "".join(c for c in filename if c.isalnum() or c in "._-") or "feedback-media"
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
+    media_path = media_dir / f"{feedback_id}_{safe_name}"
+
+    try:
+        store_upload_file(media_path, content)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to store media: {exc}")
+
+    # Record media path on feedback row
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE feedback SET media_path = ?, updated_at = ? WHERE feedback_id = ?",
+            (str(media_path), now_iso(), feedback_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    media_url = f"/api/p0/feedback/{feedback_id}/media/{safe_name}"
+    return {"media_path": str(media_path), "media_url": media_url}
+
+
+@router.get("/feedback/{feedback_id}/media/{filename}")
+async def download_feedback_media(feedback_id: str, filename: str, request: Request):
+    """Download a feedback media file."""
+    from .database import DB_PATH
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
+    media_path = media_dir / f"{feedback_id}_{filename}"
+
+    if not media_path.exists():
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    return FileResponse(path=str(media_path))
+
+
+@router.get("/feedback/{feedback_id}", response_model=FeedbackResponse)
+async def get_feedback(feedback_id: str, request: Request):
+    """Get a single feedback record by ID, including its media path."""
+    _check(request, "feedback:read")
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT * FROM feedback WHERE feedback_id = ?", (feedback_id,),
+        )).fetchone()
+    finally:
+        await db.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return FeedbackResponse(**dict(row))
 
 
 @router.get("/feedback", response_model=List[FeedbackResponse])

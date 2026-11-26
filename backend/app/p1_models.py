@@ -596,6 +596,29 @@ class QualityAuditResponse(BaseModel):
     created_by: str
     updated_by: str
 
+class AuditResourceCreate(BaseModel):
+    resource_type: str = "data_source"
+    resource_name: str
+    description: Optional[str] = None
+
+class AuditResourceUpdate(BaseModel):
+    resource_type: Optional[str] = None
+    resource_name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+class AuditResourceResponse(BaseModel):
+    resource_id: str
+    audit_id: str
+    resource_type: str
+    resource_name: str
+    description: Optional[str] = None
+    status: str
+    created_at: str
+    updated_at: str
+    created_by: str
+    updated_by: str
+
 class AuditFindingCreate(BaseModel):
     audit_id: str
     finding_type: str = "observation"

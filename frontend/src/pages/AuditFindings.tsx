@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { auditApi } from "../api/audit";
+import { auditApi, correctiveActionApi } from "../api/audit";
 import type { AuditFinding, AuditFindingStatus, AuditReport } from "../api/audit";
 import { AlertTriangle, Plus, RefreshCw } from "lucide-react";
 import FormField from "../components/ui/FormField";
@@ -43,11 +43,30 @@ export function AuditFindings() {
   const [showForm, setShowForm] = useState(false);
   const [findingNumber, setFindingNumber] = useState("");
   const [area, setArea] = useState("");
+  const [department, setDepartment] = useState("");
   const [level, setLevel] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [auditId, setAuditId] = useState(auditFilter);
   const [mutationError, setMutationError] = useState("");
+  const [closureEvidence, setClosureEvidence] = useState("");
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showCARModal, setShowCARModal] = useState(false);
+  const [carTitle, setCarTitle] = useState("");
+  const [carDescription, setCarDescription] = useState("");
+  const [carRootCause, setCarRootCause] = useState("");
+  const [carAction, setCarAction] = useState("");
+  const [carOwnerId, setCarOwnerId] = useState("");
+  const [carDueDate, setCarDueDate] = useState("");
+
+  const DEPARTMENTS = [
+    { value: "quality", label: "Quality" },
+    { value: "safety", label: "Safety" },
+    { value: "security", label: "Security" },
+    { value: "operations", label: "Operations" },
+    { value: "maintenance", label: "Maintenance" },
+    { value: "training", label: "Training" },
+  ];
 
   const createMutation = useMutation({
     mutationFn: (data: any) => auditApi.createAuditFinding(data),
@@ -56,6 +75,7 @@ export function AuditFindings() {
       setShowForm(false);
       setFindingNumber("");
       setArea("");
+      setDepartment("");
       setLevel("");
       setTitle("");
       setDescription("");
@@ -65,18 +85,241 @@ export function AuditFindings() {
     onError: () => setMutationError("Unable to create audit finding. Please check the details and try again."),
   });
 
+  const closeMutation = useMutation({
+    mutationFn: (data: any) => auditApi.updateAuditFinding(detailFinding!.finding_id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audit-findings"] });
+      qc.invalidateQueries({ queryKey: ["audit-finding", detailFinding!.finding_id] });
+      setShowCloseModal(false);
+      setClosureEvidence("");
+    },
+    onError: () => setMutationError("Unable to close audit finding. Please check the details and try again."),
+  });
+
+  const linkCARMutation = useMutation({
+    mutationFn: (data: any) =>
+      correctiveActionApi.createCorrectiveAction({
+        ...data,
+        audit_finding_id: detailFinding!.finding_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audit-finding", detailFinding!.finding_id] });
+      setShowCARModal(false);
+      setCarTitle("");
+      setCarDescription("");
+      setCarRootCause("");
+      setCarAction("");
+      setCarOwnerId("");
+      setCarDueDate("");
+    },
+    onError: () => setMutationError("Unable to link corrective action. Please try again."),
+  });
+
+  useEffect(() => {
+    if (!detailLoading && !detailError && !detailFinding) {
+      navigate("/audit-findings", { replace: true });
+    }
+  }, [detailLoading, detailError, detailFinding, navigate]);
+
   if (findingId) {
     return (
       <div className="app-page">
         <header className="app-page-header"><div><div className="app-eyebrow">Audit Management</div><h1 className="app-title">Audit Finding Details</h1></div></header>
         {detailError ? <div role="alert" className="app-surface p-5 text-rose-800">Unable to load audit finding details.</div> : detailLoading ? <div className="app-surface p-5">Loading finding…</div> : detailFinding ? (
-          <section className="app-surface space-y-3 p-5">
+          <section className="app-surface space-y-4 p-5">
             <h2 className="text-lg font-bold text-kfl-text">{detailFinding.finding_number}: {detailFinding.title}</h2>
             <p className="text-sm text-kfl-secondary">{detailFinding.description || "No description provided."}</p>
-            <p className="text-sm text-kfl-secondary">Area: {detailFinding.area} · Level {detailFinding.level} · {detailFinding.status.replace(/_/g, " ")}</p>
+            <p className="text-sm text-kfl-secondary">Department: {detailFinding.department || "—"} · Area: {detailFinding.area} · Level {detailFinding.level}</p>
+            <p className="text-sm text-kfl-secondary">Status: {detailFinding.status.replace(/_/g, " ")}{detailFinding.closed_at ? ` · Closed ${detailFinding.closed_at.slice(0, 10)} by ${detailFinding.closed_by || "—"}` : ""}</p>
+            {detailFinding.corrective_action_id ? (
+              <div className="app-surface p-4 mb-3 border border-kfl-status-info-bg bg-kfl-status-info-bg/10">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="app-label mb-1">Corrective Action</div>
+                    <div className="text-sm font-medium text-kfl-text">{detailFinding.corrective_action_id}</div>
+                  </div>
+                  <Badge variant="default" className="bg-kfl-status-info-bg text-kfl-status-info">
+                    Linked
+                  </Badge>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => setShowCARModal(true)}
+                disabled={linkCARMutation.isPending}
+                variant="outline"
+                size="sm"
+              >
+                {linkCARMutation.isPending ? "Linking…" : "Link Corrective Action"}
+              </Button>
+            )}
+            {detailFinding.status === "open" && hasPermission("audit_finding:update") && (
+              <Button
+                type="button"
+                onClick={() =>
+                  closeMutation.mutate({ status: "in_progress" })
+                }
+                disabled={closeMutation.isPending}
+                variant="default"
+                size="sm"
+              >
+                {closeMutation.isPending ? "Starting…" : "Start Investigation"}
+              </Button>
+            )}
+            {detailFinding.status === "in_progress" && hasPermission("audit_finding:close") && (
+              <Button
+                type="button"
+                onClick={() => setShowCloseModal(true)}
+                disabled={closeMutation.isPending}
+                variant="default"
+                size="sm"
+                className="bg-kfl-status-danger-bg text-white hover:bg-kfl-status-danger/90"
+              >
+                {closeMutation.isPending ? "Closing…" : "Close Finding"}
+              </Button>
+            )}
             <Link className="text-sm font-semibold text-kfl-blue underline" to={`/audit-findings?audit_id=${encodeURIComponent(detailFinding.audit_id)}`}>Back to audit findings</Link>
-          </section>
-        ) : <div className="app-surface p-5">Audit finding not found.</div>}
+            {showCloseModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="app-surface w-full max-w-md p-5">
+                  <h3 className="text-lg font-bold text-kfl-text mb-3">Close Finding {detailFinding.finding_number}</h3>
+                  <p className="text-sm text-kfl-secondary mb-4">Closure evidence is required to close this finding.</p>
+                  <FormField htmlFor="closure_evidence" label="Closure Evidence" hint="Describe how the finding was resolved" required>
+                    <textarea
+                      id="closure_evidence"
+                      name="closure_evidence"
+                      className="app-input"
+                      placeholder="Evidence of closure…"
+                      value={closureEvidence}
+                      onChange={(e) => setClosureEvidence(e.target.value)}
+                      rows={3}
+                    />
+                  </FormField>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" size="sm" onClick={() => setShowCloseModal(false)}>Cancel</Button>
+                    <Button
+                      id="fb_submit"
+                      variant="default"
+                      size="sm"
+                      disabled={closeMutation.isPending || !closureEvidence.trim()}
+                      onClick={() =>
+                        closeMutation.mutate({ status: "closed", closure_evidence: closureEvidence })
+                      }
+                    >
+                      {closeMutation.isPending ? "Closing…" : "Close Finding"}
+                    </Button>
+                  </div>
+                </div>
+                </div>
+                )}
+                {showCARModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="app-surface w-full max-w-md p-5">
+                  <h3 className="text-lg font-bold text-kfl-text mb-3">
+                    Link Corrective Action to Finding {detailFinding.finding_number}
+                  </h3>
+                  <p className="text-sm text-kfl-secondary mb-4">
+                    Create a corrective action to address this finding. The backend closure
+                    gate requires a linked CAR to be closed before the finding can be closed.
+                  </p>
+                  <FormField htmlFor="car_title" label="CAR Title" required>
+                    <input
+                      id="car_title"
+                      name="car_title"
+                      className="app-input"
+                      placeholder="e.g. Revise maintenance procedure"
+                      value={carTitle}
+                      onChange={(e) => setCarTitle(e.target.value)}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_description" label="Description" required>
+                    <textarea
+                      id="car_description"
+                      name="car_description"
+                      className="app-input"
+                      placeholder="Describe the corrective action"
+                      value={carDescription}
+                      onChange={(e) => setCarDescription(e.target.value)}
+                      rows={3}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_root_cause" label="Root Cause">
+                    <input
+                      id="car_root_cause"
+                      name="car_root_cause"
+                      className="app-input"
+                      placeholder="Root cause of the finding"
+                      value={carRootCause}
+                      onChange={(e) => setCarRootCause(e.target.value)}
+                    />
+                  </FormField>
+                  <FormField htmlFor="car_action" label="Corrective Action">
+                    <input
+                      id="car_action"
+                      name="car_action"
+                      className="app-input"
+                      placeholder="Planned corrective action"
+                      value={carAction}
+                      onChange={(e) => setCarAction(e.target.value)}
+                    />
+                  </FormField>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField htmlFor="car_owner" label="Owner User ID">
+                      <input
+                        id="car_owner"
+                        name="car_owner"
+                        className="app-input"
+                        placeholder="e.g. u-head-maintenance"
+                        value={carOwnerId}
+                        onChange={(e) => setCarOwnerId(e.target.value)}
+                        autoComplete="off"
+                      />
+                    </FormField>
+                    <FormField htmlFor="car_due_date" label="Due Date">
+                      <input
+                        id="car_due_date"
+                        name="car_due_date"
+                        type="date"
+                        className="app-input"
+                        value={carDueDate}
+                        onChange={(e) => setCarDueDate(e.target.value)}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" size="sm" onClick={() => setShowCARModal(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      id="link_car_submit"
+                      variant="default"
+                      size="sm"
+                      disabled={
+                        linkCARMutation.isPending ||
+                        !carTitle.trim() ||
+                        !carDescription.trim() ||
+                        !carOwnerId.trim()
+                      }
+                      onClick={() =>
+                        linkCARMutation.mutate({
+                          title: carTitle.trim(),
+                          description: carDescription.trim(),
+                          root_cause: carRootCause.trim() || undefined,
+                          corrective_action: carAction.trim() || undefined,
+                          owner_id: carOwnerId.trim(),
+                          due_date: carDueDate || undefined,
+                        })
+                      }
+                    >
+                      {linkCARMutation.isPending ? "Linking…" : "Link CAR"}
+                    </Button>
+                  </div>
+                </div>
+                </div>
+                )}
+                </section>
+        ) : null}
       </div>
     );
   }
@@ -162,6 +405,22 @@ export function AuditFindings() {
                 onChange={(e) => setArea(e.target.value)}
               />
             </FormField>
+            <FormField htmlFor="department" label="Department" hint="Accountable department for closure authority" required>
+              <select
+                id="department"
+                name="department"
+                className="app-input"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+              >
+                <option value="">Select department</option>
+                {DEPARTMENTS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
             <FormField htmlFor="level" label="Level" hint="2 or 3" required>
               <select
                 id="level"
@@ -208,6 +467,7 @@ export function AuditFindings() {
               createMutation.isPending || !auditId || auditsLoading || auditsError ||
               !findingNumber ||
               !area ||
+              !department ||
               !level ||
               !title ||
               !description
@@ -217,6 +477,7 @@ export function AuditFindings() {
                 finding_number: findingNumber,
                 audit_id: auditId,
                 area,
+                department,
                 level: parseInt(level, 10),
                 title,
                 description,

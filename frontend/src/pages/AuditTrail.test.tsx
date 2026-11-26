@@ -9,14 +9,10 @@ vi.mock("../api/safety", () => ({ safetyApi: { listAuditEvents: vi.fn() } }));
 
 const now = new Date().toISOString();
 const events = [
-  { event_id: "EVT-1", entity_type: "document", entity_id: "DOC-001", action: "published", actor_id: "u-librarian", timestamp: now, details: "Published v2" },
-  { event_id: "EVT-2", entity_type: "document", entity_id: "DOC-002", action: "deleted", actor_id: "u-admin", timestamp: now, details: "" },
-  { event_id: "EVT-3", entity_type: "crew", entity_id: "CRW-1", action: "created", actor_id: "u-safety", timestamp: now, details: "" },
+  { event_id: "EVT-1", entity_type: "audit_finding", entity_id: "FIND-001", action: "created", actor_id: "u-head-quality", timestamp: now, details: "New finding" },
+  { event_id: "EVT-2", entity_type: "corrective_action", entity_id: "CAR-1", action: "closed", actor_id: "u-head-safety", timestamp: now, details: "" },
+  { event_id: "EVT-3", entity_type: "risk_assessment", entity_id: "RA-1", action: "submitted", actor_id: "u-head-operations", timestamp: now, details: "" },
 ];
-
-function statValue(label: string) {
-  return screen.getByText(label).nextElementSibling as HTMLElement;
-}
 
 function renderPage(items: typeof events = events) {
   vi.mocked(safetyApi.listAuditEvents).mockResolvedValue(items as never);
@@ -31,31 +27,34 @@ function renderPage(items: typeof events = events) {
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe("AuditTrail", () => {
-  it("renders audit events with action badges and computes total/entity-type stats", async () => {
+  it("renders aviation audit trail heading", async () => {
     renderPage();
-    expect(screen.getByRole("heading", { name: "Audit Trail" })).toBeInTheDocument();
-    await screen.findByText("EVT-1");
-    expect(statValue("Total Events")).toHaveTextContent("3");
-    expect(statValue("Entity Types")).toHaveTextContent("2");
-    expect(screen.getByText("published")).toBeInTheDocument();
-    expect(screen.getByText("deleted")).toBeInTheDocument();
-    expect(screen.getByText("created")).toBeInTheDocument();
-    expect(screen.getByText("u-librarian")).toBeInTheDocument();
-    // Empty details render as a dash.
-    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "Aviation Audit Trail" })).toBeInTheDocument();
   });
 
-  it("refetches with the entity-type filter applied", async () => {
+  it("renders aviation audit events with action badges", async () => {
+    renderPage();
+    await screen.findByText("EVT-1");
+    expect(screen.getByText("created")).toBeInTheDocument();
+    expect(screen.getByText("closed")).toBeInTheDocument();
+    expect(screen.getByText("submitted")).toBeInTheDocument();
+    expect(screen.getByText("u-head-quality")).toBeInTheDocument();
+    expect(screen.getByText("u-head-safety")).toBeInTheDocument();
+    expect(screen.getByText("u-head-operations")).toBeInTheDocument();
+    // Empty details render as N/A (2 events have empty details).
+    expect(screen.getAllByText("N/A")).toHaveLength(2);
+  });
+
+  it("filters aviation audit events by entity type", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("EVT-1");
-    await user.type(screen.getByPlaceholderText("Entity type (e.g. document)"), "document");
-    await waitFor(() => expect(safetyApi.listAuditEvents).toHaveBeenCalledWith({ entity_type: "document", entity_id: undefined, limit: 100 }));
+    await user.type(screen.getByPlaceholderText("Entity type (e.g. audit_finding)"), "audit_finding");
+    await waitFor(() => expect(safetyApi.listAuditEvents).toHaveBeenLastCalledWith({ entity_type: "audit_finding", entity_id: undefined, limit: 100 }));
   });
 
-  it("shows the empty state when there are no audit events", async () => {
+  it("shows the empty state when there are no aviation audit events", async () => {
     renderPage([]);
-    expect(await screen.findByText("No audit events found.")).toBeInTheDocument();
-    expect(statValue("Total Events")).toHaveTextContent("0");
+    expect(await screen.findByText("No aviation audit events found.")).toBeInTheDocument();
   });
 });

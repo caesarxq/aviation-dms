@@ -127,7 +127,7 @@ export function FilterBar({ placeholder = "Search documents, audits, licenses, a
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="w-full pl-9 pr-4 py-2 text-sm border border-kfl-border rounded-lg bg-kfl-surface focus:outline-none focus:ring-2 focus:ring-kfl-blue transition-all"
+          className="w-full pl-9 pr-4 py-2 text-sm border-2 border-kfl-border rounded-lg bg-kfl-surface focus:outline-none focus:ring-2 focus:ring-kfl-blue transition-all mt-[3px]"
         />
         {query && (
           <button

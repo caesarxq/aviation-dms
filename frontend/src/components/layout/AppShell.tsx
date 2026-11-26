@@ -182,17 +182,17 @@ const sections: SectionProps[] = [
     items: [
       { to: "/occurrences", icon: AlertTriangle, label: "Safety Occurrences", permission: "safety:read" },
       { to: "/hazards", icon: AlertTriangle, label: "Hazard Register", permission: "safety:read" },
-      { to: "/risk-assessments", icon: ShieldCheck, label: "Risk Assessments", permission: "safety:read" },
       { to: "/investigations", icon: Search, label: "Investigations", permission: "safety:read" },
       { to: "/safety-actions", icon: CheckCircle, label: "Safety Actions", permission: "safety:read" },
       { to: "/safety-kpis", icon: Activity, label: "Safety KPIs", permission: "safety:read" },
     ],
   },
   {
-    label: "Flight",
+    label: "Flight Ops",
     icon: AlertOctagon,
     items: [
       { to: "/missions", icon: ClipboardList, label: "Missions", permission: "safety:read" },
+      { to: "/risk-assessments", icon: ShieldCheck, label: "Risk Assessments", permission: "safety:read" },
       { to: "/dangerous-goods", icon: AlertOctagon, label: "Dangerous Goods", permission: "safety:read" },
       { to: "/roc", icon: ClipboardCheck, label: "ROC & OpSpec", permission: "roc:read" },
       { to: "/dg-responsibility-matrix", icon: ClipboardList, label: "DG Responsibilities", permission: "safety:read" },
@@ -202,13 +202,9 @@ const sections: SectionProps[] = [
     label: "Quality & Compliance",
     icon: ClipboardCheck,
     items: [
-      { to: "/quality-audits", icon: ClipboardCheck, label: "Quality Audits", permission: "safety:read" },
       { to: "/corrective-actions", icon: CheckCircle, label: "Corrective Actions", permission: "safety:read" },
-      { to: "/audit-trail", icon: ScrollText, label: "Audit Trail", permission: "audit:read" },
       { to: "/distributions", icon: MailOpen, label: "Distributions", permission: "document:read" },
       { to: "/outsourced-functions", icon: ClipboardList, label: "Outsourced Functions", permission: "compliance:read" },
-      { to: "/security-reviews", icon: ShieldCheck, label: "Security Reviews", permission: "security:read_sensitive" },
-      { to: "/security", icon: ShieldAlert, label: "Security Incidents", permission: "security:read_sensitive" },
     ],
   },
   {
@@ -244,11 +240,21 @@ const sections: SectionProps[] = [
   },
   {
     label: "Audit",
-    icon: FileText,
+    icon: ScrollText,
     items: [
       { to: "/audit-reports", icon: FileText, label: "Audit Reports", permission: "audit_report:read" },
+      { to: "/audit-planning", icon: ClipboardList, label: "Audit Planning", permission: "safety:read" },
       { to: "/audit-findings", icon: AlertTriangle, label: "Audit Findings", permission: "audit_finding:read" },
       { to: "/audit-dashboard", icon: BarChart3, label: "Audit Dashboard", permission: "audit_finding:read" },
+      { to: "/audit-trail", icon: ScrollText, label: "Audit Trail", permission: "audit:read" },
+    ],
+  },
+  {
+    label: "Security",
+    icon: ShieldAlert,
+    items: [
+      { to: "/security-reviews", icon: ShieldCheck, label: "Security Reviews", permission: "security:read_sensitive" },
+      { to: "/security", icon: ShieldAlert, label: "Security Incidents", permission: "security:read_sensitive" },
     ],
   },
   {

@@ -15,6 +15,7 @@ import { ResetPasswordPage } from "./pages/ResetPassword";
 import { WelcomePage } from "./pages/Welcome";
 import { ProfileSettingsPage } from "./pages/ProfileSettings";
 
+const AuditPlanning = lazy(() => import("./pages/AuditPlanning").then((module) => ({ default: module.AuditPlanning })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
 const OrganizationOverview = lazy(() => import("./pages/OrganizationOverview").then((module) => ({ default: module.OrganizationOverview })));
 const DocumentCatalogue = lazy(() => import("./pages/DocumentCatalogue").then((module) => ({ default: module.DocumentCatalogue })));
@@ -22,7 +23,6 @@ const Occurrences = lazy(() => import("./pages/Occurrences").then((module) => ({
 const OccurrenceDetail = lazy(() => import("./pages/OccurrenceDetail").then((module) => ({ default: module.OccurrenceDetail })));
 const ROCRegister = lazy(() => import("./pages/ROCRegister").then((module) => ({ default: module.ROCRegister })));
 const Missions = lazy(() => import("./pages/Missions").then((module) => ({ default: module.Missions })));
-const QualityAudits = lazy(() => import("./pages/QualityAudits").then((module) => ({ default: module.QualityAudits })));
 const CorrectiveActions = lazy(() => import("./pages/QualityAudits").then((module) => ({ default: module.CorrectiveActions })));
 const DangerousGoods = lazy(() => import("./pages/DangerousGoods").then((module) => ({ default: module.DangerousGoods })));
 const Hazards = lazy(() => import("./pages/Hazards").then((module) => ({ default: module.Hazards })));
@@ -105,7 +105,6 @@ export default function App() {
               <Route path="/occurrences/:occurrenceId" element={<RequireAccess permission="safety:read"><OccurrenceDetail /></RequireAccess>} />
               <Route path="/roc" element={<RequireAccess permission="roc:read"><ROCRegister /></RequireAccess>} />
               <Route path="/missions" element={<RequireAccess permission="safety:read"><Missions /></RequireAccess>} />
-              <Route path="/quality-audits" element={<RequireAccess permission="safety:read"><QualityAudits /></RequireAccess>} />
               <Route path="/corrective-actions" element={<RequireAccess permission="safety:read"><CorrectiveActions /></RequireAccess>} />
               <Route path="/dangerous-goods" element={<RequireAccess permission="safety:read"><DangerousGoods /></RequireAccess>} />
               <Route path="/hazards" element={<RequireAccess permission="safety:read"><Hazards /></RequireAccess>} />
@@ -141,6 +140,7 @@ export default function App() {
               <Route path="/audit-reports" element={<RequireAccess permission="audit_report:read"><AuditReports /></RequireAccess>} />
               <Route path="/audit-findings" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
               <Route path="/audit-findings/:findingId" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
+              <Route path="/audit-planning" element={<RequireAccess permission="safety:read"><AuditPlanning /></RequireAccess>} />
               <Route path="/audit-dashboard" element={<RequireAccess permission="audit_finding:read"><AuditDashboard /></RequireAccess>} />
               <Route path="/notifications" element={<RequireAccess permission="compliance:read"><Notifications /></RequireAccess>} />
               <Route path="/account/security" element={<ChangePasswordPage />} />

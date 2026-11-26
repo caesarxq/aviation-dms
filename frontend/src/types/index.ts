@@ -507,6 +507,7 @@ export interface Feedback {
   bugtracker_id: string | null;
   bugtracker_url: string | null;
   bugtracker_sync_state: string;
+  media_path: string | null;
   next_update_at: string | null;
   created_at: string;
   updated_at: string;
@@ -525,4 +526,5 @@ export interface FeedbackCreate {
   observation_time: string;
   contact: string;
   screenshot_info: string | null;
+  media_file?: File | null;
 }

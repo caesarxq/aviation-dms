@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
-import { ShieldAlert, AlertTriangle, Calendar, Users } from "lucide-react";
+import { ShieldAlert, AlertTriangle, Calendar } from "lucide-react";
 import FormField from "../components/ui/FormField";
 import { SecurityReviewsModal } from "../components/ui/modals/SecurityReviewsModal";
-import { OutsourcedFunctionsModal } from "../components/ui/modals/OutsourcedFunctionsModal";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useAuth } from "../auth/AuthContext";
@@ -21,7 +20,6 @@ export function SecurityManagement() {
   const [dirty, setDirty] = useState(false);
   const [title, setTitle] = useState("");
   const [showSecurityReviewModal, setShowSecurityReviewModal] = useState(false);
-  const [showOutsourcedModal, setShowOutsourcedModal] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(0);
@@ -95,13 +93,6 @@ export function SecurityManagement() {
           size="sm"
         >
           <Calendar size={16} /> Schedule Review
-        </Button>}
-        {hasPermission("safety:create") && <Button
-          onClick={() => setShowOutsourcedModal(true)}
-          variant="outline"
-          size="sm"
-        >
-          <Users size={16} /> Register Outsourced Function
         </Button>}
       </header>
 
@@ -235,7 +226,6 @@ export function SecurityManagement() {
         ) : null}
       </section>
       <SecurityReviewsModal open={showSecurityReviewModal} onClose={() => setShowSecurityReviewModal(false)} />
-      <OutsourcedFunctionsModal open={showOutsourcedModal} onClose={() => setShowOutsourcedModal(false)} />
     </div>
   );
 }

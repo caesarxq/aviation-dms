@@ -2192,6 +2192,101 @@ async def update_quality_audit(audit_id: str, update: QualityAuditUpdate, reques
         await db.close()
 
 
+# ==================== AUDIT PLANNING RESOURCES ====================
+
+@router.get("/quality-audits/{audit_id}/resources", response_model=List[AuditResourceResponse])
+async def list_audit_resources(audit_id: str, request: Request):
+    _check(request, "safety:read")
+    db = await get_db()
+    try:
+        # Verify audit exists
+        row = await (await db.execute("SELECT audit_id FROM quality_audits WHERE audit_id = ?", (audit_id,))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        cursor = await db.execute(
+            "SELECT * FROM audit_resources WHERE audit_id = ? ORDER BY created_at DESC",
+            (audit_id,),
+        )
+        rows = await cursor.fetchall()
+        return [AuditResourceResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.post("/quality-audits/{audit_id}/resources", response_model=AuditResourceResponse, status_code=201)
+async def create_audit_resource(audit_id: str, resource: AuditResourceCreate, request: Request):
+    _check(request, "safety:create")
+    actor = _actor(request)
+    resource_id = _gen_id("AR")
+    now = now_iso()
+    db = await get_db()
+    try:
+        # Verify audit exists
+        row = await (await db.execute("SELECT audit_id FROM quality_audits WHERE audit_id = ?", (audit_id,))).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        await db.execute(
+            """INSERT INTO audit_resources (resource_id, audit_id, resource_type, resource_name, description, status, created_at, updated_at, created_by, updated_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (resource_id, audit_id, resource.resource_type, resource.resource_name, resource.description, "pending", now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return AuditResourceResponse(
+        resource_id=resource_id, audit_id=audit_id,
+        resource_type=resource.resource_type, resource_name=resource.resource_name,
+        description=resource.description, status="pending",
+        created_at=now, updated_at=now, created_by=actor, updated_by=actor,
+    )
+
+
+@router.patch("/quality-audits/{audit_id}/resources/{resource_id}", response_model=AuditResourceResponse)
+async def update_audit_resource(audit_id: str, resource_id: str, update: AuditResourceUpdate, request: Request):
+    _check(request, "safety:update")
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT resource_id FROM audit_resources WHERE resource_id = ? AND audit_id = ?", (resource_id, audit_id))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Resource not found")
+        updates = []
+        params = []
+        field_map = {"resource_type": update.resource_type, "resource_name": update.resource_name, "description": update.description, "status": update.status}
+        for col, val in field_map.items():
+            if val is not None:
+                updates.append(f"{col} = ?")
+                params.append(val)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            updates.append("updated_by = ?")
+            params.append(actor)
+            params.append(resource_id)
+            await db.execute(f"UPDATE audit_resources SET {', '.join(updates)} WHERE resource_id = ?", params)
+            await db.commit()
+        cursor = await db.execute("SELECT * FROM audit_resources WHERE resource_id = ?", (resource_id,))
+        row = await cursor.fetchone()
+        return AuditResourceResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.delete("/quality-audits/{audit_id}/resources/{resource_id}", status_code=204)
+async def delete_audit_resource(audit_id: str, resource_id: str, request: Request):
+    _check(request, "safety:update")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT resource_id FROM audit_resources WHERE resource_id = ? AND audit_id = ?", (resource_id, audit_id))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Resource not found")
+        await db.execute("DELETE FROM audit_resources WHERE resource_id = ?", (resource_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return None
+
+
 # ==================== AUDIT FINDINGS ====================
 
 @router.post("/audit-findings", response_model=AuditFindingResponse, status_code=201)

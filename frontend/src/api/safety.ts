@@ -178,6 +178,14 @@ export const safetyApi = {
     api.post<Feedback>(`/p0/feedback`, data).then((r: any) => r.data),
   updateFeedback: (id: string, data: any) =>
     api.patch<Feedback>(`/p0/feedback/${id}`, data).then((r: any) => r.data),
+  uploadFeedbackMedia: (feedbackId: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.post<{ media_path: string; media_url: string }>(
+      `/p0/feedback/${encodeURIComponent(feedbackId)}/media`,
+      formData
+    ).then((r: any) => r.data);
+  },
 
   downloadRiskAssessmentPdf: (id: string) =>
     api.get(`/p3/risk-assessments/${encodeURIComponent(id)}/pdf`, {

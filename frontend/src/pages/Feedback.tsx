@@ -14,6 +14,7 @@ export function FeedbackPage() {
   const [issueFilter, setIssueFilter] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [viewing, setViewing] = useState<Feedback | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [form, setForm] = useState<FeedbackCreate>({
     issue_type: "bug",
     app_area: "",
@@ -26,6 +27,7 @@ export function FeedbackPage() {
     observation_time: "",
     contact: "",
     screenshot_info: "",
+    media_file: null,
   });
 
   const { data: items = [], isLoading } = useQuery({
@@ -38,10 +40,17 @@ export function FeedbackPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => safetyApi.createFeedback(data),
+    mutationFn: async (data: FeedbackCreate) => {
+      const result = await safetyApi.createFeedback(data);
+      if (data.media_file) {
+        await safetyApi.uploadFeedbackMedia(result.feedback_id, data.media_file);
+      }
+      return result;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback"] });
       setIsCreating(false);
+      setSelectedFile(null);
       setForm({
         issue_type: "bug",
         app_area: "",
@@ -54,6 +63,7 @@ export function FeedbackPage() {
         observation_time: "",
         contact: "",
         screenshot_info: "",
+        media_file: null,
       });
     },
   });
@@ -341,6 +351,22 @@ export function FeedbackPage() {
                       placeholder="Optional. Do not include sensitive data."
                     />
                   </label>
+                  <label className="block text-sm text-kfl-secondary">
+                    <span className="mb-1 block text-xs font-semibold text-kfl-muted">Media / Screenshot</span>
+                    <input
+                      id="fb_media_file"
+                      name="media_file"
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf"
+                      onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                      className="mt-1 block w-full text-sm border border-kfl-border rounded p-2"
+                    />
+                    {selectedFile && (
+                      <p className="mt-1 text-xs text-kfl-muted">
+                        {selectedFile.name} ({Math.round(selectedFile.size / 1024)} KB)
+                      </p>
+                    )}
+                  </label>
                 </div>
                 <div className="flex justify-end gap-2 border-t border-kfl-border pt-4">
                   <Button
@@ -370,7 +396,9 @@ export function FeedbackPage() {
                     variant="default"
                     size="sm"
                     disabled={createMutation.isPending || !form.goal.trim() || !form.contact.trim()}
-                    onClick={() => createMutation.mutate(form)}
+                    onClick={() =>
+                      createMutation.mutate({ ...form, media_file: selectedFile })
+                    }
                   >
                     {createMutation.isPending ? "Submitting…" : "Submit"}
                   </Button>

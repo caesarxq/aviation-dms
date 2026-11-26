@@ -525,6 +525,7 @@ class FeedbackResponse(BaseModel):
     bugtracker_id: Optional[str] = None
     bugtracker_url: Optional[str] = None
     bugtracker_sync_state: str = "pending"
+    media_path: Optional[str] = None
     next_update_at: Optional[str]
     created_at: str
     updated_at: str

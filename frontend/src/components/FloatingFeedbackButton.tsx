@@ -10,6 +10,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 export function FloatingFeedbackButton() {
   const qc = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [form, setForm] = useState<FeedbackCreate>({
     issue_type: "bug",
     app_area: "",
@@ -22,13 +23,21 @@ export function FloatingFeedbackButton() {
     observation_time: "",
     contact: "",
     screenshot_info: "",
+    media_file: null,
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => safetyApi.createFeedback(data),
+    mutationFn: async (data: FeedbackCreate) => {
+      const result = await safetyApi.createFeedback(data);
+      if (data.media_file) {
+        await safetyApi.uploadFeedbackMedia(result.feedback_id, data.media_file);
+      }
+      return result;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feedback"] });
       setIsOpen(false);
+      setSelectedFile(null);
       setForm({
         issue_type: "bug",
         app_area: "",
@@ -41,6 +50,7 @@ export function FloatingFeedbackButton() {
         observation_time: "",
         contact: "",
         screenshot_info: "",
+        media_file: null,
       });
     },
   });
@@ -48,7 +58,7 @@ export function FloatingFeedbackButton() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.goal.trim() || !form.contact.trim()) return;
-    createMutation.mutate(form);
+    createMutation.mutate({ ...form, media_file: selectedFile });
   };
 
   return (
@@ -183,6 +193,23 @@ export function FloatingFeedbackButton() {
                     placeholder="your username or email"
                     className="h-9"
                   />
+
+                  <label className="block text-xs font-semibold text-kfl-muted uppercase tracking-wider">
+                    Media / Screenshot
+                  </label>
+                  <input
+                    id="fb_media_file"
+                    name="media_file"
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,image/png,image/jpeg,application/pdf"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="mt-1 block w-full text-sm border border-kfl-border rounded p-2 h-9"
+                  />
+                  {selectedFile && (
+                    <p className="mt-1 text-xs text-kfl-muted">
+                      {selectedFile.name} ({Math.round(selectedFile.size / 1024)} KB)
+                    </p>
+                  )}
 
                   <div className="flex flex-col gap-3 pt-2">
                     <Button

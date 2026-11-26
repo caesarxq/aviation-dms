@@ -36,7 +36,6 @@ describe("inert list controls", () => {
     renderPage(<SecurityManagement />, ["safety:create"]);
     expect(screen.queryByRole("button", { name: "Report Incident" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Schedule Review" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Register Outsourced Function" })).toBeInTheDocument();
   });
 
   it("filters quality audits independently from the create audit field", async () => {
