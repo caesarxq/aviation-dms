@@ -9,10 +9,12 @@ Project ID: 2730932000000114802
 Dashboard ID: 2730932000000114857
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -76,12 +78,67 @@ def _is_configured() -> bool:
     return bool((has_access_token or has_refresh_credentials) and ZOHO_BUGTRACKER_PROJECT_ID)
 
 
+# Sync reads pages of feedback in bounded batches instead of a single LIMIT, so
+# reconciling does not silently stop at the first 50/100 rows.
+SYNC_BATCH_SIZE = 50
+
+_TOKEN_CACHE: Dict[str, Any] = {"token": "", "expires_at": 0.0}
+_TOKEN_LOCK = asyncio.Lock()
+_TOKEN_DEFAULT_TTL_SECONDS = 3300
+_TOKEN_MIN_TTL_SECONDS = 60
+
+
+def _token_ttl_seconds(expires_in: Any) -> int:
+    """Cache lifetime for a token, keeping a safety margin before it expires."""
+    try:
+        ttl = int(expires_in)
+    except (TypeError, ValueError):
+        return _TOKEN_DEFAULT_TTL_SECONDS
+    return max(ttl - 60, _TOKEN_MIN_TTL_SECONDS)
+
+
+def _reset_token_cache() -> None:
+    """Drop the cached token (tests, and after a 401 from BugTracker)."""
+    _TOKEN_CACHE["token"] = ""
+    _TOKEN_CACHE["expires_at"] = 0.0
+
+
+async def _drain_keyset(fetch_page) -> list:
+    """Read every row from a keyset-paginated query.
+
+    `fetch_page(after)` returns the next batch ordered by `feedback_id`, or an
+    empty batch at the end. Keyset paging keeps advancing even when a row
+    cannot be synced, so a permanently failing record cannot stall the loop.
+    """
+    rows: list = []
+    after = ""
+    while True:
+        batch = await fetch_page(after)
+        if not batch:
+            return rows
+        rows.extend(batch)
+        after = str(batch[-1]["feedback_id"])
+
+
+
 async def _get_access_token() -> str:
-    """Get a valid Zoho access token, refreshing if needed."""
+    """Return a usable Zoho access token, refreshing at most once per TTL.
+
+    Zoho's token endpoint returns a ~1h token. Refreshing per API call burned
+    one request per feedback row and made long syncs slower and rate-limit
+    prone, so the token is cached in-process and refreshes are single-flight.
+    """
     if ZOHO_ACCESS_TOKEN:
         return ZOHO_ACCESS_TOKEN
 
-    if ZOHO_REFRESH_TOKEN and ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET:
+    if not (ZOHO_REFRESH_TOKEN and ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET):
+        return ""
+
+    async with _TOKEN_LOCK:
+        now = time.monotonic()
+        if _TOKEN_CACHE["token"] and now < _TOKEN_CACHE["expires_at"]:
+            return _TOKEN_CACHE["token"]
+
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
@@ -96,11 +153,20 @@ async def _get_access_token() -> str:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data.get("access_token", ZOHO_ACCESS_TOKEN)
-            except Exception:
-                pass
+                    token = data.get("access_token") or ""
+                    if token:
+                        ttl = _token_ttl_seconds(data.get("expires_in"))
+                        _TOKEN_CACHE["token"] = token
+                        _TOKEN_CACHE["expires_at"] = now + ttl
+                        return token
+                else:
+                    logger.warning(
+                        "Zoho token refresh failed: %s", resp.status_code
+                    )
+            except Exception as exc:
+                logger.exception("Error refreshing Zoho access token: %s", exc)
 
-    return ZOHO_ACCESS_TOKEN or ""
+    return ""
 
 
 def _map_feedback_to_bugtracker(feedback: dict) -> dict:
@@ -267,24 +333,25 @@ async def sync_all_pending() -> int:
         logger.warning("Zoho BugTracker not configured, skipping sync_all")
         return 0
 
-    access_token = await _get_access_token()
-    if not access_token:
-        logger.warning("No Zoho access token available for sync_all")
-        return 0
+    from app.database import get_db
 
-    import sqlite3
+    db = await get_db()
+    try:
+        async def fetch_page(after: str) -> list:
+            cursor = await db.execute(
+                "SELECT * FROM feedback "
+                "WHERE (bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL) "
+                "AND feedback_id > ? ORDER BY feedback_id LIMIT ?",
+                (after, SYNC_BATCH_SIZE),
+            )
+            return [dict(row) for row in await cursor.fetchall()]
 
-    db_path = os.getenv("DMS_DB_PATH", "data/dms.db")
-    c = sqlite3.connect(db_path)
-    c.row_factory = sqlite3.Row
-    rows = c.execute(
-        "SELECT * FROM feedback WHERE (bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL) LIMIT 50"
-    ).fetchall()
-    c.close()
+        rows = await _drain_keyset(fetch_page)
+    finally:
+        await db.close()
 
     synced = 0
-    for row in rows:
-        feedback = dict(row)
+    for feedback in rows:
         try:
             bug_id = await _create_bug_in_bugtracker(feedback)
             if bug_id:
@@ -307,17 +374,25 @@ async def sync_bugtracker_updates() -> int:
 
     access_token = await _get_access_token()
     if not access_token:
+        logger.warning("No Zoho access token available for status pull")
         return 0
 
-    import sqlite3
+    from app.database import get_db
 
-    db_path = os.getenv("DMS_DB_PATH", "data/dms.db")
-    c = sqlite3.connect(db_path)
-    c.row_factory = sqlite3.Row
-    rows = c.execute(
-        "SELECT feedback_id, bugtracker_id FROM feedback WHERE bugtracker_id IS NOT NULL LIMIT 100"
-    ).fetchall()
-    c.close()
+    db = await get_db()
+    try:
+        async def fetch_page(after: str) -> list:
+            cursor = await db.execute(
+                "SELECT feedback_id, bugtracker_id FROM feedback "
+                "WHERE bugtracker_id IS NOT NULL AND feedback_id > ? "
+                "ORDER BY feedback_id LIMIT ?",
+                (after, SYNC_BATCH_SIZE),
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
+        rows = await _drain_keyset(fetch_page)
+    finally:
+        await db.close()
 
     updated = 0
     for row in rows:

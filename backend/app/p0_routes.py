@@ -3786,9 +3786,10 @@ async def list_feedback(request: Request, status: Optional[str] = None, issue_ty
 async def zoho_bugtracker_webhook(request: Request):
     """
     Webhook endpoint for Zoho BugTracker bug status updates.
-    
-    Zoho BugTracker can POST to this endpoint when a bug status changes.
-    Expected payload: JSON with bug_id, status, and optionally feedback_id.
+
+    Expects JSON with bug_id/id and status/bug_status, optionally feedback_id.
+    Delegates to the shared handler so this route and /zoho/webhook cannot
+    drift apart.
     """
     try:
         payload = await request.json()
@@ -3797,52 +3798,11 @@ async def zoho_bugtracker_webhook(request: Request):
 
     bug_id = payload.get("bug_id") or payload.get("id")
     new_status = payload.get("status") or payload.get("bug_status")
-    feedback_id = payload.get("feedback_id")
 
     if not bug_id or not new_status:
         raise HTTPException(status_code=422, detail="bug_id and status are required")
 
-    # Map BugTracker status to local status.
-    from .bugtracker_sync import _map_bugtracker_to_status
-    local_status = _map_bugtracker_to_status(new_status)
-
-    # If feedback_id not in payload, try to find by bugtracker_id
-    if not feedback_id:
-        db = await get_db()
-        try:
-            cursor = await db.execute(
-                "SELECT feedback_id FROM feedback WHERE bugtracker_id = ?", (str(bug_id),)
-            )
-            row = await cursor.fetchone()
-            if row:
-                feedback_id = row["feedback_id"]
-        finally:
-            await db.close()
-
-    if not feedback_id:
-        logger.warning("BugTracker webhook: no feedback found for bug_id %s", bug_id)
-        return {"status": "ignored", "reason": "no_feedback_found"}
-
-    # Update local feedback status
-    db = await get_db()
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        cursor = await db.execute(
-            "UPDATE feedback SET status = ?, bugtracker_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
-            (local_status, feedback_id, local_status),
-        )
-        await db.commit()
-        if cursor.rowcount > 0:
-            logger.info("BugTracker webhook: updated feedback %s to status %s", feedback_id, local_status)
-            return {"status": "updated", "feedback_id": feedback_id, "new_status": local_status}
-        else:
-            return {"status": "no_change", "feedback_id": feedback_id}
-    except Exception as exc:
-        await db.rollback()
-        logger.exception("BugTracker webhook failed for %s: %s", feedback_id, exc)
-        raise HTTPException(status_code=500, detail="Webhook processing failed")
-    finally:
-        await db.close()
+    return await handle_bugtracker_webhook(payload)
 
 
 # --- Zoho BugTracker Webhook & Cron ---
@@ -3868,15 +3828,18 @@ async def bugtracker_cron_sync(request: Request):
     Call this periodically (e.g., every 5 minutes via cron job).
     Requires a shared secret in the Authorization header or query param.
     """
-    # Simple shared secret auth for cron
-    import os
-    cron_secret = os.getenv("ZOHO_CRON_SECRET")
-    if cron_secret:
-        auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Missing cron secret")
-        if auth[7:] != cron_secret:
-            raise HTTPException(status_code=403, detail="Invalid cron secret")
+    # Fail closed: an unset secret must not silently expose a sync trigger.
+    cron_secret = os.getenv("ZOHO_CRON_SECRET", "")
+    if not cron_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Scheduled sync endpoint is disabled; run the sync via the host cron job",
+        )
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing cron secret")
+    if not hmac.compare_digest(auth[7:], cron_secret):
+        raise HTTPException(status_code=403, detail="Invalid cron secret")
 
     synced = await sync_bugtracker_updates()
     return {"synced": synced}

@@ -157,7 +157,23 @@ def test_bugtracker_webhook_uses_bugtracker_status_mapping(client, admin_headers
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["new_status"] == "closed"
+    body = response.json()
+    assert body["success"] is True, body
+    assert body["status"] == "closed", body
+    assert body["feedback_id"] == feedback_id
+
+    async def read_status():
+        db = await get_db()
+        try:
+            row = await (await db.execute(
+                "SELECT status FROM feedback WHERE feedback_id = ?", (feedback_id,)
+            )).fetchone()
+            assert row is not None
+            return row["status"]
+        finally:
+            await db.close()
+
+    assert asyncio.run(read_status()) == "closed"
 
 
 def test_create_feedback_duplicate():
