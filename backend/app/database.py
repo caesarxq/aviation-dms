@@ -369,6 +369,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     owner_id TEXT,
     bugtracker_id TEXT,
     bugtracker_url TEXT,
+    bugtracker_sync_state TEXT NOT NULL DEFAULT 'pending',
+    -- Legacy Forms/Sheets columns retained for non-destructive upgrade compatibility only.
     zoho_form_record_id TEXT,
     zoho_form_sync_state TEXT NOT NULL DEFAULT 'pending',
     zoho_sheet_row_id TEXT,
@@ -2349,6 +2351,16 @@ async def init_db():
         await _add_column_if_missing(db, "corrective_actions", "audit_report_id", "TEXT")
         await _add_column_if_missing(db, "feedback", "bugtracker_id", "TEXT")
         await _add_column_if_missing(db, "feedback", "bugtracker_url", "TEXT")
+        feedback_column_cursor = await db.execute("PRAGMA table_info(feedback)")
+        feedback_columns = {row["name"] for row in await feedback_column_cursor.fetchall()}
+        if "bugtracker_sync_state" not in feedback_columns:
+            await _add_column_if_missing(
+                db, "feedback", "bugtracker_sync_state", "TEXT NOT NULL DEFAULT 'pending'"
+            )
+            if "zoho_form_sync_state" in feedback_columns:
+                await db.execute(
+                    "UPDATE feedback SET bugtracker_sync_state = COALESCE(NULLIF(zoho_form_sync_state, ''), 'pending')"
+                )
         # New columns for PDF-aligned risk assessments and missions
         await _add_column_if_missing(db, "risk_assessments", "pic_full_name", "TEXT")
         await _add_column_if_missing(db, "risk_assessments", "location_coordinates", "TEXT")

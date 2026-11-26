@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, FileText, ShieldCheck, Plus, Shuffle } from "lucide-react";
 import api from "../api/client";
+import { listDocuments } from "../api/documents";
 import { Modal } from "../components/ui/Modal";
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
@@ -17,6 +18,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
+const DOCUMENT_PAGE_SIZE = 50;
+
 export function DocumentCatalogue() {
   const { toast } = useToast();
   const { hasPermission } = useAuth();
@@ -24,6 +27,7 @@ export function DocumentCatalogue() {
   const canUpdate = hasPermission("document:update");
   const canEdit = canUpdate || hasPermission("document:propose");
   const [showNewDoc, setShowNewDoc] = useState(false);
+  const [documentOffset, setDocumentOffset] = useState(0);
   const [showVersionDiffModal, setShowVersionDiffModal] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [newDocForm, setNewDocForm] = useState({
@@ -32,10 +36,11 @@ export function DocumentCatalogue() {
   });
   const [newDocError, setNewDocError] = useState("");
   const qc = useQueryClient();
-  const { data: docs = [], isLoading } = useQuery({
-    queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
+  const { data: documentPage, isLoading } = useQuery({
+    queryKey: ["documents", { limit: DOCUMENT_PAGE_SIZE, offset: documentOffset }],
+    queryFn: () => listDocuments({ limit: DOCUMENT_PAGE_SIZE, offset: documentOffset }),
   });
+  const docs = documentPage?.data ?? [];
 
   useUnsavedChanges(showNewDoc && dirty);
 
@@ -166,9 +171,9 @@ export function DocumentCatalogue() {
       </Modal>
 
       <section className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="app-surface p-4"><div className="app-label">Total documents</div><div className="mt-2 text-2xl font-bold text-kfl-text">{docs.length}</div></div>
-        <div className="app-surface p-4"><div className="app-label">Published baseline</div><div className="mt-2 text-2xl font-bold text-kfl-status-success">{docs.filter((d: any) => d.status === "published").length}</div></div>
-        <div className="app-surface p-4"><div className="app-label">KCAA-controlled</div><div className="mt-2 flex items-center gap-2 text-2xl font-bold text-kfl-status-info"><ShieldCheck size={21} />{docs.filter((d: any) => d.kcaa_approval_required).length}</div></div>
+        <div className="app-surface p-4"><div className="app-label">Total documents</div><div className="mt-2 text-2xl font-bold text-kfl-text">{documentPage?.total ?? 0}</div></div>
+        <div className="app-surface p-4"><div className="app-label">Published on this page</div><div className="mt-2 text-2xl font-bold text-kfl-status-success">{docs.filter((d: any) => d.status === "published").length}</div></div>
+        <div className="app-surface p-4"><div className="app-label">KCAA-controlled on this page</div><div className="mt-2 flex items-center gap-2 text-2xl font-bold text-kfl-status-info"><ShieldCheck size={21} />{docs.filter((d: any) => d.kcaa_approval_required).length}</div></div>
       </section>
 
       <section className="app-surface overflow-hidden">
@@ -199,6 +204,33 @@ export function DocumentCatalogue() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {documentPage && (
+          <div className="flex items-center justify-between border-t border-kfl-border px-4 py-3">
+            <span className="text-xs text-kfl-muted">
+              {documentPage.total === 0 ? "0 documents" : `${documentOffset + 1}–${documentOffset + docs.length} of ${documentPage.total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={documentOffset === 0 || isLoading}
+                onClick={() => setDocumentOffset((offset) => Math.max(0, offset - DOCUMENT_PAGE_SIZE))}
+              >
+                Previous
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={documentOffset + DOCUMENT_PAGE_SIZE >= documentPage.total || isLoading}
+                onClick={() => setDocumentOffset((offset) => offset + DOCUMENT_PAGE_SIZE)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         )}
       </section>

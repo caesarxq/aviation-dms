@@ -195,6 +195,19 @@ export function FeedbackPage() {
                       <label className="block text-xs font-semibold text-kfl-muted">Status</label>
                       {statusBadge(viewing.status)}
                     </div>
+                    {viewing.bugtracker_url && (
+                      <div>
+                        <label className="block text-xs font-semibold text-kfl-muted">Zoho BugTracker</label>
+                        <a
+                          href={viewing.bugtracker_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-kfl-status-info underline underline-offset-2"
+                        >
+                          Open in Zoho BugTracker
+                        </a>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-semibold text-kfl-muted">Priority</label>
                       <p className="text-sm text-kfl-secondary">{viewing.priority}</p>

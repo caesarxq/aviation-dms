@@ -72,7 +72,7 @@ sudo env \
   ACME_EMAIL="${ACME_EMAIL}" \
   docker compose -f docker-compose.yml -f docker-compose.staging.yml \
     --env-file .env.staging config --format json |
-  python3 -c 'import json, sys
+  sudo python3 -c 'import json, os, sys
 config = json.load(sys.stdin)
 expected = {"backend": [("127.0.0.1", "8000", 8000, "tcp")], "frontend": [("127.0.0.1", "8081", 80, "tcp")], "upload-validator": [], "clamd": []}
 actual = {name: [(p.get("host_ip"), str(p.get("published")), int(p["target"]), p.get("protocol", "tcp")) for p in config["services"][name].get("ports", [])] for name in expected}
@@ -83,7 +83,12 @@ backend_env = config["services"]["backend"].get("environment", {})
 if str(backend_env.get("INVITE_EMAIL_ENABLED")).lower() != "true" or str(backend_env.get("NOTIFICATION_ENABLED")).lower() != "true":
     print("ERROR: staging email delivery flags must be enabled")
     sys.exit(1)
-print("Staging host port bindings and enabled email flags verified")'
+for secret_name in ("zoho_client_id", "zoho_client_secret", "zoho_refresh_token"):
+    secret_path = config.get("secrets", {}).get(secret_name, {}).get("file")
+    if not secret_path or not os.path.isfile(secret_path):
+        print("ERROR: required protected BugTracker secret file is missing: " + secret_name)
+        sys.exit(1)
+print("Staging bindings, email flags, and BugTracker secret-file sources verified")'
 
 # --- Pull images from registry ---
 echo "--- Pulling images from registry ---"
@@ -147,12 +152,13 @@ done
 
 # --- Run smoke test ---
 echo "--- Running smoke test ---"
-sudo docker exec kfl-aviation-dms-staging-backend-1 \
-  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" \
-  && echo "Backend health check: OK" || {
-    echo "ERROR: Backend health check failed"
-    exit 1
-  }
+if sudo docker exec kfl-aviation-dms-staging-backend-1 \
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"; then
+  echo "Backend health check: OK"
+else
+  echo "ERROR: Backend health check failed"
+  exit 1
+fi
 
 # --- Verify runtime release tag matches the requested image tag ---
 reported_tag=$(sudo docker exec kfl-aviation-dms-staging-backend-1 \

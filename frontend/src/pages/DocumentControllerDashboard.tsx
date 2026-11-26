@@ -7,7 +7,7 @@ import {
   CheckCircle,
   XCircle,
 } from "lucide-react";
-import api from "../api/client";
+import { listDocuments } from "../api/documents";
 import {
   controlledDocumentApi,
   DocumentClassification,
@@ -99,11 +99,12 @@ export function DocumentControllerDashboard() {
   const [showPermModal, setShowPermModal] = useState(false);
   const [permGrants, setPermGrants] = useState<DocumentPermissionGrant[]>([]);
 
-  const { data: docs = [], isLoading: docsLoading } = useQuery({
+  const { data: documentPage, isLoading: docsLoading } = useQuery({
     queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data),
+    queryFn: () => listDocuments(),
     enabled: canManage,
   });
+  const docs = documentPage?.data ?? [];
 
   const { data: classifications = CLASSIFICATIONS } = useQuery({
     queryKey: ["document-classifications"],

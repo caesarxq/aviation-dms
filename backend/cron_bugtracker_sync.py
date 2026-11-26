@@ -12,31 +12,73 @@ It performs two sync operations:
 
 import os
 import sys
+import tempfile
 import asyncio
 import logging
 from datetime import datetime
 
-# Add the backend directory to the path
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This script sits beside the app/ package, both in the repo (backend/) and in
+# the image (/app). Resolving the parent of this file's directory points at /
+# inside the container, where neither code nor logs are writable.
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BACKEND_DIR)
 
-# Set up logging
-log_dir = os.path.join(BACKEND_DIR, "logs")
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, f"bugtracker_sync_{datetime.now().strftime('%Y%m%d')}.log")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+def _resolve_log_dir(backend_dir: str) -> str:
+    """Return a writable directory for sync logs.
+
+    Candidates are tried in order: an explicit DMS_LOG_DIR, the source tree
+    logs/ directory, a data-relative logs/ directory, an explicit fallback, and
+    finally the platform temp directory. The container root filesystem is not
+    writable by the backend UID, so a single fixed path would crash the job.
+    """
+    candidates = [
+        os.getenv("DMS_LOG_DIR", ""),
+        os.path.join(backend_dir, "logs"),
+        os.path.join(backend_dir, "data", "logs"),
+        os.getenv("DMS_LOG_FALLBACK_DIR", ""),
+        tempfile.gettempdir(),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            probe = os.path.join(candidate, ".bugtracker-sync-write-probe")
+            with open(probe, "w", encoding="utf-8"):
+                pass
+            os.remove(probe)
+        except OSError:
+            continue
+        return candidate
+    raise RuntimeError("No writable directory available for BugTracker sync logs")
+
+
+log_dir: str | None = None
+log_file: str | None = None
+
+
+def _configure_logging() -> str:
+    """Attach file and console handlers for a real sync run.
+
+    Deliberately called from the entry point rather than at import time so that
+    importing this module (tests, probes) has no filesystem side effects.
+    """
+    global log_dir, log_file
+    log_dir = _resolve_log_dir(BACKEND_DIR)
+    log_file = os.path.join(log_dir, f"bugtracker_sync_{datetime.now().strftime('%Y%m%d')}.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    return log_dir
+
 
 logger = logging.getLogger(__name__)
-
-from datetime import datetime
 
 
 async def run_sync():
@@ -71,6 +113,6 @@ async def run_sync():
 
 
 if __name__ == "__main__":
-    from datetime import datetime
+    _configure_logging()
     exit_code = asyncio.run(run_sync())
     sys.exit(exit_code)

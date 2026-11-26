@@ -13,40 +13,67 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# Configuration from environment
-ZOHO_ACCESS_TOKEN = os.getenv("ZOHO_ACCESS_TOKEN", "")
-ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN", "")
-ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "")
-ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET", "")
-ZOHO_BUGTRACKER_PORTAL = os.getenv("ZOHO_BUGTRACKER_PORTAL", "kfldotke")
-ZOHO_BUGTRACKER_PROJECT_ID = os.getenv("ZOHO_BUGTRACKER_PROJECT_ID", "2730932000000114802")
-ZOHO_API_BASE = "https://bugtracker.zoho.com/api/v1"
+# Configuration from environment or protected, read-only secret files.
+def _read_config_value(name: str, default: str = "") -> str:
+    secret_path = os.getenv(f"{name}_FILE")
+    if secret_path:
+        try:
+            return Path(secret_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            logger.error("Unable to read configured secret file for %s", name)
+            return ""
+    return os.getenv(name, default)
 
-# Field mapping: Feedback field -> BugTracker custom field name
-FIELD_MAP = {
-    "feedback_id": "Feedback ID",
-    "ticket_number": "Ticket Number",
-    "issue_type": "Issue Type",
-    "app_area": "App Area",
-    "goal": "Goal",
-    "impact": "Impact",
-    "priority": "Priority",
-    "contact": "Contact Email",
-    "status": "Status",
-    "created_at": "Created At",
-}
+
+ZOHO_ACCESS_TOKEN = _read_config_value("ZOHO_ACCESS_TOKEN")
+ZOHO_REFRESH_TOKEN = _read_config_value("ZOHO_REFRESH_TOKEN")
+ZOHO_CLIENT_ID = _read_config_value("ZOHO_CLIENT_ID")
+ZOHO_CLIENT_SECRET = _read_config_value("ZOHO_CLIENT_SECRET")
+ZOHO_BUGTRACKER_PORTAL = os.getenv("ZOHO_BUGTRACKER_PORTAL", "kfldotke")
+ZOHO_BUGTRACKER_PORTAL_ID = os.getenv("ZOHO_BUGTRACKER_PORTAL_ID", "")
+ZOHO_BUGTRACKER_PROJECT_ID = os.getenv("ZOHO_BUGTRACKER_PROJECT_ID", "2730932000000114802")
+# Zoho mounts bugs under /restapi/portal/{portal}/projects/{project}/bugs/.
+# The previous /api/v1/projects/... path is not a Zoho route and returns the
+# BugTracker HTML "Page Not Found" (HTTP 404).
+ZOHO_API_BASE = "https://bugtracker.zoho.com/restapi"
+
+
+def _api_portal() -> str:
+    """Portal segment for API paths.
+
+    Zoho accepts the numeric portal id or the portal link name. The id is
+    preferred when configured, because a link name can be renamed.
+    """
+    return ZOHO_BUGTRACKER_PORTAL_ID or ZOHO_BUGTRACKER_PORTAL
+
+
+def _bug_collection_url() -> str:
+    """URL of the project's bug collection."""
+    return (
+        f"{ZOHO_API_BASE}/portal/{quote(_api_portal(), safe='')}"
+        f"/projects/{quote(ZOHO_BUGTRACKER_PROJECT_ID, safe='')}/bugs/"
+    )
+
+
+def _bug_item_url(bug_id: str) -> str:
+    """URL of a single bug."""
+    return f"{_bug_collection_url()}{quote(str(bug_id), safe='')}/"
 
 
 def _is_configured() -> bool:
-    """Check if BugTracker integration is minimally configured."""
-    return bool(ZOHO_ACCESS_TOKEN and ZOHO_BUGTRACKER_PROJECT_ID)
+    """Check whether BugTracker OAuth credentials and project configuration exist."""
+    has_access_token = bool(ZOHO_ACCESS_TOKEN)
+    has_refresh_credentials = bool(ZOHO_REFRESH_TOKEN and ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET)
+    return bool((has_access_token or has_refresh_credentials) and ZOHO_BUGTRACKER_PROJECT_ID)
 
 
 async def _get_access_token() -> str:
@@ -77,12 +104,20 @@ async def _get_access_token() -> str:
 
 
 def _map_feedback_to_bugtracker(feedback: dict) -> dict:
-    """Map a local feedback record to BugTracker bug fields."""
+    """Map a local feedback record to BugTracker bug create fields.
+
+    Only fields Zoho documents for `POST .../bugs/` are sent. The project is
+    part of the URL, and Zoho rejects unknown members such as a nested
+    `custom_fields` object, so the remaining detail goes into the description.
+    """
     return {
-        "project_id": ZOHO_BUGTRACKER_PROJECT_ID,
-        "title": f"[{feedback.get('ticket_number', '')}] {feedback.get('issue_type', 'Feedback')} — {feedback.get('app_area', '')}",
+        "title": (
+            f"[{feedback.get('ticket_number', '')}] "
+            f"{feedback.get('issue_type', 'Feedback')} — {feedback.get('app_area', '')}"
+        )[:255],
         "description": (
             f"**Ticket:** {feedback.get('ticket_number', '')}\n"
+            f"**Feedback ID:** {feedback.get('feedback_id', '')}\n"
             f"**Issue Type:** {feedback.get('issue_type', '')}\n"
             f"**App Area:** {feedback.get('app_area', '')}\n"
             f"**Goal:** {feedback.get('goal', '')}\n"
@@ -94,18 +129,8 @@ def _map_feedback_to_bugtracker(feedback: dict) -> dict:
             f"**Created:** {feedback.get('created_at', '')}\n"
         ),
         "priority": _map_priority(feedback.get("priority", "P3")),
-        "status": _map_status(feedback.get("status", "new")),
-        "custom_fields": {
-            "Feedback ID": feedback.get("feedback_id", ""),
-            "Ticket Number": feedback.get("ticket_number", ""),
-            "Issue Type": feedback.get("issue_type", ""),
-            "App Area": feedback.get("app_area", ""),
-            "Goal": feedback.get("goal", ""),
-            "Impact": feedback.get("impact", ""),
-            "Contact Email": feedback.get("contact", ""),
-            "Created At": feedback.get("created_at", ""),
-        },
     }
+
 
 
 def _map_priority(priority: str) -> str:
@@ -119,26 +144,16 @@ def _map_priority(priority: str) -> str:
     return mapping.get(priority, "Low")
 
 
-def _map_status(status: str) -> str:
-    """Map local status to BugTracker status."""
-    mapping = {
-        "new": "Open",
-        "in_progress": "In Progress",
-        "resolved": "Fixed",
-        "closed": "Closed",
-        "rejected": "Rejected",
-    }
-    return mapping.get(status, "Open")
-
-
 def _map_bugtracker_to_status(bt_status: str) -> str:
     """Map BugTracker status back to local feedback status."""
     mapping = {
         "Open": "new",
+        "Reopened": "new",
         "In Progress": "in_progress",
         "Fixed": "resolved",
         "Closed": "closed",
         "Rejected": "rejected",
+        "Won't Fix": "rejected",
     }
     return mapping.get(bt_status, "new")
 
@@ -185,23 +200,29 @@ async def _create_bug_in_bugtracker(feedback: dict) -> Optional[str]:
 
     payload = _map_feedback_to_bugtracker(feedback)
 
-    # BugTracker API: create bug
-    url = f"{ZOHO_API_BASE}/projects/{ZOHO_BUGTRACKER_PROJECT_ID}/bugs"
+    # Zoho BugTracker: POST /restapi/portal/{portal}/projects/{project}/bugs/
+    url = _bug_collection_url()
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
-        "Content-Type": "application/json",
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, headers=headers, json=payload, timeout=30)
+            # Zoho Projects/BugTracker REST v1 reads create fields from a
+            # form-encoded body. A JSON body is not parsed at all and the API
+            # replies 400 {"error":{"code":6831,"message":"Input Parameter Missing"}}.
+            resp = await client.post(url, headers=headers, data=payload, timeout=30)
             if resp.status_code in (200, 201):
-                data = resp.json()
-                bug_id = data.get("bug_id") or data.get("id") or data.get("bug", {}).get("bug_id")
+                bug_id = _extract_bug_id(resp.json())
                 if bug_id:
-                    await _update_feedback_bugtracker_id(feedback["feedback_id"], str(bug_id), "synced")
+                    await _update_feedback_bugtracker_id(feedback["feedback_id"], bug_id, "synced")
                     logger.info("Created BugTracker bug %s for feedback %s", bug_id, feedback["feedback_id"])
-                    return str(bug_id)
+                    return bug_id
+                logger.warning(
+                    "BugTracker create returned %s without a bug id: %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
             else:
                 logger.warning(
                     "BugTracker bug creation failed: %s %s",
@@ -226,7 +247,7 @@ async def _update_feedback_bugtracker_id(feedback_id: str, bugtracker_id: str, s
     try:
         await db.execute(
             """UPDATE feedback
-               SET bugtracker_id = ?, bugtracker_url = ?, zoho_form_sync_state = ?
+               SET bugtracker_id = ?, bugtracker_url = ?, bugtracker_sync_state = ?
                WHERE feedback_id = ?""",
             (bugtracker_id, bugtracker_url, state, feedback_id),
         )
@@ -257,7 +278,7 @@ async def sync_all_pending() -> int:
     c = sqlite3.connect(db_path)
     c.row_factory = sqlite3.Row
     rows = c.execute(
-        "SELECT * FROM feedback WHERE (zoho_form_sync_state = 'pending' OR bugtracker_id IS NULL) LIMIT 50"
+        "SELECT * FROM feedback WHERE (bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL) LIMIT 50"
     ).fetchall()
     c.close()
 
@@ -309,12 +330,13 @@ async def sync_bugtracker_updates() -> int:
 
                 db2 = await get_db()
                 try:
-                    await db2.execute(
-                        "UPDATE feedback SET status = ?, zoho_form_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
+                    cursor = await db2.execute(
+                        "UPDATE feedback SET status = ?, bugtracker_sync_state = 'synced' WHERE feedback_id = ? AND status != ?",
                         (local_status, row["feedback_id"], local_status),
                     )
                     await db2.commit()
-                    updated += 1
+                    if cursor.rowcount > 0:
+                        updated += 1
                 finally:
                     await db2.close()
         except Exception as exc:
@@ -323,9 +345,61 @@ async def sync_bugtracker_updates() -> int:
     return updated
 
 
+def _extract_bug_id(payload: Any) -> Optional[str]:
+    """Return the new bug's id from a BugTracker create response.
+
+    Zoho answers `POST .../bugs/` with `{"bugs": [{"id_string": "..."}]}`; older
+    payloads and wrappers use `id`, `bug_id`, or a single `bug` object.
+    """
+    candidates = []
+    if isinstance(payload, dict):
+        bugs = payload.get("bugs")
+        if isinstance(bugs, list) and bugs:
+            candidates.append(bugs[0])
+        elif isinstance(payload.get("bug"), dict):
+            candidates.append(payload["bug"])
+        candidates.append(payload)
+
+    for node in candidates:
+        if not isinstance(node, dict):
+            continue
+        for key in ("id_string", "bug_id", "id"):
+            value = node.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+    return None
+
+
+def _extract_bug_status(payload: Any) -> Optional[str]:
+    """Return the bug status name from a BugTracker bug response.
+
+    Zoho returns the status as an object (`{"name": "Open"}`) in REST v1, but
+    older payloads and the webhook carry a plain string under `status` or
+    `bug_status`, so both shapes are accepted.
+    """
+    bug = payload
+    if isinstance(payload, dict):
+        if isinstance(payload.get("bugs"), list):
+            if not payload["bugs"]:
+                return None
+            bug = payload["bugs"][0]
+        elif isinstance(payload.get("bug"), dict):
+            bug = payload["bug"]
+
+    if not isinstance(bug, dict):
+        return None
+
+    status = bug.get("status") or bug.get("bug_status")
+    if isinstance(status, dict):
+        status = status.get("name") or status.get("type")
+    if isinstance(status, str) and status.strip():
+        return status.strip()
+    return None
+
+
 async def _get_bugtracker_bug_status(access_token: str, bug_id: str) -> Optional[str]:
     """Get the current status of a BugTracker bug."""
-    url = f"{ZOHO_API_BASE}/projects/{ZOHO_BUGTRACKER_PROJECT_ID}/bugs/{bug_id}"
+    url = _bug_item_url(bug_id)
     headers = {
         "Authorization": f"Zoho-oauthtoken {access_token}",
     }
@@ -334,9 +408,10 @@ async def _get_bugtracker_bug_status(access_token: str, bug_id: str) -> Optional
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, timeout=30)
             if resp.status_code == 200:
-                data = resp.json()
-                bug = data.get("bug", data)
-                return bug.get("status") or bug.get("bug_status")
+                return _extract_bug_status(resp.json())
+            logger.warning(
+                "BugTracker bug %s lookup failed: %s", bug_id, resp.status_code
+            )
     except Exception as exc:
         logger.exception("Error fetching BugTracker bug %s status: %s", bug_id, exc)
     return None
@@ -395,7 +470,7 @@ async def handle_bugtracker_webhook(webhook_data: dict) -> dict:
             now = datetime.now(timezone.utc).isoformat()
             await db.execute(
                 """UPDATE feedback
-                   SET status = ?, zoho_form_sync_state = 'synced', updated_at = ?, updated_by = 'bugtracker_webhook'
+                   SET status = ?, bugtracker_sync_state = 'synced', updated_at = ?, updated_by = 'bugtracker_webhook'
                    WHERE feedback_id = ? AND status != ?""",
                 (local_status, now, feedback_id, local_status),
             )

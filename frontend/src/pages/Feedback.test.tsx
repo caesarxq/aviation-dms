@@ -44,9 +44,9 @@ describe("FeedbackPage", () => {
         status: "new",
         priority: "medium",
         owner_id: null,
-        zoho_form_record_id: null,
-        zoho_form_sync_state: "pending",
-        zoho_sheet_row_id: null,
+        bugtracker_id: "BT-1",
+        bugtracker_url: "https://bugtracker.zoho.com/portal/kfldotke#zp/projects/project/bugs/BT-1",
+        bugtracker_sync_state: "synced",
         next_update_at: null,
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
@@ -55,6 +55,11 @@ describe("FeedbackPage", () => {
     ]);
     renderWithProvider(<FeedbackPage />);
     expect(await screen.findByText("FBK-20260101-0001")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(screen.getByRole("link", { name: "Open in Zoho BugTracker" })).toHaveAttribute(
+      "href",
+      "https://bugtracker.zoho.com/portal/kfldotke#zp/projects/project/bugs/BT-1",
+    );
   });
 
   it("shows empty state when no feedback", async () => {

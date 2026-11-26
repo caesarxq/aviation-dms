@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import DOMPurify from "dompurify";
 import api from "../api/client";
+import { listDocuments } from "../api/documents";
 import { Plus, Check, X, ArrowUpRight } from "lucide-react";
 import { Modal } from "../components/ui/Modal";
 import { useToast } from "../components/ui/Toast";
@@ -55,7 +56,7 @@ export function DocumentProposals() {
 
   const { data: docs = [] } = useQuery({
     queryKey: ["documents"],
-    queryFn: () => api.get("/p0/documents").then((r: any) => r.data?.data || []),
+    queryFn: () => listDocuments().then((page) => page.data),
   });
 
   useUnsavedChanges(showForm && dirty);

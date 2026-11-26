@@ -332,50 +332,20 @@ emergency_plan, sop, checklist, form, policy, procedure
 
 ---
 
-## 11. Zoho BugTracker Integration — Replace Form + Sheet
+## 11. Zoho BugTracker Integration — Forms/Sheets Decommissioned
 
 ### Current State
-- **Feedback sync** (`feedback_sync.py`): Dual write to Zoho Forms (record) + Zoho Sheets (row)
-- **Config**: `ZOHO_FORM_ID`, `ZOHO_SHEET_ID`, OAuth tokens
-- **Issues**: 
-  - Forms API limited; Sheets API for tabular data
-  - No bidirectional sync (status updates from Zoho not pulled)
-  - Manual credential management (refresh tokens)
+- Zoho Forms and Zoho Sheets dual-write/pull integrations are decommissioned; `backend/app/feedback_sync.py` is removed.
+- Zoho BugTracker remains the supported external issue tracker for feedback. Feedback creation still queues a BugTracker push, while the cron and webhook paths synchronize local status.
+- BugTracker identifiers, URL, and sync state use `bugtracker_id`, `bugtracker_url`, and `bugtracker_sync_state`.
+- Existing Forms/Sheets columns are retained only as legacy database fields so existing SQLite data can be upgraded without destructive column drops. The startup migration copies the prior sync state into `bugtracker_sync_state` once.
+- OAuth refresh credentials are a valid configuration path; they are refreshed when an access token is not configured.
 
-### Zoho BugTracker (Target: `https://bugtracker.zoho.com/portal/kfldotke#zp/projects/2730932000000114802/dashboard/2730932000000114857`)
-**Advantages:**
-- Native bug/issue tracking with workflow (Open → In Progress → Fixed → Closed)
-- Custom fields, priorities, milestones, assignments
-- REST API for CRUD + webhooks for real-time sync
-- Portal for external reporters
-- Better RBAC than Forms+Sheets
-
-### Migration Plan
-1. **Create Zoho BugTracker project** for "KFL Aviation DMS Feedback"
-2. **Map feedback fields → BugTracker fields**:
-   | Feedback Field | BugTracker Field |
-   |----------------|------------------|
-   | ticket_number | Bug ID (auto) |
-   | issue_type | Category (custom) |
-   | app_area | Module (custom) |
-   | goal | Description |
-   | reproduction_steps | Steps to Reproduce |
-   | expected/actual_result | Expected/Actual Behavior |
-   | impact | Severity |
-   | priority | Priority (P1-P4) |
-   | status | Status (map: new→Open, in_progress→In Progress, resolved→Fixed, closed→Closed) |
-   | contact | Reporter Email |
-   | zoho_form_record_id | → BugTracker Bug ID |
-   | zoho_sheet_row_id | → remove |
-
-3. **Implement bidirectional sync**:
-   - **Push**: On feedback create/update → create/update BugTracker bug
-   - **Pull**: Webhook from BugTracker → update local feedback status/assignment
-   - **Conflict resolution**: Last-write-wins with timestamp comparison
-
-4. **Deprecate Forms+Sheets sync** after migration verified
-
-5. **Update `FeedbackCreate` model** to include `bugtracker_id`, `bugtracker_url`
+### Operational Requirements
+- Keep the BugTracker project configuration and `cron_bugtracker_sync.py` / Docker copy in place.
+- Staging Compose reads OAuth client ID, client secret, and refresh token from protected host-side secret files under `/opt/kfl-aviation-dms-staging/secrets/`; `.env.staging` contains file paths only, never the secret values.
+- Do not add Zoho Forms or Zoho Sheets credentials, webhook routes, or synchronization code.
+- Rotate any Zoho credentials exposed in prior conversations before using them for staging or production.
 
 ---
 
