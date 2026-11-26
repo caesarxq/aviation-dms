@@ -842,6 +842,21 @@ CREATE TABLE IF NOT EXISTS quality_audit_findings (
     FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
 );
 
+-- Audit planning resources (data sources, interviews, documents) linked to audits
+CREATE TABLE IF NOT EXISTS audit_resources (
+    resource_id TEXT PRIMARY KEY,
+    audit_id TEXT NOT NULL,
+    resource_type TEXT NOT NULL DEFAULT 'data_source',
+    resource_name TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'system',
+    updated_by TEXT NOT NULL DEFAULT 'system',
+    FOREIGN KEY (audit_id) REFERENCES quality_audits(audit_id)
+);
+
 -- Corrective Action Requests (CARs)
 CREATE TABLE IF NOT EXISTS corrective_actions (
     car_id TEXT PRIMARY KEY,

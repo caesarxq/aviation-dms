@@ -167,3 +167,91 @@ export const auditApi = {
       .get<any>("/p3/audit-findings/summary", { params: { department } })
       .then((r: any) => r.data),
 };
+
+/* ============ Quality Audits (Audit Planning) ============ */
+
+export interface QualityAudit {
+  audit_id: string;
+  title: string;
+  audit_type: string;
+  scope: string | null;
+  auditor_id: string;
+  auditee_id: string | null;
+  planned_date: string | null;
+  actual_date: string | null;
+  status: string;
+  findings_count: number;
+  overall_result: string | null;
+  report: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface QualityAuditCreate {
+  title: string;
+  audit_type?: string;
+  scope?: string;
+  auditor_id: string;
+  auditee_id?: string;
+  planned_date?: string;
+}
+
+export interface QualityAuditUpdate {
+  title?: string;
+  audit_type?: string;
+  scope?: string;
+  auditee_id?: string;
+  planned_date?: string;
+  actual_date?: string;
+  status?: string;
+  overall_result?: string;
+  report?: string;
+}
+
+export interface AuditResource {
+  resource_id: string;
+  audit_id: string;
+  resource_type: string;
+  resource_name: string;
+  description: string | null;
+  status: string;
+  created_at: string | null;
+  updated_at: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+export interface AuditResourceCreate {
+  resource_type?: string;
+  resource_name: string;
+  description?: string;
+}
+
+export interface AuditResourceUpdate {
+  resource_type?: string;
+  resource_name?: string;
+  description?: string;
+  status?: string;
+}
+
+export const qualityAuditApi = {
+  listQualityAudits: (params?: { status?: string; limit?: number; offset?: number }): Promise<QualityAudit[]> =>
+    api.get<QualityAudit[]>("/p1/quality-audits", { params }).then((r: any) => r.data),
+  getQualityAudit: (id: string): Promise<QualityAudit> =>
+    api.get<QualityAudit>(`/p1/quality-audits/${encodeURIComponent(id)}`).then((r: any) => r.data),
+  createQualityAudit: (data: QualityAuditCreate): Promise<QualityAudit> =>
+    api.post<QualityAudit>("/p1/quality-audits", data).then((r: any) => r.data),
+  updateQualityAudit: (id: string, data: QualityAuditUpdate): Promise<QualityAudit> =>
+    api.patch<QualityAudit>(`/p1/quality-audits/${encodeURIComponent(id)}`, data).then((r: any) => r.data),
+
+  listAuditResources: (auditId: string): Promise<AuditResource[]> =>
+    api.get<AuditResource[]>(`/p1/quality-audits/${encodeURIComponent(auditId)}/resources`).then((r: any) => r.data),
+  createAuditResource: (auditId: string, data: AuditResourceCreate): Promise<AuditResource> =>
+    api.post<AuditResource>(`/p1/quality-audits/${encodeURIComponent(auditId)}/resources`, data).then((r: any) => r.data),
+  updateAuditResource: (auditId: string, resourceId: string, data: AuditResourceUpdate): Promise<AuditResource> =>
+    api.patch<AuditResource>(`/p1/quality-audits/${encodeURIComponent(auditId)}/resources/${encodeURIComponent(resourceId)}`, data).then((r: any) => r.data),
+  deleteAuditResource: (auditId: string, resourceId: string): Promise<void> =>
+    api.delete(`/p1/quality-audits/${encodeURIComponent(auditId)}/resources/${encodeURIComponent(resourceId)}`).then(() => undefined),
+};

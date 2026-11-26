@@ -15,6 +15,7 @@ import { ResetPasswordPage } from "./pages/ResetPassword";
 import { WelcomePage } from "./pages/Welcome";
 import { ProfileSettingsPage } from "./pages/ProfileSettings";
 
+const AuditPlanning = lazy(() => import("./pages/AuditPlanning").then((module) => ({ default: module.AuditPlanning })));
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
 const OrganizationOverview = lazy(() => import("./pages/OrganizationOverview").then((module) => ({ default: module.OrganizationOverview })));
 const DocumentCatalogue = lazy(() => import("./pages/DocumentCatalogue").then((module) => ({ default: module.DocumentCatalogue })));
@@ -139,6 +140,7 @@ export default function App() {
               <Route path="/audit-reports" element={<RequireAccess permission="audit_report:read"><AuditReports /></RequireAccess>} />
               <Route path="/audit-findings" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
               <Route path="/audit-findings/:findingId" element={<RequireAccess permission="audit_finding:read"><AuditFindings /></RequireAccess>} />
+              <Route path="/audit-planning" element={<RequireAccess permission="safety:read"><AuditPlanning /></RequireAccess>} />
               <Route path="/audit-dashboard" element={<RequireAccess permission="audit_finding:read"><AuditDashboard /></RequireAccess>} />
               <Route path="/notifications" element={<RequireAccess permission="compliance:read"><Notifications /></RequireAccess>} />
               <Route path="/account/security" element={<ChangePasswordPage />} />

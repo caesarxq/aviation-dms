@@ -243,6 +243,7 @@ const sections: SectionProps[] = [
     icon: ScrollText,
     items: [
       { to: "/audit-reports", icon: FileText, label: "Audit Reports", permission: "audit_report:read" },
+      { to: "/audit-planning", icon: ClipboardList, label: "Audit Planning", permission: "safety:read" },
       { to: "/audit-findings", icon: AlertTriangle, label: "Audit Findings", permission: "audit_finding:read" },
       { to: "/audit-dashboard", icon: BarChart3, label: "Audit Dashboard", permission: "audit_finding:read" },
       { to: "/audit-trail", icon: ScrollText, label: "Audit Trail", permission: "audit:read" },
