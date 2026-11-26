@@ -175,7 +175,7 @@ describe("AppShell authentication screens", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "All modules" }));
     expect(screen.getByRole("button", { name: "Safety" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Flight" }));
+    await userEvent.click(screen.getByRole("button", { name: "Flight Ops" }));
     expect(within(screen.getByLabelText("All modules navigation")).getByRole("link", { name: "Dangerous Goods" })).toBeInTheDocument();
     expect(within(screen.getByLabelText("All modules navigation")).queryByRole("link", { name: "Missions" })).not.toBeInTheDocument();
   });

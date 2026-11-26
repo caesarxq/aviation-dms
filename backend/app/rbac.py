@@ -27,6 +27,7 @@ PERMISSIONS = [
     "occurrence:report", "occurrence:acknowledge", "occurrence:investigate",
     "roc:read", "roc:manage", "aircraft:read", "aircraft:manage",
     "aircraft:view", "flight:release", "security:read_sensitive", "security:manage",
+    "dg:read",
     "personnel:read", "personnel:view", "personnel:manage",
     "settings:read", "settings:manage",
     "backup:read", "backup:run",
@@ -89,7 +90,7 @@ ROLE_PERMISSIONS = {
         "aircraft:manage", "aircraft:view", "compliance:read", "audit:read", "personnel:read",
         "change_request:create", "change_request:review",
         "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
-        "personnel:view", "personnel:manage", "feedback:create", "feedback:read",
+        "personnel:view", "personnel:manage", "feedback:create", "feedback:read", "dg:read",
     },
     "chief_pilot": {
         "document:read", "document.section.view", "document.section.extract", "document:review", "safety:read", "safety:create", "risk_assessment:approve", "flight:release", "roc:read", "aircraft:read", "audit:read",

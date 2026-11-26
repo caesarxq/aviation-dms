@@ -2,11 +2,13 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
   AlertTriangle,
   ArrowUpRight,
   BarChart3,
   CalendarClock,
   CheckCircle2,
+  ClipboardCheck,
   FileCheck2,
   ShieldCheck,
   Users,
@@ -193,6 +195,62 @@ const ROLE_DASHBOARD_CONFIG: Record<string, {
     quickActions: [
       { label: "Audit Reports", href: "/audit-reports", icon: Briefcase },
       { label: "Findings", href: "/audit-findings", icon: AlertTriangle },
+    ],
+  },
+  system_admin: {
+    metrics: [
+      { label: "System Observability", valueKey: "system_health", context: "Platform status", icon: Activity, tone: "blue", href: "/admin/observability", trendKey: "system_trend" },
+      { label: "Organisation Overview", valueKey: "org_items", context: "Accountable posts", icon: BarChart3, tone: "green", href: "/organization-overview", trendKey: "org_trend" },
+    ],
+    quickActions: [
+      { label: "System Observability", href: "/admin/observability", icon: Activity },
+      { label: "Organisation Overview", href: "/organization-overview", icon: BarChart3 },
+    ],
+  },
+  librarian: {
+    metrics: [
+      { label: "Documents in Catalogue", valueKey: "documents_count", context: "Controlled documents", icon: FileCheck2, tone: "blue", href: "/documents", trendKey: "documents_trend" },
+      { label: "Distributions Pending", valueKey: "distributions_pending", context: "Awaiting release", icon: Plane, tone: "amber", href: "/distributions?status=pending", trendKey: "distributions_trend" },
+    ],
+    quickActions: [
+      { label: "Documents", href: "/documents", icon: FileCheck2 },
+      { label: "Distributions", href: "/distributions", icon: Plane },
+    ],
+  },
+  chief_pilot: {
+    metrics: [
+      { label: "Active Missions", valueKey: "missions_count", context: "Current operations", icon: Plane, tone: "blue", href: "/missions?status=in_progress", trendKey: "missions_trend" },
+      { label: "Crew On Duty", valueKey: "crew_on_duty", context: "FDTL-compliant assignments", icon: Users, tone: "green", href: "/duties", trendKey: "crew_trend" },
+    ],
+    quickActions: [
+      { label: "New Mission", href: "/missions", icon: Plane },
+      { label: "Release Flight", href: "/missions", icon: Briefcase },
+    ],
+  },
+  flight_ops_officer: {
+    metrics: [
+      { label: "Active Missions", valueKey: "missions_count", context: "Current operations", icon: Plane, tone: "blue", href: "/missions?status=in_progress", trendKey: "missions_trend" },
+      { label: "ROC Items", valueKey: "roc_items", context: "ROC & OpSpec", icon: ClipboardCheck, tone: "green", href: "/roc", trendKey: "roc_trend" },
+    ],
+    quickActions: [
+      { label: "New Mission", href: "/missions", icon: Plane },
+      { label: "View ROC", href: "/roc", icon: ClipboardCheck },
+    ],
+  },
+  occurrence_reporter: {
+    metrics: [
+      { label: "Open Occurrences", valueKey: "open_occurrences", context: "Awaiting classification", icon: AlertTriangle, tone: "amber", href: "/occurrences?status=reported", trendKey: "occurrences_trend" },
+    ],
+    quickActions: [
+      { label: "Report Occurrence", href: "/occurrences", icon: AlertTriangle },
+    ],
+  },
+  as_contracted: {
+    metrics: [
+      { label: "Documents", valueKey: "documents_count", context: "Read-only access", icon: FileCheck2, tone: "blue", href: "/documents", trendKey: "documents_trend" },
+    ],
+    quickActions: [
+      { label: "Documents", href: "/documents", icon: FileCheck2 },
     ],
   },
 };
