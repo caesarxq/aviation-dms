@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { auditApi } from "../api/audit";
@@ -89,6 +89,12 @@ export function AuditFindings() {
     onError: () => setMutationError("Unable to close audit finding. Please check the details and try again."),
   });
 
+  useEffect(() => {
+    if (!detailLoading && !detailError && !detailFinding) {
+      navigate("/audit-findings", { replace: true });
+    }
+  }, [detailLoading, detailError, detailFinding, navigate]);
+
   if (findingId) {
     return (
       <div className="app-page">
@@ -159,7 +165,7 @@ export function AuditFindings() {
               </div>
             )}
           </section>
-        ) : <div className="app-surface p-5">Audit finding not found.</div>}
+        ) : null}
       </div>
     );
   }

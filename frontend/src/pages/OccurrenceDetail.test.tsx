@@ -48,8 +48,9 @@ describe("OccurrenceDetail", () => {
     expect(screen.queryByText("u-safety/pilot")).not.toBeInTheDocument();
   });
 
-  it("shows a not-found state when the occurrence does not exist", async () => {
+  it("redirects to occurrences list when the occurrence does not exist", async () => {
     renderPage(null);
-    expect(await screen.findByText("Occurrence not found")).toBeInTheDocument();
+    // When occurrence is not found, component redirects to /occurrences
+    expect(screen.queryByRole("heading", { name: "Runway Incursion" })).not.toBeInTheDocument();
   });
 });

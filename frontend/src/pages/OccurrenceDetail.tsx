@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { safetyApi } from "../api/safety";
 import { FileText, Clock, ShieldCheck } from "lucide-react";
@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 
 export function OccurrenceDetail() {
   const { occurrenceId } = useParams();
+  const navigate = useNavigate();
   const { data: occ, isLoading } = useQuery({
     queryKey: ["occurrence", occurrenceId],
     queryFn: () => safetyApi.getOccurrence(occurrenceId!),
@@ -13,7 +14,10 @@ export function OccurrenceDetail() {
   });
 
   if (isLoading) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading occurrence…</div></div>;
-  if (!occ) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Occurrence not found</div></div>;
+  if (!occ) {
+    navigate("/occurrences", { replace: true });
+    return null;
+  }
 
   return (
     <div className="app-page">

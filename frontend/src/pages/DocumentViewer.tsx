@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../api/client";
 import { Button } from "@/components/ui/button";
@@ -101,6 +101,7 @@ function applyAnnotationHighlights(doc: Document, annotations: any[]) {
 
 export function DocumentViewer() {
   const { docId } = useParams();
+  const navigate = useNavigate();
   const viewerShellRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -318,7 +319,10 @@ export function DocumentViewer() {
   };
 
   if (isLoading) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading document…</div></div>;
-  if (!content) return <div className="app-page"><div className="app-surface p-10 text-center text-sm text-kfl-muted">Document not found</div></div>;
+  if (!content) {
+    navigate("/documents", { replace: true });
+    return null;
+  }
 
   return (
     <div ref={viewerShellRef} className={isFullscreen ? "fixed inset-0 z-50 overflow-auto bg-kfl-canvas p-4" : "app-page relative"}>
