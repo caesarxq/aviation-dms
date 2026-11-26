@@ -40,7 +40,10 @@ ROLE_PERMISSIONS = {
     "accountable_manager": {
         "document:read", "document:approve", "document:publish", "document:propose",
         "document:download", "document.section.view", "document.section.extract",
-        "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
+        # Change requests for controlled manuals are approved and published by the
+        # Head of Quality only; the accountable manager keeps document-level
+        # approve/publish for documents outside the manual ownership scheme.
+        "change_request:review", "compliance:read", "compliance:manage",
         "audit:read", "safety:read", "safety:close", "roc:read", "roc:manage",
         "aircraft:read", "personnel:read", "personnel:view",
         "flight:release", "risk_assessment:approve", "security:read_sensitive", "security:manage",
@@ -57,7 +60,8 @@ ROLE_PERMISSIONS = {
         "document:read", "document:approve", "document:publish", "document:propose", "document:review", "document:annotate",
         "document:download", "document.section.view", "document.section.extract",
         "document.extract.approve",
-        "change_request:review", "change_request:approve", "compliance:read", "compliance:manage",
+        "change_request:create", "change_request:review", "change_request:approve",
+        "compliance:read", "compliance:manage",
         "audit:read", "audit:manage", "safety:read", "safety:create", "safety:update", "safety:close",
         "roc:read", "aircraft:read", "personnel:read", "personnel:view",
         "audit_report:read", "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
@@ -65,18 +69,22 @@ ROLE_PERMISSIONS = {
     },
     "head_safety": {
         "document:read", "document.section.view", "document.section.extract", "document:propose", "document:review", "document:annotate", "safety:read", "safety:create",
+        "change_request:create", "change_request:review",
         "safety:update", "safety:close", "risk_assessment:approve", "occurrence:acknowledge", "occurrence:investigate",
         "roc:read", "aircraft:read", "audit:read", "personnel:read", "personnel:view",
         "security:read_sensitive", "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close", "feedback:create", "feedback:read",
     },
     "head_security": {
-        "document:read", "document.section.view", "document.section.extract", "document:review", "safety:read", "safety:create", "safety:update", "audit:read", "roc:read", "aircraft:read",
+        "document:read", "document.section.view", "document.section.extract", "document:propose", "document:review", "safety:read", "safety:create", "safety:update", "audit:read", "roc:read", "aircraft:read",
+        "change_request:create", "change_request:review",
         "personnel:read", "personnel:view", "security:read_sensitive", "security:manage",
         "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close", "feedback:create", "feedback:read",
     },
     "head_operations": {
-        "document:read", "document.section.view", "document.section.extract", "document:review", "safety:read", "safety:create", "safety:update", "risk_assessment:approve", "flight:release", "roc:read", "roc:manage", "aircraft:read",
+        "document:read", "document.section.view", "document.section.extract", "document:propose", "document:review", "safety:read", "safety:create", "safety:update", "risk_assessment:approve", "flight:release", "roc:read", "roc:manage", "aircraft:read",
         "aircraft:manage", "aircraft:view", "compliance:read", "audit:read", "personnel:read",
+        "change_request:create", "change_request:review",
+        "audit_finding:read", "audit_finding:create", "audit_finding:update", "audit_finding:close",
         "personnel:view", "personnel:manage", "feedback:create", "feedback:read",
     },
     "chief_pilot": {
@@ -88,11 +96,13 @@ ROLE_PERMISSIONS = {
         "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "head_training": {
-        "document:read", "document.section.view", "document.section.extract", "document:review", "safety:read", "safety:create", "roc:read", "aircraft:read",
+        "document:read", "document.section.view", "document.section.extract", "document:propose", "document:review", "safety:read", "safety:create", "roc:read", "aircraft:read",
+        "change_request:create", "change_request:review",
         "personnel:read", "personnel:view", "personnel:manage", "feedback:create", "feedback:read",
     },
     "head_maintenance": {
-        "document:read", "document.section.view", "document.section.extract", "document:review", "safety:read", "safety:create", "roc:read", "aircraft:read",
+        "document:read", "document.section.view", "document.section.extract", "document:propose", "document:review", "safety:read", "safety:create", "roc:read", "aircraft:read",
+        "change_request:create", "change_request:review",
         "aircraft:manage", "aircraft:view", "audit:read", "personnel:read", "personnel:view", "feedback:create", "feedback:read",
     },
     "dg_coordinator": {

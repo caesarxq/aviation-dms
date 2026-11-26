@@ -27,7 +27,7 @@ class TestChangeRequests:
         assert s.json()["status"] == "submitted"
 
     def test_review_change_request(self, client, admin_headers):
-        # Librarian can create, head_quality can review
+        # DOC-006 is the security manual: its owner (head_security) reviews.
         payload = {
             "document_id": "DOC-006",
             "title": "Security manual update",
@@ -38,13 +38,17 @@ class TestChangeRequests:
         assert r.status_code == 201
         cr = r.json()
 
-        # Requester cannot review their own CR (SOD)
         s = client.post(f"/api/p1/change-requests/{cr['cr_id']}/submit", headers=admin_headers)
         assert s.status_code == 200
 
-        # Review as a different actor (simulate head_quality)
+        # The Head of Quality approves manuals but does not own the security one.
         quality_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
-        rv = client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=quality_headers)
+        not_owner = client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=quality_headers)
+        assert not_owner.status_code == 403
+
+        # The manual owner reviews it.
+        security_headers = {"X-Role": "head_security", "X-Actor": "u-security"}
+        rv = client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=security_headers)
         assert rv.status_code == 200
         assert rv.json()["status"] == "under_review"
 
@@ -60,11 +64,15 @@ class TestChangeRequests:
         cr = r.json()
 
         client.post(f"/api/p1/change-requests/{cr['cr_id']}/submit", headers=admin_headers)
-        client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers={"X-Role": "head_quality", "X-Actor": "u-quality"})
+        quality_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+        client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=quality_headers)
 
-        # Approve as accountable_manager
+        # Only the Head of Quality approves change requests.
         am_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
-        ap = client.post(f"/api/p1/change-requests/{cr['cr_id']}/approve", headers=am_headers)
+        denied = client.post(f"/api/p1/change-requests/{cr['cr_id']}/approve", headers=am_headers)
+        assert denied.status_code == 403
+
+        ap = client.post(f"/api/p1/change-requests/{cr['cr_id']}/approve", headers=quality_headers)
         assert ap.status_code == 200
         assert ap.json()["status"] == "approved"
 
@@ -80,14 +88,14 @@ class TestChangeRequests:
         cr = r.json()
 
         client.post(f"/api/p1/change-requests/{cr['cr_id']}/submit", headers=admin_headers)
-        client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers={"X-Role": "head_quality", "X-Actor": "u-quality"})
+        quality_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+        client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers=quality_headers)
 
-        # Reject as accountable_manager
-        am_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
+        # DOC-012 is the quality manual, so its owner is also the approving role.
         rj = client.post(
             f"/api/p1/change-requests/{cr['cr_id']}/reject",
             json={"rejection_reason": "Needs more justification."},
-            headers=am_headers,
+            headers=quality_headers,
         )
         assert rj.status_code == 200
         assert rj.json()["status"] == "rejected"
@@ -139,7 +147,11 @@ class TestChangeRequests:
         cr = r.json()
 
         client.post(f"/api/p1/change-requests/{cr['cr_id']}/submit", headers=admin_headers)
-        client.post(f"/api/p1/change-requests/{cr['cr_id']}/review", headers={"X-Role": "head_quality", "X-Actor": "u-quality"})
+        # DOC-001 is the operations manual, reviewed by its owner.
+        client.post(
+            f"/api/p1/change-requests/{cr['cr_id']}/review",
+            headers={"X-Role": "head_operations", "X-Actor": "u-ops"},
+        )
 
         # Same actor (admin = requester) tries to approve -> 403
         ap = client.post(f"/api/p1/change-requests/{cr['cr_id']}/approve", headers=admin_headers)

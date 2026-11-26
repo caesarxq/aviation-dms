@@ -115,7 +115,14 @@ async def _require_editable_document(db, doc_id: str):
     if category in _NON_EDITABLE_DOCUMENT_CATEGORIES or doc_class in _NON_EDITABLE_DOCUMENT_CLASSES:
         raise HTTPException(
             status_code=403,
-            detail="This document category is read-only; use a change proposal instead",
+            # ROC/OPS Specs and OEM publications are issued by an external
+            # authority. They are not editable here and cannot go through the
+            # proposal workflow either (p2_routes rejects the same categories),
+            # so point at the path that actually exists.
+            detail=(
+                "This document is issued externally and is read-only in the DMS. "
+                "Upload the replacement controlled copy when the authority issues a new revision."
+            ),
         )
     return row
 

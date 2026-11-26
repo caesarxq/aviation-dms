@@ -45,6 +45,17 @@ AUDIT_REPORT_EVIDENCE_DIR = Path(
     os.getenv("AUDIT_REPORT_EVIDENCE_DIR", str(Path(DB_PATH).parent / "attachments"))
 )
 
+# Each department's findings are closed by that department's head. Unknown
+# department names fail closed rather than skipping the closure gate.
+DEPARTMENT_HEAD_ROLES = {
+    "quality": "head_quality",
+    "safety": "head_safety",
+    "security": "head_security",
+    "operations": "head_operations",
+    "maintenance": "head_maintenance",
+    "training": "head_training",
+}
+
 
 def _validated_audit_report_evidence_path(evidence_file: Optional[str]) -> Optional[Path]:
     """Resolve only a named file path inside the audit attachments directory."""
@@ -1155,17 +1166,29 @@ async def update_audit_finding(finding_id: str, payload: AuditFindingUpdate, req
         if not closure_evidence.strip():
             raise HTTPException(status_code=422, detail="closure_evidence is required to close a finding")
         # Department-head closure gate: a finding tagged to a department can only
-        # be closed by the head of that department (Head of Quality / Safety / Security).
+        # be closed by the head of that department. Leading a department's
+        # objectives includes owning the closure of its audit findings.
         actor_role = _role(request)
         db = await get_db()
         try:
             row = await (await db.execute("SELECT department FROM audit_findings WHERE finding_id = ?", (finding_id,))).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail="Audit finding not found")
-            dept = row["department"]
+            dept = (row["department"] or "").strip().lower()
             if dept:
-                dept_head_role = {"quality": "head_quality", "safety": "head_safety", "security": "head_security"}.get(dept)
-                if dept_head_role and actor_role != dept_head_role:
+                dept_head_role = DEPARTMENT_HEAD_ROLES.get(dept)
+                if not dept_head_role:
+                    # Fail closed. An unmapped department used to skip the gate
+                    # entirely, which let any role holding audit_finding:close
+                    # close another department's finding.
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Department '{dept}' has no mapped head role; "
+                            "configure DEPARTMENT_HEAD_ROLES before closing this finding."
+                        ),
+                    )
+                if actor_role != dept_head_role:
                     raise HTTPException(
                         status_code=403,
                         detail=f"Closing a {dept} department finding requires the {dept_head_role} role.",
