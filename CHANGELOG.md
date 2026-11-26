@@ -9,6 +9,30 @@ and this project adheres to Semantic Versioning where applicable.
 
 ## [Unreleased]
 
+### Added
+- Manual ownership model: `manual_ownership` maps each manual class to an owning department head and an approver; `manual_authority.py` decides who may review, approve and publish a given manual
+- Departmental audit closure: `audit_findings` / `corrective_actions` with a department-head closure gate; an unmapped department now fails closed (409) instead of skipping the gate
+- Document list pagination envelope `{data, total, limit, offset}` across catalogue, controller dashboard, editor, proposals and version diff
+- BugTracker sync health in `integration_sync_status`, with a 15-minute cron and a read-only staging verification script
+
+### Changed
+- Approval and publication are separate duties: `head_quality` approves (including KCAA approval), the document controller (`librarian`) publishes. `document:publish` moved off `head_quality` and `accountable_manager`
+- Manual owners can raise and review change requests (`change_request:create`, `change_request:review`) and review proposals on their own manual
+- Direct content writes and new draft versions on an ownership-managed manual return 409; changes must go through a proposal
+- `head_operations` gained `audit_finding:read/create/update/close`
+
+### Fixed
+- BugTracker API base corrected to `/restapi/portal/{portal}/projects/{project}/bugs/`; create payload no longer sent as `custom_fields`; sync accounting uses row counts
+- Change-request and proposal review enforcement now consult the document's owner and approver instead of permission alone
+- KCAA approval chain is satisfiable with one Head of Quality: the accountable manager verifies evidence, the Head of Quality approves, the controller publishes
+
+### Removed
+- Zoho Forms and Zoho Sheets integrations and `feedback_sync.py` (BugTracker retained)
+
+---
+
+## [v1.0.1] — 2026-11-12
+
 ### Fixed
 - Fixed indentation bug in `backend/app/database.py`: the `ver_id` and version-insert block was inside `for c in classifications:` instead of `for d in docs:`, causing `UNIQUE constraint failed: document_versions.version_id` on seed (`3465d73`)
 - Updated `Caddyfile.bastion` staging proxy to route to new ports 8001 (backend) and 8081 (frontend) after staging instance port changes (`3465d73`)

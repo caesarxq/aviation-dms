@@ -2,7 +2,7 @@
 
 **Prepared by:** Chief of Staff  
 **Date:** 2026-11-24  
-**Status:** Proposal only — no implementation yet
+**Status:** Proposal. Partially implemented: the `app_versions` table exists in the schema, but no version-tracking service or upgrade-notification flow has been built. Treat the rest as unstarted.
 
 ---
 

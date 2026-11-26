@@ -4,6 +4,8 @@
 **Prepared by:** Chief of Staff  
 **Scope:** Comprehensive reevaluation of 11 implementation areas based on change request workflow, audit processes, document management, fleet management, and integration requirements.
 
+**Status (2026-11-26):** findings 1–3 (change-request publish/distribute, manual ownership, departmental audit closure) and 11 (BugTracker retention) are implemented on `main`; see `CHANGELOG.md`. Items are retained here as the audit record, not as an open worklist.
+
 ---
 
 ## Executive Summary
@@ -409,7 +411,7 @@ emergency_plan, sop, checklist, form, policy, procedure
 - `backend/app/p1_routes.py` — aircraft operational status computation
 - `backend/app/p2_routes.py` — document ingestion endpoints
 - `backend/app/p3_routes.py` — audit finding closure gate
-- `backend/app/feedback_sync.py` — Zoho BugTracker sync replacement
+- `backend/app/bugtracker_sync.py` — Zoho BugTracker sync
 
 ### Frontend
 - `frontend/src/pages/DocumentEditor.tsx` — proposal button, document selector filter
@@ -420,7 +422,7 @@ emergency_plan, sop, checklist, form, policy, procedure
 - `frontend/src/pages/RiskAssessments.tsx` — PDF download
 - `frontend/src/pages/Missions.tsx` — PDF download
 - `frontend/src/components/layout/AppShell.tsx` — Global FilterBar
-- `frontend/src/components/ui/FilterBar.tsx` — new component
+- `frontend/src/components/layout/FilterBar.tsx` — new component
 
 ### Database Migrations Required
 1. `ALTER TABLE documents ADD COLUMN manual_owner_role TEXT`
