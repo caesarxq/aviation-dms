@@ -3547,6 +3547,26 @@ async def system_admin_observability(request: Request):
         await db.close()
 
 
+@router.get("/app-versions", response_model=List[dict])
+async def list_app_versions(request: Request, limit: int = 10):
+    """Return application version history for the release history panel."""
+    if _role(request) != "system_admin":
+        raise HTTPException(status_code=403, detail="System administrator permission required")
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT version_id, version_number, released_at, released_by, "
+            "changelog_non_technical, changelog_technical, notification_sent, created_at "
+            "FROM app_versions ORDER BY released_at DESC LIMIT ?",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
 async def _probe_scanner_status() -> dict:
     """Lightweight clamd connectivity probe: attempt a TCP handshake.
 
