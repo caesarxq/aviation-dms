@@ -4,6 +4,8 @@ Self-contained package for the KFL Aviation DMS user-training workshop and restr
 
 No emojis. Controlled manuals are read-only. This package is training material; it does not authorize accounts, invites, commits, or deployment.
 
+**Snapshot notice:** `documents/` is a frozen copy of [`../docs/`](../docs/README.md) taken when this package was assembled. `docs/` is authoritative and continues to change; this copy does not track it. Refresh it before reusing the package for a new cohort.
+
 ## Contents
 
 | Item | Path | Purpose |

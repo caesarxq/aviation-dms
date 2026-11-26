@@ -12,18 +12,23 @@ aviation-dms/
 │   ├── app/
 │   │   ├── main.py          # App entry, CORS, security headers, auth middleware
 │   │   ├── p0_auth.py       # HTTP-only session auth, CSRF, dev-only identity headers
-│   │   ├── p0_routes.py     # P0: documents, versions, content, change requests,
-│   │   │                  # distributions, retention, legal holds, compliance,
-│   │   │                  # audit events, evidence pack, admin observability,
-│   │   │                  # auth profile
+│   │   ├── p0_routes.py     # P0: documents, versions, content, distributions,
+│   │   │                  # retention, legal holds, compliance, audit events,
+│   │   │                  # evidence pack, admin observability, auth profile
 │   │   ├── p1_routes.py     # P1: occurrences, hazards, missions, ROC, safety KPIs,
-│   │   │                  # deadlines, notifications
+│   │   │                  # deadlines, notifications, change requests
 │   │   ├── p2_routes.py     # P2: document proposals (atomic, batched), annotations,
 │   │   │                  # personnel licenses, aircraft insurance, self-service uploads
+│   │   ├── p3_routes.py     # P3: audit reports/imports, audit findings, corrective
+│   │   │                  # actions, finding summary and report PDFs
+│   │   ├── manual_authority.py # Manual ownership: who may review, approve, publish
+│   │   ├── bugtracker_sync.py  # Zoho BugTracker pull/create/update sync
 │   │   ├── proposal_engine.py  # Change detection + atomic proposal grouping
 │   │   ├── rbac.py          # Role-based access control matrix (16 roles)
 │   │   ├── audit.py         # Audit trail logging
 │   │   ├── database.py      # SQLite schema, seed data, migrations
+│   │   ├── upload_safety.py / upload_validation.py / upload_ingestion.py
+│   │   │                    # Upload quarantine, signature checks, PDF classification
 │   │   └── notifications.py # Deadline/ expiry notification scheduler
 │   ├── data/                # SQLite DB + uploads (gitignored)
 │   └── tests/               # pytest suite
@@ -116,14 +121,14 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | Role | Access | Key capabilities |
 |------|--------|------------------|
 | `system_admin` | L4 | Broad administration and audit import; cannot verify provenance |
-| `accountable_manager` | L4 | Organization overview, approve/publish |
-| `head_quality` | L3 | Document approve/publish, QA, audits |
-| `head_safety` | L3 | Safety SMS, occurrences, investigations |
-| `head_security` | L3 | Security records, audit read |
-| `head_operations` | L3 | ROC/fleet, missions, personnel ops |
+| `accountable_manager` | L4 | Organization overview, document approval, KCAA evidence verification |
+| `head_quality` | L3 | Document approval and change-request approval, QA, audits |
+| `head_safety` | L3 | Safety SMS, occurrences, investigations, safety audit closure |
+| `head_security` | L3 | Security records, security audit closure |
+| `head_operations` | L3 | ROC/fleet, missions, personnel ops, operations audit closure |
 | `head_training` | L3 | Training program, personnel manage |
 | `head_maintenance` | L3 | Maintenance, aircraft manage |
-| `librarian` | L2 | Document create/update/propose, distribution |
+| `librarian` | L2 | Document controller: registration, distribution, **publication** |
 | `chief_pilot` | L2 | Flight ops, safety read |
 | `flight_ops_officer` | L2 | Missions, safety read |
 | `dg_coordinator` | L2 | Dangerous goods, safety read |
@@ -132,20 +137,35 @@ Production API requests use an opaque, server-managed HTTP-only session cookie a
 | `occurrence_reporter` | L1 | Safety read and occurrence reporting |
 | `as_contracted` | L1 | Baseline read-only access; contract-specific scope is assigned separately |
 
+Approval and publication are separate duties: the Head of Quality approves a controlled manual, the document controller (librarian) publishes it. No role holds `change_request:approve` except `head_quality` and `system_admin`.
+
 Separation of duties: a change proposer cannot approve/reject/publish their own change.
 
 New users should follow the [User Onboarding Procedure](docs/USER-ONBOARDING-PROCEDURE.md). Administrators should use the [Onboarding Runbook](docs/ONBOARDING-RUNBOOK.md) for roster reconciliation and controlled invitations.
 
 ## Document Control Workflow
 
+### Manual ownership
+
+Each controlled manual is owned by a department head (`manual_ownership`, keyed by `doc_class`): operations → `head_operations`, safety → `head_safety`, security → `head_security`, quality → `head_quality`, training → `head_training`, maintenance → `head_maintenance`. `head_quality` is the approver for all six.
+
+The rule the workflow enforces:
+
+- **The owner reviews** change requests and proposals for their manual.
+- **Only `head_quality` approves** a manual change (`change_request:approve`, KCAA approval).
+- **The document controller publishes** (`librarian` holds `document:publish`).
+- **Direct content writes are refused.** A new draft version or in-place content update on an ownership-managed manual returns `409`; the change must go through a proposal so the owner sees it before approval. `system_admin` keeps break-glass access.
+
+Documents outside the scheme (forms, checklists, policies, OEM/ROC references) keep the ordinary permission checks.
+
 ### Version lifecycle
 
 `draft → in_review → {approved → kcaa_approved → published}` with `rejected` as an exit at most stages.
 
-- `draft → in_review`: librarian (document:update)
-- `in_review → approved`: an authorized `document:approve` role; creator cannot approve
+- `draft → in_review`: a `document:update` role (document controller)
+- `in_review → approved`: a `document:approve` role; for an owned manual, the manual's approver role (Head of Quality); creator cannot approve
 - `approved → kcaa_approved`: `document:approve` after a retained evidence PDF is independently verified; uploader, verifier, and KCAA approver must be distinct
-- `kcaa_approved → published`: an authorized `document:publish` role; creator cannot publish and the verified evidence file/hash is rechecked
+- `kcaa_approved → published`: `document:publish` (document controller); creator cannot publish and the verified evidence file/hash is rechecked
 - KCAA gate: documents requiring KCAA approval cannot be published without a retained PDF evidence artifact whose SHA-256 is computed server-side, verified by a separate `document:approve` principal, and linked to the exact version. This records internal evidence review; it is not an automated validation against KCAA systems.
 
 ### Atomic change proposals
@@ -154,8 +174,8 @@ When a user edits a document, the system detects changes and groups them into re
 
 1. **Preview** (`POST /api/p2/documents/{doc_id}/proposals/preview`) — detect changes without persisting
 2. **Batch submit** (`POST /api/p2/documents/{doc_id}/proposals/batch`) — creates one proposal per detected change
-3. **Review** — quality head approves/rejects (SoD enforced)
-4. **Apply** — system_admin applies an approved proposal as a new draft version
+3. **Review** — the manual's owner reviews (`can_review`), the approver role decides (SoD enforced)
+4. **Apply** — the document controller (`document:publish`) applies an approved proposal as a new draft version
 
 Change grouping heuristics:
 - Changes within 8 tokens, ≥25% density, or ≥10 changed tokens are merged into one proposal
@@ -184,9 +204,6 @@ PUT    /api/p0/documents/{id}/content       # Save content as new draft version
 POST   /api/p0/versions                     # Create version
 PATCH  /api/p0/versions/{id}/state          # State transition (draft→in_review→approved→kcaa_approved→published)
 GET    /api/p0/versions                     # List versions
-GET    /api/p0/change-requests              # List change requests
-POST   /api/p0/change-requests              # Create change request
-PATCH  /api/p0/change-requests/{id}         # Review/approve/reject (SoD enforced)
 GET    /api/p0/distributions                # List distributions
 POST   /api/p0/distributions                # Create distribution
 POST   /api/p0/distributions/{id}/acknowledge
@@ -213,6 +230,23 @@ GET        /api/p1/deadlines                # Upcoming/overdue deadlines
 GET        /api/p1/notifications            # Notifications
 ```
 
+### P1 — Change requests
+```
+GET    /api/p1/change-requests                     # List (requires change_request:review)
+POST   /api/p1/change-requests                     # Create (change_request:create)
+GET    /api/p1/change-requests/{id}
+PATCH  /api/p1/change-requests/{id}                # Edit while open
+DELETE /api/p1/change-requests/{id}
+POST   /api/p1/change-requests/{id}/submit
+POST   /api/p1/change-requests/{id}/review         # Owner review
+POST   /api/p1/change-requests/{id}/approve        # head_quality only
+POST   /api/p1/change-requests/{id}/reject         # head_quality only
+POST   /api/p1/change-requests/{id}/publish        # document controller
+POST   /api/p1/change-requests/{id}/distribute
+POST   /api/p1/change-requests/{id}/redirect       # head_quality only
+GET/POST /api/p1/change-requests/{id}/comments
+```
+
 ### P2 — Document Proposals, Licenses, Insurance
 ```
 POST   /api/p2/documents/{id}/proposals/preview    # Detect changes (no persist)
@@ -237,15 +271,40 @@ GET    /api/p2/personnel/uploads/{id}/file         # Authenticated private downl
 PATCH  /api/p2/personnel/uploads/{id}/verify       # Independent verify/reject decision
 ```
 
+### P3 — Audit, findings and corrective actions
+```
+GET    /api/p3/audit-reports
+GET    /api/p3/audit-report-imports
+GET    /api/p3/audit-report-imports/{id}
+POST   /api/p3/audit-report-imports/{id}/reject
+POST   /api/p3/audit-findings                      # audit_finding:create
+GET    /api/p3/audit-findings                      # department-scoped
+GET    /api/p3/audit-findings/summary
+GET    /api/p3/audit-findings/{id}
+PATCH  /api/p3/audit-findings/{id}                 # close requires the department head
+POST   /api/p3/audit-findings/{id}/car             # Raise a corrective action
+POST   /api/p3/corrective-actions
+GET    /api/p3/corrective-actions
+GET    /api/p3/corrective-actions/{id}
+POST   /api/p3/corrective-actions/{id}/verify
+POST   /api/p3/corrective-actions/{id}/close
+GET    /api/p3/risk-assessments/{id}/pdf
+GET    /api/p3/missions/{id}/pdf
+```
+
 ## Database
 
 SQLite at `backend/data/dms.db`. Schema includes:
 - `users` / `user_roles` / `user_id_aliases` — 15 seeded role profiles consolidate to 8 canonical active accounts with 15 assigned roles; legacy IDs and audit references are retained
 - `auth_sessions` — opaque, revocable sessions with a server-stored active role
 - `documents` / `document_versions` — controlled documents with KCAA gates
+- `manual_ownership` — `doc_class` → owner role, head-of-department user, approver role
+- `kcaa_approval_evidence` — retained evidence PDFs with SHA-256 and independent verification
 - `document_proposals` — atomic change proposals
 - `change_requests` — formal change requests with SoD
 - `audit_events` — immutable audit trail
+- `audit_reports` / `audit_report_imports` / `audit_findings` / `corrective_actions` — audit programme, findings and CARs
+- `feedback` — user feedback; `integration_sync_status` — BugTracker sync health
 - `personnel_licenses` / `license_renewal_history` — license expiry tracking
 - `personnel_uploads` — private credential file metadata, SHA-256 integrity, and independent review status
 - `aircraft_insurance` / `insurance_renewal_history` — insurance expiry tracking
@@ -285,12 +344,17 @@ SQLite at `backend/data/dms.db`. Schema includes:
 | `FLIGHT_RELEASE_ENABLED` | `false` | Disabled until source-to-rule mapping and postholder validation are complete |
 | `SMTP_*` | unset in local dev | Required production email/reset delivery settings |
 | `NOTIFICATION_ENABLED` | `false` locally | Enables configured email notifications |
+| `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN` | unset | Zoho OAuth client used for BugTracker sync (or the corresponding `*_FILE` secret-file variants) |
+| `ZOHO_BUGTRACKER_PORTAL` / `ZOHO_BUGTRACKER_PROJECT_ID` | unset | BugTracker portal slug and project the feedback sync targets |
+| `ZOHO_CRON_SECRET` | unset | Bearer secret for the cron-triggered BugTracker sync endpoint; when unset the endpoint refuses to run |
 
 See `.env.example` for the full template.
 
 ## Design System
 
 `DESIGN.md` defines KFL brand tokens: brand blue `#1B7ABF`, deep aviation navy `#0B2942`, canvas gray, semantic status colors, and component specifications. Implemented via Tailwind CSS and custom CSS variables.
+
+All other project documentation is indexed in [`docs/README.md`](docs/README.md).
 
 Form UX, accessibility, and mutation-testing guidance is documented in [`docs/FORM-UX-AND-QUALITY-PLAN.md`](docs/FORM-UX-AND-QUALITY-PLAN.md).
 

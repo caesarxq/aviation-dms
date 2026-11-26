@@ -19,7 +19,7 @@ KFL Aviation DMS is a FastAPI + React document management system for KCAA-regula
 ### Backend Setup
 
 ```bash
-cd /Users/mohamedalsayed/Projects/aviation-dms/backend
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -36,7 +36,7 @@ Health check: `http://localhost:8000/health`
 ### Frontend Setup
 
 ```bash
-cd /Users/mohamedalsayed/Projects/aviation-dms/frontend
+cd frontend
 npm install
 npm run dev          # Vite dev server on http://localhost:5173
 npm run build        # Production build
