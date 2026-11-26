@@ -136,8 +136,10 @@ class TestRiskAssessments:
         mission_id = mission.json()["mission_id"]
 
         assessment = client.post("/api/p1/risk-assessments", json={
+            # A mission-linked assessment must use the flight model the release gate checks.
             "title": "Mission risk", "mission_id": mission_id,
-            "risk_model": "sms_5x5", "likelihood": "rare", "severity": "negligible", "risk_level": "low",
+            "risk_model": "om_flight_26", "likelihood": "rare", "severity": "negligible",
+            "exposure": "rare", "risk_level": "low",
         }, headers=admin_headers)
         assert assessment.status_code == 201, assessment.text
 

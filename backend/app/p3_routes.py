@@ -292,7 +292,7 @@ class AuditFindingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     description: str = Field(min_length=1, max_length=10000)
     regulatory_reference: Optional[str] = Field(default=None, max_length=2000)
-    department: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    department: str = Field(min_length=1, max_length=50)
     due_date: Optional[date] = None
 
 
@@ -1171,10 +1171,24 @@ async def update_audit_finding(finding_id: str, payload: AuditFindingUpdate, req
         actor_role = _role(request)
         db = await get_db()
         try:
-            row = await (await db.execute("SELECT department FROM audit_findings WHERE finding_id = ?", (finding_id,))).fetchone()
+            row = await (await db.execute("SELECT status, department, corrective_action_id FROM audit_findings WHERE finding_id = ?", (finding_id,))).fetchone()
             if row is None:
                 raise HTTPException(status_code=404, detail="Audit finding not found")
+            # Transition validity comes first, so an illegal close is reported as
+            # such rather than masked by an authority error.
+            if row["status"] != "in_progress":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Invalid finding status transition: {row['status']} -> closed",
+                )
             dept = (row["department"] or "").strip().lower()
+            if not dept:
+                # Fail closed: an untagged finding has no accountable head, so
+                # closure would bypass the departmental gate entirely.
+                raise HTTPException(
+                    status_code=409,
+                    detail="Assign a department to this finding before it can be closed.",
+                )
             if dept:
                 dept_head_role = DEPARTMENT_HEAD_ROLES.get(dept)
                 if not dept_head_role:
@@ -1188,10 +1202,21 @@ async def update_audit_finding(finding_id: str, payload: AuditFindingUpdate, req
                             "configure DEPARTMENT_HEAD_ROLES before closing this finding."
                         ),
                     )
-                if actor_role != dept_head_role:
+                # system_admin keeps break-glass access, as elsewhere in the system.
+                if actor_role not in (dept_head_role, "system_admin"):
                     raise HTTPException(
                         status_code=403,
                         detail=f"Closing a {dept} department finding requires the {dept_head_role} role.",
+                    )
+            linked_car = row["corrective_action_id"]
+            if linked_car:
+                car = await (await db.execute(
+                    "SELECT status FROM corrective_actions WHERE car_id = ?", (linked_car,)
+                )).fetchone()
+                if car is None or car["status"] != "closed":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="The linked corrective action must be closed before the finding can be closed.",
                     )
         finally:
             await db.close()
@@ -1277,198 +1302,6 @@ async def link_corrective_action(finding_id: str, payload: CorrectiveActionLink,
     finally:
         await db.close()
     return {"finding_id": finding_id, "corrective_action_id": car_id}
-
-
-@router.post("/corrective-actions", response_model=CorrectiveActionResponse, status_code=201)
-async def create_corrective_action(car: CorrectiveActionCreate, request: Request):
-    """Create a Corrective Action Request (CAR) linked to an audit finding."""
-    _check(request, "audit_finding:update")
-    actor = _actor(request)
-    car_id = _gen_id("CAR")
-    now = _now()
-    db = await get_db()
-    try:
-        # Validate the linked finding (either quality or external audit finding)
-        audit_id = None
-        audit_report_id = None
-        finding_level = car.finding_level
-        
-        if car.audit_finding_id:
-            finding = await (await db.execute(
-                "SELECT finding_id, audit_id, level, title FROM audit_findings WHERE finding_id = ?",
-                (car.audit_finding_id,),
-            )).fetchone()
-            if not finding:
-                raise HTTPException(status_code=404, detail="Audit finding not found")
-            audit_id = finding["audit_id"]
-            audit_report_id = audit_id  # For external audits, audit_id = audit_report_id
-            finding_level = f"level_{finding['level']}"
-        elif car.finding_id:
-            finding = await (await db.execute(
-                "SELECT finding_id, audit_id FROM quality_audit_findings WHERE finding_id = ?",
-                (car.finding_id,),
-            )).fetchone()
-            if not finding:
-                raise HTTPException(status_code=404, detail="Quality audit finding not found")
-            audit_id = finding["audit_id"]
-            finding_level = car.finding_level
-        else:
-            raise HTTPException(status_code=422, detail="Either finding_id or audit_finding_id is required")
-        
-        # Validate audit_id/audit_report_id consistency
-        if car.audit_id and car.audit_id != audit_id:
-            raise HTTPException(status_code=422, detail="audit_id does not match the finding's audit")
-        if car.audit_report_id and car.audit_report_id != audit_report_id:
-            raise HTTPException(status_code=422, detail="audit_report_id does not match the finding's audit report")
-        
-        await db.execute("BEGIN IMMEDIATE")
-        await db.execute(
-            """INSERT INTO corrective_actions
-               (car_id, finding_id, audit_finding_id, audit_id, audit_report_id, title, description,
-                finding_level, root_cause, corrective_action, preventive_action,
-                owner_id, due_date, status, created_at, updated_at, created_by, updated_by)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                car_id, car.finding_id, car.audit_finding_id, audit_id, audit_report_id,
-                car.title, car.description, car.finding_level, car.root_cause,
-                car.corrective_action, car.preventive_action, car.owner_id,
-                car.due_date, "open", now, now, actor, actor,
-            ),
-        )
-        await _write_event(db, "corrective_action", car_id, "created", actor, {
-            "title": car.title,
-            "audit_finding_id": car.audit_finding_id,
-            "finding_id": car.finding_id,
-        })
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    finally:
-        await db.close()
-    return CorrectiveActionResponse(
-        car_id=car_id, finding_id=car.finding_id, audit_finding_id=car.audit_finding_id,
-        audit_id=audit_id, audit_report_id=audit_report_id,
-        title=car.title, description=car.description,
-        finding_level=car.finding_level, root_cause=car.root_cause,
-        corrective_action=car.corrective_action, preventive_action=car.preventive_action,
-        owner_id=car.owner_id, due_date=car.due_date, status="open",
-        verification=None, verified_by=None, verified_at=None, closed_at=None,
-        created_at=now, updated_at=now, created_by=actor, updated_by=actor,
-    )
-
-
-@router.get("/corrective-actions", response_model=list[CorrectiveActionResponse])
-async def list_corrective_actions(
-    request: Request,
-    status: Optional[str] = None,
-    audit_finding_id: Optional[str] = None,
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-):
-    """List corrective action requests with optional status and finding filters."""
-    _check(request, "audit_finding:read")
-    conditions = []
-    params = []
-    if status:
-        conditions.append("status = ?")
-        params.append(status)
-    if audit_finding_id:
-        conditions.append("audit_finding_id = ?")
-        params.append(audit_finding_id)
-    where = " AND ".join(conditions) if conditions else "1=1"
-    db = await get_db()
-    try:
-        cursor = await db.execute(
-            f"SELECT * FROM corrective_actions WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        )
-        rows = await cursor.fetchall()
-        return [CorrectiveActionResponse(**dict(r)) for r in rows]
-    finally:
-        await db.close()
-
-
-@router.get("/corrective-actions/{car_id}", response_model=CorrectiveActionResponse)
-async def get_corrective_action(car_id: str, request: Request):
-    """Get a single corrective action request by ID."""
-    _check(request, "audit_finding:read")
-    db = await get_db()
-    try:
-        row = await (await db.execute(
-            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
-        )).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Corrective action not found")
-        return CorrectiveActionResponse(**dict(row))
-    finally:
-        await db.close()
-
-
-@router.post("/corrective-actions/{car_id}/verify")
-async def verify_corrective_action(car_id: str, request: Request):
-    """Verify that a corrective action has been implemented effectively."""
-    _check(request, "audit_finding:update")
-    actor = _actor(request)
-    now = _now()
-    db = await get_db()
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        car = await (await db.execute(
-            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
-        )).fetchone()
-        if not car:
-            raise HTTPException(status_code=404, detail="Corrective action not found")
-        car = dict(car)
-        if car["status"] != "open":
-            raise HTTPException(status_code=400, detail="Only open corrective actions can be verified")
-        if same_principal(request, car["owner_id"]):
-            raise HTTPException(status_code=403, detail="The CAR owner cannot verify their own corrective action")
-        await db.execute(
-            "UPDATE corrective_actions SET verification = 'pending_verification', updated_at = ?, updated_by = ? WHERE car_id = ?",
-            (now, actor, car_id),
-        )
-        await _write_event(db, "corrective_action", car_id, "verification_requested", actor, {})
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    finally:
-        await db.close()
-    return {"car_id": car_id, "status": "pending_verification", "verified_by": actor}
-
-
-@router.post("/corrective-actions/{car_id}/close")
-async def close_corrective_action(car_id: str, request: Request):
-    """Close a verified corrective action."""
-    _check(request, "audit_finding:update")
-    actor = _actor(request)
-    now = _now()
-    db = await get_db()
-    try:
-        await db.execute("BEGIN IMMEDIATE")
-        car = await (await db.execute(
-            "SELECT * FROM corrective_actions WHERE car_id = ?", (car_id,)
-        )).fetchone()
-        if not car:
-            raise HTTPException(status_code=404, detail="Corrective action not found")
-        car = dict(car)
-        if car["status"] != "pending_verification":
-            raise HTTPException(status_code=400, detail="Only pending_verification corrective actions can be closed")
-        if same_principal(request, car["owner_id"]):
-            raise HTTPException(status_code=403, detail="The CAR owner cannot close their own corrective action")
-        await db.execute(
-            "UPDATE corrective_actions SET status = 'closed', verification = 'verified', verified_by = ?, verified_at = ?, closed_at = ?, updated_at = ?, updated_by = ? WHERE car_id = ?",
-            (actor, now, now, now, actor, car_id),
-        )
-        await _write_event(db, "corrective_action", car_id, "closed", actor, {})
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    finally:
-        await db.close()
-    return {"car_id": car_id, "status": "closed", "verified_by": actor, "closed_at": now}
 
 
 @router.get("/audit-findings/summary")
