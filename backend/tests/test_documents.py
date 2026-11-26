@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import sqlite3
 import stat
 import uuid
@@ -343,17 +344,32 @@ class TestDocumentVersioning:
         assert approved.json()["kcaa_reference"] == "KCAA-APPROVAL-2026-001"
         assert approved.json()["kcaa_evidence_sha256"] == expected_hash
         assert approved.json()["kcaa_evidence_id"] == evidence["evidence_id"]
-        uploader_publish = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=admin_headers)
-        assert uploader_publish.status_code == 403, uploader_publish.text
-        publisher_headers = document_controller_headers
-        published = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=publisher_headers)
-        assert published.status_code == 200, published.text
+        # KCAA approval publishes the manual: the publisher is the system, so
+        # no human both approves and publishes.
+        assert approved.json()["state"] == "published"
+        assert approved.json()["published_at"]
 
-    def test_kcaa_approval_chain_requires_a_distinct_publisher(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, document_controller_headers, upload_safety_enabled):
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            stored = conn.execute(
+                "SELECT state, updated_by, published_at FROM document_versions WHERE version_id = ?",
+                (version_id,),
+            ).fetchone()
+            current = conn.execute(
+                "SELECT current_version_id FROM documents WHERE document_id = 'DOC-001'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert stored[0] == "published"
+        assert stored[1] == "system"
+        assert stored[2]
+        assert current[0] == version_id
+
+    def test_kcaa_approval_publishes_as_the_system(self, client, quality_headers, admin_headers, tmp_path, monkeypatch, upload_safety_enabled):
         monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
         version = client.post(
             "/api/p0/versions",
-            json={"document_id": "DOC-001", "version_number": "03.01.00", "content": "distinct publisher test"},
+            json={"document_id": "DOC-001", "version_number": "03.01.00", "content": "system publication test"},
             headers=admin_headers,
         ).json()
         version_id = version["version_id"]
@@ -362,7 +378,7 @@ class TestDocumentVersioning:
 
         evidence_bytes = _valid_pdf_bytes()
         uploaded = client.post(
-            f"/api/p0/versions/{version_id}/kcaa-evidence?reference=KCAA-DISTINCT-PUBLISHER",
+            f"/api/p0/versions/{version_id}/kcaa-evidence?reference=KCAA-SYSTEM-PUBLICATION",
             content=evidence_bytes,
             headers={**admin_headers, "Content-Type": "application/pdf"},
         )
@@ -372,24 +388,38 @@ class TestDocumentVersioning:
         assert client.post(
             f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence_id}/verify", headers=accountable_headers
         ).status_code == 200
+
         approved = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_evidence_id={evidence_id}",
             headers=quality_headers,
         )
         assert approved.status_code == 200, approved.text
+        assert approved.json()["state"] == "published"
 
-        publisher_headers = document_controller_headers
-
-        for same_chain_actor in (admin_headers, quality_headers, accountable_headers):
-            denied = client.patch(
-                f"/api/p0/versions/{version_id}/state?state=published", headers=same_chain_actor
-            )
-            assert denied.status_code == 403, denied.text
-
-        independent_publisher = client.patch(
-            f"/api/p0/versions/{version_id}/state?state=published", headers=publisher_headers
+        # The human approval is recorded against the approver; the publication
+        # is attributed to the system, and the trail shows both events.
+        events = client.get(
+            f"/api/p0/audit-events?entity_type=document_version&entity_id={version_id}",
+            headers=admin_headers,
+        ).json()
+        transitions = [
+            {**e, "payload": json.loads(e["details"] or "{}")}
+            for e in events
+            if e["action"] == "state_changed"
+        ]
+        assert any(
+            e["actor_id"] == "u-quality" and e["payload"].get("to_state") == "kcaa_approved"
+            for e in transitions
         )
-        assert independent_publisher.status_code == 200, independent_publisher.text
+        assert any(
+            e["actor_id"] == "system" and e["payload"].get("to_state") == "published"
+            for e in transitions
+        )
+        assert any(e["payload"].get("system_published") is True for e in transitions)
+
+        # The version is already effective, so a second publish is not a valid transition.
+        again = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=admin_headers)
+        assert again.status_code == 422, again.text
 
     def test_sod_creator_cannot_publish(self, client, quality_headers, admin_headers):
         resp = client.post("/api/p0/versions", json={
