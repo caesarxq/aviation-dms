@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { safetyApi } from "../api/safety";
 import { ToastProvider } from "../components/ui/Toast";
+import { AuthContext } from "../auth/AuthContext";
 import { ChangeRequests } from "./ChangeRequests";
 
 vi.mock("../api/safety", () => ({
@@ -30,10 +31,34 @@ function renderPage() {
   vi.mocked(safetyApi.listChangeRequests).mockResolvedValue(crs as never);
   vi.mocked(safetyApi.listReviewComments).mockResolvedValue([] as never);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // A user who can raise, review and approve: the page's own permission
+  // gating is covered separately in ChangeRequests.permissions.test.tsx.
+  const permissions = ["document:read", "change_request:create", "change_request:review", "change_request:approve"];
+  const profile = {
+    user: { user_id: "u1", username: "user", email: "u@example.test", full_name: "User", role: "head_quality", active_role: "head_quality", roles: ["head_quality"] },
+    role: "head_quality",
+    active_role: "head_quality",
+    roles: ["head_quality"],
+    authenticated_via: "session_cookie",
+    onboarding_completed: true,
+    permissions,
+  };
   return render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <ChangeRequests />
+        <AuthContext.Provider
+          value={{
+            profile,
+            state: "authenticated",
+            login: async () => profile,
+            switchRole: async () => profile,
+            logout: async () => {},
+            refreshProfile: async () => profile,
+            hasPermission: (permission: string) => permissions.includes(permission),
+          } as never}
+        >
+          <ChangeRequests />
+        </AuthContext.Provider>
       </ToastProvider>
     </QueryClientProvider>,
   );
