@@ -100,6 +100,29 @@ The low score is useful: the outline tests cover the main happy paths but do not
 5. Keep full-page React mutation testing out of CI initially; cover those behaviors with Playwright and contract tests instead.
 6. Raise the Stryker break threshold gradually: `0 → 60 → 70 → 80`.
 
-## Dependency note
+### Dependency note
 
 Adding StrykerJS introduced nine npm audit findings in the current dependency tree (eight moderate, one high). These should be triaged separately before making mutation testing a mandatory CI gate; do not use `npm audit fix --force` without reviewing breaking dependency changes.
+
+## Accessibility — color contrast gap
+
+The integrated Playwright accessibility audit (axe-core) runs on 19 routes in `e2e/smoke.spec.ts`, excluding `iframe` and `[contenteditable="true"]`, and filtering out critical and serious violations:
+
+```ts
+const results = await new AxeBuilder({ page })
+  .exclude("iframe")
+  .exclude('[contenteditable="true"]')
+  .disableRules(["color-contrast"])
+  .analyze();
+```
+
+### Known gap: `color-contrast` rule disabled
+
+The `color-contrast` axe rule is deliberately disabled in all e2e accessibility checks. The KFL brand palette — brand blue `#1B7ABF`, deep aviation navy `#0B2942`, canvas gray, and semantic status colors defined in `docs/DESIGN.md` — has not yet been verified for WCAG AA contrast ratios (4.5:1 for normal text, 3:1 for large text) across all color combinations used in the UI.
+
+### Recommended remediation
+
+1. Enable `axe-core` `color-contrast` on all 19 audited routes and fix any violations before production release.
+2. Verify brand colors against WCAG AA (4.5:1 normal / 3:1 large text) and AAA where feasible; document the passing combinations in `docs/DESIGN.md`.
+3. Add a contrast checklist to the `FORM-UX-AND-QUALITY-PLAN.md` P2 accessibility rollout so new components cannot ship with insufficient contrast.
+4. Ensure focus indicators (`:focus-visible`) meet the 3:1 contrast requirement against adjacent colors.

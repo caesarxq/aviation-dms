@@ -330,6 +330,25 @@ SQLite at `backend/data/dms.db`. Schema includes:
 (cd frontend && npm run build)  # TypeScript + Vite production build
 ```
 
+## Code splitting
+
+All 38 frontend pages are loaded lazily with React `lazy()` in `App.tsx` (line 17–60). Each page is a separate Vite chunk, so the initial bundle only contains the shell, auth, routing, and the currently rendered page.
+
+### Verified behavior
+
+- Role landing pages (`e2e/role-landings.mock.spec.ts`) verify that all 16 roles land on their workspace-specific page without uncaught browser errors, console errors, or unexpected API calls.
+- The E2E smoke suite (`e2e/smoke.spec.ts`) exercises the Dashboard, Document Catalogue, Change Requests, Missions, Risk Assessments, Investigations, Safety Actions, Audit Trail, Document Distributions, Training Management, Maintenance Management, Crew Management, Duty Time Tracking, Crew Qualifications, Change Requests, and Audit Report Provenance Import flows.
+
+### Code-splitting opportunities (not yet done)
+
+1. **Route-level chunks for heavy editors.** `DocumentEditor.tsx` (~1058 lines) and `RiskAssessments.tsx` (~655 lines) are lazy-loaded at the route level but could benefit from splitting the editor shell from the TipTap rich-text editor and the form shell from the risk-assessment form, so users who never open those features don't download their code.
+2. **Component-level splitting.** Shared components in `src/components/documents/` (`TipTapEditor.tsx`, `DocumentOutline.tsx`, `InlineSuggestionView.tsx`) are imported by `DocumentEditor` on every route that renders it. These could be dynamic-imported only when the editor is actually opened.
+3. **Vendor chunk isolation.** `@tanstack/react-query`, `dompurify`, `@tiptap/*`, and `lucide-react` are used across many pages. Confirm they are being extracted into shared vendor chunks by Vite rather than duplicated per page chunk.
+
+### Performance guardrail
+
+Add a build-time check that no single page chunk exceeds a reasonable size (e.g. 100 KB gzipped), and track bundle size over time in CI.
+
 ## Environment Variables
 
 | Variable | Default | Description |

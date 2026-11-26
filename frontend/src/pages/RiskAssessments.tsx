@@ -5,6 +5,7 @@ import { CheckCircle, ShieldCheck, Plus, Download, UserCheck } from "lucide-reac
 import FormField from "../components/ui/FormField";
 import { useValidation } from "../utils/validation";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
+import { useDebounce } from "../hooks/useDebounce";
 import { useToast } from "../components/ui/Toast";
 import { useAuth } from "../auth/AuthContext";
 import type { RiskAssessment } from "../types";
@@ -39,6 +40,7 @@ export function RiskAssessments() {
   const [occurrenceId, setOccurrenceId] = useState("");
   const [missionId, setMissionId] = useState("");
   const [missionSearch, setMissionSearch] = useState("");
+  const debouncedMissionSearch = useDebounce(missionSearch, 300);
   const [riskModel, setRiskModel] = useState("sms_5x5");
   const [likelihood, setLikelihood] = useState("possible");
   const [severity, setSeverity] = useState("minor");
@@ -73,8 +75,6 @@ export function RiskAssessments() {
     { id: "communication_towers", name: "Communication towers", risk: "Collision with towers or guy wires.", mitigation: "Locate towers and guy wires. Keep the flight path clear of both.", score: "4 Low", ls: "L1 × S4" },
     { id: "electric_poles", name: "Electric poles / power lines", risk: "Wire strike or electrical contact.", mitigation: "Identify poles and spans. Set a safe stand-off distance.", score: "4 Low", ls: "L1 × S4" },
   ];
-  const [selectedHazards, setSelectedHazards] = useState<Record<string, boolean>>({});
-
   const { data: fetchedAssessments = [], isLoading, isError, error, refetch } = useQuery<RiskAssessment[]>({
     queryKey: ["risk-assessments", statusFilter, riskFilter, page],
     queryFn: () => safetyApi.listRiskAssessments({
@@ -96,10 +96,10 @@ export function RiskAssessments() {
     queryFn: () => safetyApi.getRiskAssessmentSummary(),
   });
   const { data: plannedMissions = [], isError: missionsError } = useQuery({
-    queryKey: ["risk-assessment-planned-missions", missionSearch],
+    queryKey: ["risk-assessment-planned-missions", debouncedMissionSearch],
     queryFn: () => safetyApi.listMissions({
       status: "planned",
-      ...(missionSearch.trim() ? { search: missionSearch.trim() } : {}),
+      ...(debouncedMissionSearch.trim() ? { search: debouncedMissionSearch.trim() } : {}),
       limit: 100,
       offset: 0,
     }),
@@ -116,6 +116,11 @@ export function RiskAssessments() {
 
   const removeHazard = (idToRemove: string) => {
     setHazardIds(hazardIds.filter((id) => id !== idToRemove));
+    setDirty(true);
+  };
+
+  const toggleKflHazard = (id: string) => {
+    setHazardIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
     setDirty(true);
   };
 
@@ -454,8 +459,8 @@ export function RiskAssessments() {
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={selectedHazards[hazard.id] ?? false}
-                      onChange={() => setSelectedHazards({ ...selectedHazards, [hazard.id]: !selectedHazards[hazard.id] })}
+                      checked={hazardIds.includes(hazard.id)}
+                      onChange={() => toggleKflHazard(hazard.id)}
                       className="mt-0.5 shrink-0 text-kfl-blue"
                     />
                     <div className="flex-1">
