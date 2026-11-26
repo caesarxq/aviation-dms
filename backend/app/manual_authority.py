@@ -71,4 +71,4 @@ def review_denial(role: str, authority: dict) -> str:
 
 
 def approve_denial(role: str, authority: dict) -> str:
-    return _denied(role, authority.get("approver_role", ""), "Approving or publishing a change request")
+    return _denied(role, authority.get("approver_role", ""), "Approving")

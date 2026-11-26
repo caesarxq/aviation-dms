@@ -3638,7 +3638,10 @@ async def reject_change_request(cr_id: str, request: Request, payload: Optional[
 @router.post("/change-requests/{cr_id}/publish")
 async def publish_change_request(cr_id: str, request: Request):
     """Publish an approved change request, making it eligible for distribution."""
-    _check(request, "change_request:approve")
+    # Publication is the document controller's act; approval belongs to the
+    # Head of Quality. The two are separate permissions so neither role can
+    # both approve and publish a manual change.
+    _check(request, "document:publish")
     actor = _actor(request)
     now = now_iso()
     db = await get_db()
@@ -3652,9 +3655,6 @@ async def publish_change_request(cr_id: str, request: Request):
             raise HTTPException(status_code=400, detail="Only approved change requests can be published")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot publish their own change request (separation of duties)")
-        authority = await authority_for_document(db, cr["document_id"])
-        if not can_approve(_role(request), authority):
-            raise HTTPException(status_code=403, detail=approve_denial(_role(request), authority))
         await db.execute(
             "UPDATE change_requests SET status = 'published', updated_at = ?, updated_by = ? WHERE cr_id = ?",
             (now, actor, cr_id),
@@ -3707,6 +3707,9 @@ async def redirect_change_request(cr_id: str, request: Request, payload: Optiona
             raise HTTPException(status_code=400, detail="Only change requests under review can be redirected")
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot redirect their own change request")
+        authority = await authority_for_document(db, cr["document_id"])
+        if not can_approve(_role(request), authority):
+            raise HTTPException(status_code=403, detail=approve_denial(_role(request), authority))
         reason = payload.rejection_reason if payload else None
         if not reason or not reason.strip():
             raise HTTPException(status_code=422, detail="A redirect reason is required")

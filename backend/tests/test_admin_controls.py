@@ -66,30 +66,30 @@ class TestRoleProfiles:
 
 
 class TestWorkflowStateMachine:
-    def test_invalid_document_transition_is_rejected(self, client, librarian_headers):
+    def test_invalid_document_transition_is_rejected(self, client, admin_headers):
         response = client.post(
             "/api/p0/versions",
             json={"document_id": "DOC-001", "version_number": "99.99.01", "content": "workflow test"},
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         version_id = response.json()["version_id"]
         response = client.patch(
             f"/api/p0/versions/{version_id}/state?state=published",
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         assert response.status_code == 422
         assert "Invalid version transition" in response.json()["detail"]
 
-    def test_document_state_transition_creates_audit_event(self, client, librarian_headers):
+    def test_document_state_transition_creates_audit_event(self, client, admin_headers):
         response = client.post(
             "/api/p0/versions",
             json={"document_id": "DOC-001", "version_number": "99.99.02", "content": "workflow audit"},
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         version_id = response.json()["version_id"]
         response = client.patch(
             f"/api/p0/versions/{version_id}/state?state=in_review",
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         assert response.status_code == 200
         events = client.get(

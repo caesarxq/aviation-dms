@@ -27,6 +27,7 @@ from .rbac import has_permission, check_sod, all_role_profiles, ROLE_PERMISSIONS
 from .p0_models import *
 from .p0_auth import P0AuthMiddleware, SESSION_COOKIE, CSRF_COOKIE, SESSION_COOKIE_SECURE, SESSION_TTL_SECONDS, DEV_MODE, same_principal
 from .bugtracker_sync import handle_bugtracker_webhook, run_full_sync
+from .manual_authority import authority_for_document, can_approve, approve_denial
 from .upload_safety import (
     UploadMalwareDetected,
     UploadQuotaExceeded,
@@ -101,6 +102,31 @@ def _check_document_read(request: Request):
 
 _NON_EDITABLE_DOCUMENT_CATEGORIES = {"roc_ops_spec", "oem_publication"}
 _NON_EDITABLE_DOCUMENT_CLASSES = {"roc_spec", "ops_spec", "oem_publication"}
+
+
+async def _require_change_path_for_owned_manual(db, doc_id: str, role: str) -> None:
+    """Owned manuals are changed through a proposal, never by a direct write.
+
+    Without this, the document controller (or any holder of document:update)
+    could write new content into a controlled manual and have it approved
+    afterwards — skipping the owner review that the ownership rule requires.
+    """
+    if role == "system_admin":
+        return
+    cursor = await db.execute(
+        "SELECT manual_owner_role FROM documents WHERE document_id = ?", (doc_id,)
+    )
+    row = await cursor.fetchone()
+    owner_role = (row["manual_owner_role"] or "").strip() if row else ""
+    if owner_role:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This manual is owned by {owner_role}. Changes must go through a "
+                "document proposal so the owner can review them and the Head of "
+                "Quality can approve them."
+            ),
+        )
 
 
 async def _require_editable_document(db, doc_id: str):
@@ -1577,6 +1603,7 @@ async def create_version(ver: DocumentVersionCreate, request: Request):
     try:
         # Check if parent document exists
         doc_row = await _require_editable_document(db, ver.document_id)
+        await _require_change_path_for_owned_manual(db, ver.document_id, _role(request))
         kcaa_required = doc_row["kcaa_approval_required"]
         
         await db.execute(
@@ -1816,6 +1843,10 @@ async def transition_version_state(
             raise HTTPException(status_code=404, detail="Version not found")
         row = dict(row)
         await _require_editable_document(db, row["document_id"])
+        # approval/publishing authority is a property of the actor and the
+        # document: a manual can only be approved or published by its approver
+        # role (Head of Quality). Checked after the transition is validated so
+        # an impossible transition still reports as invalid.
         allowed_transitions = {
             "draft": {"in_review"},
             "in_review": {"approved", "rejected", "draft"},
@@ -1826,6 +1857,10 @@ async def transition_version_state(
         }
         if state not in allowed_transitions.get(row["state"], set()):
             raise HTTPException(status_code=422, detail=f"Invalid version transition: {row['state']} -> {state}")
+        if state in ("approved", "kcaa_approved"):
+            authority = await authority_for_document(db, row["document_id"])
+            if not can_approve(role, authority):
+                raise HTTPException(status_code=403, detail=approve_denial(role, authority))
         # Permission checks based on target state
         if state in ("approved", "kcaa_approved"):
             if not has_permission(role, "document:approve"):
@@ -1999,6 +2034,7 @@ async def update_document_content(doc_id: str, update: DocumentContentUpdate, re
     db = await get_db()
     try:
         doc_row = await _require_editable_document(db, doc_id)
+        await _require_change_path_for_owned_manual(db, doc_id, _role(request))
         kcaa_required = doc_row["kcaa_approval_required"]
 
         # Get latest version number to increment

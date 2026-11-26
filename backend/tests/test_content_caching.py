@@ -35,14 +35,14 @@ def test_stale_if_none_match_returns_full_content(client, librarian_headers):
     assert "content" in resp.json()
 
 
-def test_etag_changes_when_content_changes(client, librarian_headers):
-    before = client.get("/api/p0/documents/DOC-001/content?include_draft=true", headers=librarian_headers)
+def test_etag_changes_when_content_changes(client, admin_headers, librarian_headers):
+    before = client.get("/api/p0/documents/DOC-001/content?include_draft=true", headers=admin_headers)
     etag_before = before.headers["ETag"]
     save = client.put(
         "/api/p0/documents/DOC-001/content",
         json={"content": "<p>Changed for ETag test</p>", "change_summary": "etag test"},
-        headers=librarian_headers,
+        headers=admin_headers,
     )
     assert save.status_code == 200
-    after = client.get("/api/p0/documents/DOC-001/content?include_draft=true", headers=librarian_headers)
+    after = client.get("/api/p0/documents/DOC-001/content?include_draft=true", headers=admin_headers)
     assert after.headers["ETag"] != etag_before

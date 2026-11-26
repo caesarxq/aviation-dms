@@ -49,6 +49,35 @@ def proposal_only_headers(monkeypatch):
 
 
 @pytest.fixture
+def document_controller_headers(monkeypatch):
+    """A distinct document controller.
+
+    The seed data canonically merges u-lib (librarian) into u-quality, so the
+    seeded controller and the Head of Quality are the same principal and can
+    never satisfy the approver/publisher separation. Production needs its own
+    controller account; here we model one explicitly.
+    """
+    actor_id = f"u-controller-test-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setitem(p0_auth.DEV_IDENTITY_ROLES, actor_id, (actor_id, "librarian"))
+
+    async def add_controller():
+        db = await get_db()
+        try:
+            await db.execute(
+                "INSERT INTO users (user_id, username, email, full_name, role, is_active, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'librarian', 1, 'now', 'now')",
+                (actor_id, actor_id, f"{actor_id}@example.test", "Test Document Controller"),
+            )
+            await db.execute("INSERT INTO user_roles (user_id, role) VALUES (?, 'librarian')", (actor_id,))
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(add_controller())
+    return {"X-Role": "librarian", "X-Actor": actor_id}
+
+
+@pytest.fixture
 def independent_publisher_headers(monkeypatch):
     actor_id = f"u-publisher-test-{uuid.uuid4().hex[:8]}"
     monkeypatch.setitem(p0_auth.DEV_IDENTITY_ROLES, actor_id, (actor_id, "system_admin"))
@@ -105,10 +134,10 @@ class TestDocumentVersioning:
             assert response.status_code == 200
             assert title in response.json()["content"]
 
-    def test_create_version_starts_draft(self, client, librarian_headers):
+    def test_create_version_starts_draft(self, client, admin_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-001", "version_number": "02.00.00", "content": "v2 content"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         assert resp.status_code == 201
         data = resp.json()
         assert data["state"] == "draft"
@@ -120,32 +149,32 @@ class TestDocumentVersioning:
         }, headers=librarian_headers)
         assert resp.status_code == 404
 
-    def test_state_transition_draft_to_in_review(self, client, librarian_headers):
+    def test_state_transition_draft_to_in_review(self, client, admin_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-001", "version_number": "02.01.00", "content": "test"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         vid = resp.json()["version_id"]
-        resp = client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=librarian_headers)
+        resp = client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["state"] == "in_review"
 
-    def test_state_transition_requires_permission(self, client, librarian_headers):
+    def test_state_transition_requires_permission(self, client, admin_headers, librarian_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-001", "version_number": "02.02.00", "content": "test"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         vid = resp.json()["version_id"]
-        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=librarian_headers)
+        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=admin_headers)
         # Librarian cannot approve
         resp = client.patch(f"/api/p0/versions/{vid}/state?state=approved", headers=librarian_headers)
         assert resp.status_code == 403
 
-    def test_kcaa_gate_blocks_publish(self, client, librarian_headers, quality_headers, admin_headers):
+    def test_kcaa_gate_blocks_publish(self, client, quality_headers, admin_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-001", "version_number": "02.03.00", "content": "test"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         vid = resp.json()["version_id"]
-        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=librarian_headers)
-        client.patch(f"/api/p0/versions/{vid}/state?state=approved", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{vid}/state?state=approved", headers=quality_headers)
         # Publish without KCAA approval should fail
         resp = client.patch(f"/api/p0/versions/{vid}/state?state=published", headers=admin_headers)
         assert resp.status_code == 403
@@ -241,16 +270,16 @@ class TestDocumentVersioning:
         assert response.status_code == 415
         assert not list(tmp_path.iterdir())
 
-    def test_kcaa_publication_requires_retained_verified_evidence(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers, upload_safety_enabled):
+    def test_kcaa_publication_requires_retained_verified_evidence(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, document_controller_headers, upload_safety_enabled):
         monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
         version = client.post(
             "/api/p0/versions",
             json={"document_id": "DOC-001", "version_number": "03.00.00", "content": "external approval pending"},
-            headers=librarian_headers,
+            headers=admin_headers,
         ).json()
         version_id = version["version_id"]
-        client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=librarian_headers)
-        client.patch(f"/api/p0/versions/{version_id}/state?state=approved", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{version_id}/state?state=approved", headers=quality_headers)
 
         rejected_unverified = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_reference=FAKE&kcaa_evidence_sha256={'a' * 64}",
@@ -283,13 +312,13 @@ class TestDocumentVersioning:
             headers=admin_headers,
         )
         assert self_verify.status_code == 403
+        accountable_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
         verified = client.post(
             f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence['evidence_id']}/verify",
-            headers=quality_headers,
+            headers=accountable_headers,
         )
         assert verified.status_code == 200, verified.text
         assert verified.json()["status"] == "verified"
-        accountable_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
         stored_file = tmp_path / evidence["stored_filename"]
         assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
         assert stat.S_IMODE(stored_file.stat().st_mode) == 0o600
@@ -301,14 +330,14 @@ class TestDocumentVersioning:
         assert tampered_download.status_code == 409
         tampered = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_evidence_id={evidence['evidence_id']}",
-            headers=accountable_headers,
+            headers=quality_headers,
         )
         assert tampered.status_code == 409
         stored_file.write_bytes(evidence_bytes)
 
         approved = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_evidence_id={evidence['evidence_id']}",
-            headers=accountable_headers,
+            headers=quality_headers,
         )
         assert approved.status_code == 200, approved.text
         assert approved.json()["kcaa_reference"] == "KCAA-APPROVAL-2026-001"
@@ -316,20 +345,20 @@ class TestDocumentVersioning:
         assert approved.json()["kcaa_evidence_id"] == evidence["evidence_id"]
         uploader_publish = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=admin_headers)
         assert uploader_publish.status_code == 403, uploader_publish.text
-        publisher_headers = independent_publisher_headers
+        publisher_headers = document_controller_headers
         published = client.patch(f"/api/p0/versions/{version_id}/state?state=published", headers=publisher_headers)
         assert published.status_code == 200, published.text
 
-    def test_kcaa_approval_chain_requires_a_distinct_publisher(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, independent_publisher_headers, upload_safety_enabled):
+    def test_kcaa_approval_chain_requires_a_distinct_publisher(self, client, librarian_headers, quality_headers, admin_headers, tmp_path, monkeypatch, document_controller_headers, upload_safety_enabled):
         monkeypatch.setattr(p0_routes, "KCAA_EVIDENCE_DIR", tmp_path)
         version = client.post(
             "/api/p0/versions",
             json={"document_id": "DOC-001", "version_number": "03.01.00", "content": "distinct publisher test"},
-            headers=librarian_headers,
+            headers=admin_headers,
         ).json()
         version_id = version["version_id"]
-        client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=librarian_headers)
-        client.patch(f"/api/p0/versions/{version_id}/state?state=approved", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{version_id}/state?state=in_review", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{version_id}/state?state=approved", headers=quality_headers)
 
         evidence_bytes = _valid_pdf_bytes()
         uploaded = client.post(
@@ -339,17 +368,17 @@ class TestDocumentVersioning:
         )
         assert uploaded.status_code == 201, uploaded.text
         evidence_id = uploaded.json()["evidence_id"]
-        assert client.post(
-            f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence_id}/verify", headers=quality_headers
-        ).status_code == 200
         accountable_headers = {"X-Role": "accountable_manager", "X-Actor": "u-accountable"}
+        assert client.post(
+            f"/api/p0/versions/{version_id}/kcaa-evidence/{evidence_id}/verify", headers=accountable_headers
+        ).status_code == 200
         approved = client.patch(
             f"/api/p0/versions/{version_id}/state?state=kcaa_approved&kcaa_evidence_id={evidence_id}",
-            headers=accountable_headers,
+            headers=quality_headers,
         )
         assert approved.status_code == 200, approved.text
 
-        publisher_headers = independent_publisher_headers
+        publisher_headers = document_controller_headers
 
         for same_chain_actor in (admin_headers, quality_headers, accountable_headers):
             denied = client.patch(
@@ -362,15 +391,15 @@ class TestDocumentVersioning:
         )
         assert independent_publisher.status_code == 200, independent_publisher.text
 
-    def test_sod_creator_cannot_publish(self, client, librarian_headers, quality_headers, admin_headers):
+    def test_sod_creator_cannot_publish(self, client, quality_headers, admin_headers):
         resp = client.post("/api/p0/versions", json={
             "document_id": "DOC-002", "version_number": "01.01.00", "content": "test"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         vid = resp.json()["version_id"]
-        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=librarian_headers)
-        client.patch(f"/api/p0/versions/{vid}/state?state=approved", headers=admin_headers)
-        # Admin (not creator) can publish, but librarian (creator) cannot
-        resp = client.patch(f"/api/p0/versions/{vid}/state?state=published", headers=librarian_headers)
+        client.patch(f"/api/p0/versions/{vid}/state?state=in_review", headers=admin_headers)
+        client.patch(f"/api/p0/versions/{vid}/state?state=approved", headers=quality_headers)
+        # The creator cannot publish its own version, even holding publish rights
+        resp = client.patch(f"/api/p0/versions/{vid}/state?state=published", headers=admin_headers)
         assert resp.status_code == 403
 
     def test_nonexistent_version_returns_404(self, client, librarian_headers):
@@ -400,11 +429,11 @@ class TestDocumentVersioning:
         assert allowed_draft.status_code == 200
         assert allowed_draft.json()["content"] == "Unapproved draft secret"
 
-    def test_proposal_only_can_read_catalogue_and_published_content_but_not_drafts_or_save(self, client, librarian_headers, proposal_only_headers):
+    def test_proposal_only_can_read_catalogue_and_published_content_but_not_drafts_or_save(self, client, admin_headers, proposal_only_headers):
         draft = client.put(
             "/api/p0/documents/DOC-006/content",
             json={"content": "Proposal-only must not read this draft", "change_summary": "test"},
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         assert draft.status_code == 200
 
@@ -436,12 +465,12 @@ class TestDocumentVersioning:
         )
         assert saved.status_code == 403
 
-    def test_versions_endpoint_hides_unpublished_content_from_readers(self, client, librarian_headers, reporter_headers, proposal_only_headers):
+    def test_versions_endpoint_hides_unpublished_content_from_readers(self, client, admin_headers, librarian_headers, reporter_headers, proposal_only_headers):
         marker = "Unpublished version must remain restricted"
         draft = client.put(
             "/api/p0/documents/DOC-006/content",
             json={"content": marker, "change_summary": "version-list visibility test"},
-            headers=librarian_headers,
+            headers=admin_headers,
         )
         assert draft.status_code == 200
         draft_id = draft.json()["version_id"]
@@ -476,26 +505,26 @@ class TestDocumentVersioning:
         resp = client.get("/api/p0/documents/NONEXISTENT/content", headers=librarian_headers)
         assert resp.status_code == 404
 
-    def test_save_content_creates_new_version(self, client, librarian_headers):
+    def test_save_content_creates_new_version(self, client, admin_headers):
         resp = client.put("/api/p0/documents/DOC-001/content", json={
             "content": "Updated content", "change_summary": "test update"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         assert resp.status_code == 200
         assert "version_number" in resp.json()
 
-    def test_draft_version_does_not_replace_effective_published_content(self, client, librarian_headers):
-        baseline = client.get("/api/p0/documents/DOC-006/content", headers=librarian_headers)
+    def test_draft_version_does_not_replace_effective_published_content(self, client, admin_headers):
+        baseline = client.get("/api/p0/documents/DOC-006/content", headers=admin_headers)
         assert baseline.status_code == 200
         baseline_data = baseline.json()
         assert baseline_data["state"] == "published"
 
         draft = client.put("/api/p0/documents/DOC-006/content", json={
             "content": "Unapproved draft modification", "change_summary": "draft only"
-        }, headers=librarian_headers)
+        }, headers=admin_headers)
         assert draft.status_code == 200
         assert draft.json()["state"] == "draft"
 
-        effective = client.get("/api/p0/documents/DOC-006/content", headers=librarian_headers)
+        effective = client.get("/api/p0/documents/DOC-006/content", headers=admin_headers)
         assert effective.status_code == 200
         assert effective.json()["state"] == "published"
         assert effective.json()["version_id"] == baseline_data["version_id"]
