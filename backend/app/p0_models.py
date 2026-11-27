@@ -96,6 +96,7 @@ class DocumentCreate(BaseModel):
     owner_id: str
     kcaa_approval_required: bool = False
     review_due_date: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class DocumentUpdate(BaseModel):
@@ -107,6 +108,7 @@ class DocumentUpdate(BaseModel):
     owner_id: Optional[str] = None
     kcaa_approval_required: Optional[bool] = None
     review_due_date: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class DocumentResponse(BaseModel):
@@ -130,9 +132,40 @@ class DocumentResponse(BaseModel):
     approval_evidence_status: Optional[str] = None
     parent_document_id: Optional[str] = None
     parent_section_ref: Optional[str] = None
+    folder_id: Optional[str] = None
     created_at: str
     updated_at: str
     created_by: str
+
+
+class FolderCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class FolderResponse(BaseModel):
+    folder_id: str
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    document_count: int = 0
+    created_by: str
+    created_at: str
+    updated_at: str
+
+
+class PaginatedFolderResponse(BaseModel):
+    data: List[FolderResponse]
+    total: int
+    limit: int
+    offset: int
 
 
 class PaginatedDocumentResponse(BaseModel):
@@ -550,3 +583,60 @@ class AppVersionResponse(BaseModel):
     changelog_technical: Optional[str]
     notification_sent: int
     created_at: str
+
+
+# --- Bulk document intake (historical records) ---
+
+class BulkIngestItem(BaseModel):
+    staging_id: str
+    file_name: str
+    document_type: str
+    confidence: float
+    target_table: str
+    status: str
+    extracted_fields: dict
+    raw_text_preview: str
+    duplicate_of: Optional[str] = None
+
+
+class BulkIngestResponse(BaseModel):
+    batch_id: str
+    items: list[BulkIngestItem]
+    staged: int
+    duplicates: int
+    rejected: int
+
+
+class ApplyIngestionItem(BaseModel):
+    staging_id: str
+    target_table: str
+    # Optional overrides supplied by the reviewer at apply time.
+    aircraft_id: Optional[str] = None
+    person_id: Optional[str] = None
+    document_id: Optional[str] = None
+    # Required when target_table == "audit_report_import" (historical audits /
+    # CARs / findings reports are quarantined here pending provenance review).
+    source_auditor_id: Optional[str] = None
+    source_auditor_name: Optional[str] = None
+    auditee_id: Optional[str] = None
+    audit_number: Optional[str] = None
+    audit_date: Optional[str] = None
+    scope: Optional[str] = None
+    regulatory_basis: Optional[str] = None
+
+
+class ApplyBulkIngestionRequest(BaseModel):
+    items: list[ApplyIngestionItem]
+
+
+class ApplyBulkIngestionResult(BaseModel):
+    staging_id: str
+    target_table: str
+    status: str
+    detail: str
+
+
+class ApplyBulkIngestionResponse(BaseModel):
+    applied: int
+    rejected: int
+    results: list[ApplyBulkIngestionResult]

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../api/client";
@@ -83,7 +84,7 @@ function renderAdmin() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AdminObservability />
+      <MemoryRouter><AdminObservability /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -130,6 +131,79 @@ describe("AdminObservability role assignments", () => {
     expect(screen.getByText("canonical-5012309115b2a2d3b38a23e35dc6cf92a26ebcc3-20261118T200056Z")).toBeInTheDocument();
     expect(screen.getByText(/API 1\.0\.0/)).toBeInTheDocument();
     expect(screen.getByText(/5012309115b2a/)).toBeInTheDocument();
+  });
+
+  it("shows BugTracker failures and pending feedback in observability", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({
+      data: {
+        ...observability,
+        health: {
+          ...observability.health,
+          bugtracker_sync: {
+            integration: "bugtracker", configured: true, healthy: false, stale: false,
+            last_status: "degraded", last_created: 0, last_updated: 1, last_failed: 2,
+            pending_feedback: 2, last_finished_at: "2026-11-27T00:00:00Z",
+            last_error: "2 feedback issue(s) remain pending in BugTracker sync.",
+          },
+        },
+      },
+    } as any);
+    renderAdmin();
+
+    expect(await screen.findByText("BugTracker sync")).toBeInTheDocument();
+    expect(screen.getByText(/2 failed · 2 pending/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review feedback queue" })).toHaveAttribute("href", "/feedback");
+  });
+
+  it("renders an accessible audit trend and requests the selected time range", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({
+      data: {
+        ...observability,
+        audit: {
+          ...observability.audit,
+          activity_trend: [
+            { date: "2026-11-21", count: 1 },
+            { date: "2026-11-22", count: 0 },
+            { date: "2026-11-23", count: 3 },
+          ],
+        },
+      },
+    } as any);
+    renderAdmin();
+
+    expect(await screen.findByRole("img", { name: "Daily system audit events over 30 days" })).toBeInTheDocument();
+    expect(screen.getByText("4 events in 30 days")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Audit trend time range"), "7");
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/p0/admin/observability", { params: { days: 7 } }));
+  });
+
+  it("requires confirmation before bulk release notices and reports partial delivery", async () => {
+    const pendingVersion = { ...appVersions[0], notification_sent: false };
+    vi.mocked(api.get).mockImplementation((url: string) => {
+      if (url === "/p0/app-versions") return Promise.resolve({ data: [pendingVersion] } as any);
+      return Promise.resolve({ data: observability } as any);
+    });
+    vi.mocked(api.post).mockResolvedValue({ data: {
+      notifications_sent: 1,
+      notifications_failed: 1,
+      total_users: 2,
+      notification_status: "partial",
+      recipient_results: [
+        { email: "one@example.test", status: "sent" },
+        { email: "two@example.test", status: "failed" },
+      ],
+    } } as any);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderAdmin();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Send notification" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    await userEvent.click(screen.getByRole("button", { name: "Send notification" }));
+    expect(await screen.findByText(/one@example\.test — sent/)).toBeInTheDocument();
+    expect(screen.getByText(/two@example\.test — failed/)).toBeInTheDocument();
   });
 
   it("displays preserved merged account IDs without offering them role editing", async () => {

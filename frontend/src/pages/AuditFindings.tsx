@@ -85,6 +85,19 @@ export function AuditFindings() {
     onError: () => setMutationError("Unable to create audit finding. Please check the details and try again."),
   });
 
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      finding_number: findingNumber,
+      audit_id: auditId,
+      area,
+      department,
+      level: parseInt(level, 10),
+      title,
+      description,
+    });
+  };
+
   const closeMutation = useMutation({
     mutationFn: (data: any) => auditApi.updateAuditFinding(detailFinding!.finding_id, data),
     onSuccess: () => {
@@ -368,8 +381,9 @@ export function AuditFindings() {
           </div>
           {mutationError && <p role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">{mutationError}</p>}
           {auditsError && <div role="alert" className="mb-3 rounded-md border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 text-kfl-status-danger text-sm">Unable to load audit engagements. <Button onClick={() => void refetchAudits()} variant="link" size="sm">Retry</Button></div>}
-          <div className="space-y-3 mb-4">
-            <FormField htmlFor="audit_engagement" label="Audit engagement" required>
+          <form onSubmit={handleCreate} className="space-y-2">
+            <div className="space-y-3 mb-4">
+              <FormField htmlFor="audit_engagement" label="Audit engagement" required>
               <select id="audit_engagement" name="audit_id" aria-label="Audit engagement" className="app-input" value={auditId} onChange={(event) => setAuditId(event.target.value)} disabled={auditsLoading || auditsError}>
                 <option value="">Select an audit</option>
                 {audits.map((audit) => <option key={audit.audit_id} value={audit.audit_id}>{audit.audit_number} — {audit.audit_date}</option>)}
@@ -460,35 +474,25 @@ export function AuditFindings() {
                 rows={3}
               />
             </FormField>
-          </div>
-          <Button
-            type="button"
-            disabled={
-              createMutation.isPending || !auditId || auditsLoading || auditsError ||
-              !findingNumber ||
-              !area ||
-              !department ||
-              !level ||
-              !title ||
-              !description
-            }
-            onClick={() =>
-              createMutation.mutate({
-                finding_number: findingNumber,
-                audit_id: auditId,
-                area,
-                department,
-                level: parseInt(level, 10),
-                title,
-                description,
-              })
-            }
-            variant="default"
-            size="sm"
-            className="w-full disabled:opacity-60"
-          >
-            {createMutation.isPending ? "Creating…" : "Create Finding"}
-          </Button>
+            </div>
+            <Button
+              type="submit"
+              disabled={
+                createMutation.isPending || !auditId || auditsLoading || auditsError ||
+                !findingNumber ||
+                !area ||
+                !department ||
+                !level ||
+                !title ||
+                !description
+              }
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
+            >
+              {createMutation.isPending ? "Creating…" : "Create Finding"}
+            </Button>
+          </form>
         </div>
       )}
 

@@ -109,6 +109,15 @@ def invite_email_configuration_error() -> Optional[str]:
     return None
 
 
+def notification_email_configuration_error() -> Optional[str]:
+    """Return a safe reason when real SMTP delivery cannot be guaranteed."""
+    if not NOTIFICATION_ENABLED:
+        return "Email notifications are disabled"
+    if not all((SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM_CONFIGURED)):
+        return "Notification email SMTP is not configured"
+    return None
+
+
 def send_invitation_email(to: str, subject: str, body: str, html: str) -> bool:
     """Send an invite without persisting the bearer link in notifications."""
     reason = invite_email_configuration_error()

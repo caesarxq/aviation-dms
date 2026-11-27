@@ -66,6 +66,18 @@ export function AuditReports() {
     onError: () => setMutationError("Unable to create audit report. Please check the details and try again."),
   });
 
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      audit_number: auditNumber,
+      audit_date: auditDate,
+      auditor_id: auditorId.trim(),
+      auditee_id: auditeeId.trim(),
+      scope: scope || undefined,
+      regulatory_basis: regulatoryBasis || undefined,
+    });
+  };
+
   return (
     <div className="app-page">
       <header className="app-page-header">
@@ -166,25 +178,17 @@ export function AuditReports() {
               />
             </FormField>
           </div>
-          <Button
-            type="button"
-            disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
-            onClick={() =>
-              createMutation.mutate({
-                audit_number: auditNumber,
-                audit_date: auditDate,
-                auditor_id: auditorId.trim(),
-                auditee_id: auditeeId.trim(),
-                scope: scope || undefined,
-                regulatory_basis: regulatoryBasis || undefined,
-              })
-            }
-            variant="default"
-            size="sm"
-            className="w-full disabled:opacity-60"
-          >
-            {createMutation.isPending ? "Creating…" : "Create Audit"}
-          </Button>
+          <form onSubmit={handleCreate} className="space-y-2">
+            <Button
+              type="submit"
+              disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
+            >
+              {createMutation.isPending ? "Creating…" : "Create Audit"}
+            </Button>
+          </form>
         </div>
       )}
 
@@ -193,20 +197,22 @@ export function AuditReports() {
       )}
 
       <section className="app-surface overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 border-b border-kfl-border p-4 md:flex-row md:items-center md:justify-between md:gap-4">
           <div className="relative min-w-0 flex-1 md:max-w-md">
             <Input type="search" id="audit-report-search" name="search" aria-label="Search audit reports" value={search} onChange={(event) => { setSearch(event.target.value); setReportOffset(0); }} placeholder="Search audit reports…" />
           </div>
-          <Select onValueChange={(e) => { setStatusFilter(e); setReportOffset(0); }}>
-            <SelectTrigger id="audit-report-status" name="status" aria-label="Filter audit reports by status">
-              <SelectValue placeholder={statusFilter || "All statuses"} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
-              {AUDIT_REPORT_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <div className="text-sm font-semibold text-kfl-text">Audit Reports</div>
+          <div className="md:shrink-0">
+            <Select onValueChange={(e) => { setStatusFilter(e); setReportOffset(0); }}>
+              <SelectTrigger id="audit-report-status" name="status" aria-label="Filter audit reports by status">
+                <SelectValue placeholder={statusFilter || "All statuses"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All statuses</SelectItem>
+                {AUDIT_REPORT_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="text-sm font-semibold text-kfl-text md:shrink-0">Audit Reports</div>
         </div>
 
         {isError ? (

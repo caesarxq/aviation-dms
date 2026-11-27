@@ -4,6 +4,8 @@ import {
   BarChart3,
   LayoutDashboard,
   FileText,
+  Import,
+  List,
   AlertTriangle,
   ClipboardList,
   ClipboardCheck,
@@ -226,6 +228,7 @@ const sections: SectionProps[] = [
     items: [
       { to: "/maintenance", icon: Wrench, label: "Maintenance Management", permission: "aircraft:read" },
       { to: "/aircraft-insurance", icon: Shield, label: "Aircraft Insurance", permission: "aircraft:read" },
+      { to: "/aircraft/:aircraftId/documents", icon: List, label: "Aircraft Documents", permission: "aircraft:read" },
     ],
   },
   {
@@ -233,8 +236,10 @@ const sections: SectionProps[] = [
     icon: FileText,
     items: [
       { to: "/documents", icon: FileText, label: "Documents", anyPermissions: ["document:read", "document:propose"] },
+      { to: "/documents/bulk-ingest", icon: Import, label: "Bulk Intake", permission: "document:update" },
       { to: "/change-requests", icon: FileText, label: "Change Requests", permission: "document:read" },
       { to: "/document-proposals", icon: KeyRound, label: "Document Proposals", anyPermissions: ["document:read", "document:propose"] },
+      { to: "/documents/:docId/annotations", icon: List, label: "Document Annotations", permission: "document:annotate" },
       { to: "/version-diff", icon: Activity, label: "Version Diff", permission: "document:read" },
     ],
   },
@@ -242,10 +247,10 @@ const sections: SectionProps[] = [
     label: "Audit",
     icon: ScrollText,
     items: [
-      { to: "/audit-reports", icon: FileText, label: "Audit Reports", permission: "audit_report:read" },
-      { to: "/audit-planning", icon: ClipboardList, label: "Audit Planning", permission: "safety:read" },
-      { to: "/audit-findings", icon: AlertTriangle, label: "Audit Findings", permission: "audit_finding:read" },
       { to: "/audit-dashboard", icon: BarChart3, label: "Audit Dashboard", permission: "audit_finding:read" },
+      { to: "/audit-planning", icon: ClipboardList, label: "Audit Planning", permission: "safety:read" },
+      { to: "/audit-reports", icon: FileText, label: "Audit Reports", permission: "audit_report:read" },
+      { to: "/audit-findings", icon: AlertTriangle, label: "Audit Findings", permission: "audit_finding:read" },
       { to: "/audit-trail", icon: ScrollText, label: "Audit Trail", permission: "audit:read" },
     ],
   },

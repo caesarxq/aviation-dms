@@ -13,8 +13,10 @@ set -euo pipefail
 
 IMAGE_TAG="${1:?Usage: deploy-prod.sh <IMAGE_TAG>}"
 REGISTRY="${REGISTRY:-ghcr.io}"
-PROD_DIR="/opt/kfl-aviation-dms-prod"
+PROD_DIR="${PROD_DIR:-/opt/kfl-aviation-dms-prod}"
 BACKUP_SCRIPT="${BACKUP_SCRIPT:-${PROD_DIR}/scripts/full-stack-backup.sh}"
+HEALTH_WAIT_ATTEMPTS="${HEALTH_WAIT_ATTEMPTS:-30}"
+HEALTH_WAIT_INTERVAL="${HEALTH_WAIT_INTERVAL:-2}"
 
 echo "============================================================"
 echo "Aviation DMS Production Deployment"
@@ -65,35 +67,44 @@ sudo docker tag "${REGISTRY}/kfl-aviation-dms/frontend:${IMAGE_TAG}" \
 # --- Deploy using production compose override ---
 echo "--- Deploying to production ---"
 cd "${PROD_DIR}"
-sudo docker compose \
+sudo env \
+  DMS_RELEASE_TAG="${DMS_RELEASE_TAG}" \
+  DMS_HOSTNAME="${DMS_HOSTNAME}" \
+  DMS_CLAMD_HOST="${DMS_CLAMD_HOST}" \
+  DMS_CLAMD_PORT="${DMS_CLAMD_PORT}" \
+  DMS_CLAMD_TIMEOUT_SECONDS="${DMS_CLAMD_TIMEOUT_SECONDS}" \
+  DMS_CLAMD_MAX_TIMEOUT_SECONDS="${DMS_CLAMD_MAX_TIMEOUT_SECONDS}" \
+  DMS_UPLOAD_STORAGE_QUOTA_BYTES="${DMS_UPLOAD_STORAGE_QUOTA_BYTES}" \
+  DMS_AUDIT_EVIDENCE_MAX_BYTES="${DMS_AUDIT_EVIDENCE_MAX_BYTES}" \
+  DMS_P3_IMPORT_BODY_MAX_BYTES="${DMS_P3_IMPORT_BODY_MAX_BYTES}" \
+  FLIGHT_RELEASE_ENABLED="${FLIGHT_RELEASE_ENABLED}" \
+  DEV_MODE="${DEV_MODE}" \
+  SESSION_COOKIE_SECURE="${SESSION_COOKIE_SECURE}" \
+  NOTIFICATION_ENABLED="${NOTIFICATION_ENABLED}" \
+  docker compose \
   -f docker-compose.yml \
   -f docker-compose.prod.yml \
   --env-file .env.prod \
-  up -d --build backend upload-validator clamd frontend https_proxy
+  up -d --no-build backend upload-validator clamd frontend
 
 # --- Wait for health ---
 echo "--- Waiting for services to become healthy ---"
-for service in backend upload-validator clamd frontend https_proxy; do
+for service in backend upload-validator clamd frontend; do
   echo "Waiting for ${service}..."
-  for i in $(seq 1 30); do
-    status=$(sudo docker inspect --format='{{.Status}}' \
+  for i in $(seq 1 "${HEALTH_WAIT_ATTEMPTS}"); do
+    status=$(sudo docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
       "kfl-aviation-dms-prod-${service}-1" 2>/dev/null || echo "not_found")
-    if [ "${status}" = "healthy" ]; then
-      echo "${service} is healthy"
+    if [ "${status}" = "healthy" ] || [ "${status}" = "running" ]; then
+      echo "${service} is ${status}"
       break
     fi
-    if [ "${i}" -eq 30 ]; then
+    if [ "${i}" -eq "${HEALTH_WAIT_ATTEMPTS}" ]; then
       echo "ERROR: ${service} did not become healthy"
       sudo docker logs "kfl-aviation-dms-prod-${service}-1" --tail 50
-      echo "Initiating rollback..."
-      sudo docker compose \
-        -f docker-compose.yml \
-        -f docker-compose.prod.yml \
-        --env-file .env.prod \
-        down
+      echo "Production services were left running for investigation; no destructive teardown was attempted." >&2
       exit 1
     fi
-    sleep 2
+    sleep "${HEALTH_WAIT_INTERVAL}"
   done
 done
 

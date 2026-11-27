@@ -1009,7 +1009,9 @@ function DocumentSelector({ setDocId }: { setDocId: (id: string) => void }) {
     queryFn: () => listDocuments({ document_category: "controlled_manual" }),
   });
   const docs = (documentPage?.data ?? []).filter(
-    (doc) => !["roc_spec", "ops_spec", "oem_publication"].includes(doc.doc_class.toLowerCase()),
+    (doc) =>
+      !["roc_spec", "ops_spec", "oem_publication"].includes(doc.doc_class.toLowerCase()) &&
+      !["roc_ops_spec", "oem_publication"].includes((doc.document_category || "").toLowerCase()),
   );
 
   if (isLoading) return <div className="app-surface p-10 text-center text-sm text-kfl-muted">Loading documents…</div>;

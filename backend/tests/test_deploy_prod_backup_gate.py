@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-prod.sh"
 
 
-def _run_deploy(tmp_path, backup_script: Path | None):
+def _run_deploy(tmp_path, backup_script: Path | None, health_status: str = "healthy"):
     """Run deploy-prod.sh with stubbed sudo/docker; return (returncode, log, output)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -27,12 +27,18 @@ def _run_deploy(tmp_path, backup_script: Path | None):
 
     # docker stub: record and no-op (never touch a real daemon).
     docker = bin_dir / "docker"
-    docker.write_text("#!/bin/bash\necho \"docker $*\" >> \"$STUB_LOG\"\nexit 0\n")
+    docker.write_text("#!/bin/bash\necho \"docker $*\" >> \"$STUB_LOG\"\nif [[ $1 == inspect ]]; then echo \"$DOCKER_HEALTH_STATUS\"; fi\nexit 0\n")
     docker.chmod(0o755)
+
+    sleeper = bin_dir / "sleep"
+    sleeper.write_text("#!/bin/bash\nexit 0\n")
+    sleeper.chmod(0o755)
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["STUB_LOG"] = str(log)
+    env["DOCKER_HEALTH_STATUS"] = health_status
+    env["PROD_DIR"] = str(tmp_path)
     if backup_script is not None:
         env["BACKUP_SCRIPT"] = str(backup_script)
     else:
@@ -68,3 +74,14 @@ def test_successful_backup_allows_deployment_to_proceed(tmp_path):
     code, log, output = _run_deploy(tmp_path, backup_script=backup)
     # A successful backup must not block deployment: docker commands are reached.
     assert "docker" in log, "deployment should proceed after a successful backup"
+
+
+def test_health_failure_does_not_bring_down_production_services(tmp_path):
+    backup = tmp_path / "backup.sh"
+    backup.write_text("#!/bin/bash\nexit 0\n")
+    backup.chmod(0o755)
+    code, log, output = _run_deploy(tmp_path, backup_script=backup, health_status="unhealthy")
+
+    assert code != 0
+    assert "docker compose" in log
+    assert "docker compose down" not in log

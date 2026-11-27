@@ -927,6 +927,30 @@ class MaintenanceRecordResponse(BaseModel):
     aircraft_operational_status: Optional[str] = None
 
 
+class MaintenanceWorkOrderCreate(BaseModel):
+    aircraft_registration: str
+    title: str
+    description: str
+    priority: str = "routine"
+    due_date: Optional[str] = None
+
+
+class MaintenanceWorkOrderResponse(BaseModel):
+    work_order_id: str
+    aircraft_registration: str
+    title: str
+    description: str
+    priority: str
+    status: str
+    due_date: Optional[str] = None
+    completed_at: Optional[str] = None
+    performed_by: Optional[str] = None
+    created_at: str
+    updated_at: str
+    created_by: str
+    updated_by: str
+
+
 class CrewMemberCreate(BaseModel):
     full_name: str
     role: str
@@ -1160,6 +1184,10 @@ class ChangeRequestResponse(BaseModel):
     approved_at: Optional[str] = None
     rejected_at: Optional[str] = None
     rejection_reason: Optional[str] = None
+    published_at: Optional[str] = None
+    distributed_at: Optional[str] = None
+    published_by: Optional[str] = None
+    distributed_by: Optional[str] = None
     created_at: str
     updated_at: str
     created_by: str

@@ -34,6 +34,8 @@ env:
   REGISTRY_USER: ${{ github.actor }}
   BACKEND_IMAGE: ${{ github.repository }}/backend
   FRONTEND_IMAGE: ${{ github.repository }}/frontend
+  # Force JavaScript actions onto Node 24 ahead of Node 20 removal (Sept 23, 2026)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Owner-confirmed: roc-dis is one VM with both the bastion and staging addresses.
   # Staging is deployed directly to this shared host (no separate staging instance).
   STAGING_HOST: 145.241.152.126
@@ -43,9 +45,9 @@ env:
   BASTION_USER: ubuntu
   # Single host-key pin for the shared bastion/staging VM (roc-dis).
   ROC_DIS_HOST_KEY_FINGERPRINT: "SHA256:8gJYtzepz5my3l6wpKYHcF2s+BUpTgbEOCPuJRqyoe8"
-  # Production instance private IP — set via GitHub secret or environment
-  # Obtain from: OCI console instance details
-  PROD_HOST: ${{ secrets.PROD_HOST || 'prod.kfl.ke' }}
+  # Production instance private IP; the public domain resolves to the bastion.
+  PROD_HOST: ${{ secrets.PROD_HOST || '10.20.1.69' }}
+  PROD_USER: ${{ secrets.PROD_USER || 'ubuntu' }}
 
 jobs:
   build:
@@ -304,8 +306,8 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts_prod" \
             -o GlobalKnownHostsFile=/dev/null \
             -o ProxyCommand="ssh -i ~/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_bastion -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
-            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
-            "test -f /opt/kfl-aviation-dms-prod/scripts/full-stack-backup.sh && echo 'production backup helper: present'"
+            ${{ env.PROD_USER }}@${{ env.PROD_HOST }} \
+            "test -x /opt/kfl-aviation-dms-prod/scripts/full-stack-backup.sh && test -f /opt/kfl-aviation-dms-prod/scripts/deploy-prod.sh && echo 'production backup and deploy scripts: present'"
 
       - name: Promote image to production
         run: |
@@ -315,5 +317,5 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts_prod" \
             -o GlobalKnownHostsFile=/dev/null \
             -o ProxyCommand="ssh -i ~/.ssh/id_bastion -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_bastion -o GlobalKnownHostsFile=/dev/null -W %h:%p ${{ env.BASTION_USER }}@${{ env.BASTION_HOST }}" \
-            ${{ env.BASTION_USER }}@${{ env.PROD_HOST }} \
-            "./scripts/promote-to-production.sh $IMAGE_TAG"
+            ${{ env.PROD_USER }}@${{ env.PROD_HOST }} \
+            "bash /opt/kfl-aviation-dms-prod/scripts/deploy-prod.sh $IMAGE_TAG"

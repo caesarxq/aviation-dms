@@ -14,12 +14,14 @@ export interface Document {
   document_id: string;
   title: string;
   doc_class: string;
+  document_category: string;
   classification: string;
   status: string;
   owner_id: string;
   description: string | null;
   tags: string | null;
   current_version_id: string | null;
+  folder_id: string | null;
   kcaa_approval_required: boolean;
   review_due_date: string | null;
   created_at: string;

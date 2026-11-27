@@ -17,7 +17,7 @@
 set -euo pipefail
 
 IMAGE_TAG="${1:?Usage: promote-to-production.sh <IMAGE_TAG>}"
-PROD_HOST="${PROD_HOST:-prod.kfl.ke}"
+PROD_HOST="${PROD_HOST:-10.20.1.69}"
 PROD_USER="${PROD_USER:-ubuntu}"
 BASTION_HOST="${BASTION_HOST:-145.241.152.126}"
 BASTION_USER="${BASTION_USER:-ubuntu}"
