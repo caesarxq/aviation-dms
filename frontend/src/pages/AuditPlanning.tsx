@@ -43,6 +43,8 @@ export function AuditPlanning() {
   const [newAuditorId, setNewAuditorId] = useState("");
   const [newAuditeeId, setNewAuditeeId] = useState("");
   const [newPlannedDate, setNewPlannedDate] = useState("");
+  const [newChecklistItems, setNewChecklistItems] = useState("");
+  const [createdAuditId, setCreatedAuditId] = useState<string | null>(null);
   const [createError, setCreateError] = useState("");
   const todayUtc = new Date().toISOString().slice(0, 10);
 
@@ -83,8 +85,55 @@ export function AuditPlanning() {
   );
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => qualityAuditApi.createQualityAudit(data),
+    mutationFn: async ({ audit, checklistItems }: { audit: any; checklistItems: string[] }) => {
+      const createdAudit = await qualityAuditApi.createQualityAudit(audit);
+      if (checklistItems.length === 0) return { audit: createdAudit, checklistSaved: true };
+      try {
+        await qualityAuditApi.createAuditResource(createdAudit.audit_id, {
+          resource_type: "checklist",
+          resource_name: "Audit checklist",
+          description: checklistItems.map((item) => `☐ ${item}`).join("\n"),
+        });
+        return { audit: createdAudit, checklistSaved: true };
+      } catch {
+        return { audit: createdAudit, checklistSaved: false };
+      }
+    },
+    onSuccess: ({ audit, checklistSaved }) => {
+      qc.invalidateQueries({ queryKey: ["quality-audits-planning"] });
+      if (!checklistSaved) {
+        setCreatedAuditId(audit.audit_id);
+        setCreateError("");
+        toast({ title: "Audit plan created; checklist needs retry", message: `Plan ${audit.audit_id} was saved. Retry the checklist before leaving this page.`, type: "warning", duration: 10000 });
+        return;
+      }
+      setShowCreateForm(false);
+      setNewTitle("");
+      setNewAuditType("internal");
+      setNewScope("");
+      setNewAuditorId("");
+      setNewAuditeeId("");
+      setNewPlannedDate("");
+      setNewChecklistItems("");
+      setCreatedAuditId(null);
+      setCreateError("");
+      toast({ title: "Audit planned", message: "The audit has been scheduled with its checklist.", type: "success" });
+    },
+    onError: () => setCreateError("Failed to create audit plan. Please try again."),
+  });
+
+  const retryChecklistMutation = useMutation({
+    mutationFn: () => {
+      if (!createdAuditId) throw new Error("No audit plan is awaiting a checklist");
+      const checklistItems = newChecklistItems.split("\n").map((item) => item.trim()).filter(Boolean);
+      return qualityAuditApi.createAuditResource(createdAuditId, {
+        resource_type: "checklist",
+        resource_name: "Audit checklist",
+        description: checklistItems.map((item) => `☐ ${item}`).join("\n"),
+      });
+    },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["audit-resources", createdAuditId ?? ""] });
       qc.invalidateQueries({ queryKey: ["quality-audits-planning"] });
       setShowCreateForm(false);
       setNewTitle("");
@@ -93,10 +142,11 @@ export function AuditPlanning() {
       setNewAuditorId("");
       setNewAuditeeId("");
       setNewPlannedDate("");
-      setCreateError("");
-      toast({ title: "Audit planned", message: "The audit has been scheduled.", type: "success" });
+      setNewChecklistItems("");
+      setCreatedAuditId(null);
+      toast({ title: "Audit checklist saved", message: "The plan and checklist are ready.", type: "success" });
     },
-    onError: () => setCreateError("Failed to create audit plan. Please try again."),
+    onError: () => toast({ title: "Checklist retry failed", message: "The audit plan remains saved; retry the checklist again.", type: "error" }),
   });
 
   const updateMutation = useMutation({
@@ -291,19 +341,43 @@ export function AuditPlanning() {
                   onChange={(e) => setNewPlannedDate(e.target.value)}
                 />
               </FormField>
+              <FormField htmlFor="plan_checklist" label="Checklist items" hint="Enter one inspection or interview point per line. Leave blank if no checklist is needed.">
+                <Textarea
+                  id="plan_checklist"
+                  name="plan_checklist"
+                  aria-label="Checklist items"
+                  rows={4}
+                  placeholder="Review flight records\nInterview operations staff"
+                  value={newChecklistItems}
+                  onChange={(e) => setNewChecklistItems(e.target.value)}
+                  disabled={!!createdAuditId}
+                />
+              </FormField>
             </div>
+            {createdAuditId && (
+              <div role="status" className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <p>Audit plan {createdAuditId} was created, but its checklist was not saved.</p>
+                <Button type="button" size="sm" className="mt-2" disabled={retryChecklistMutation.isPending} onClick={() => retryChecklistMutation.mutate()}>
+                  {retryChecklistMutation.isPending ? "Saving checklist…" : "Retry checklist"}
+                </Button>
+              </div>
+            )}
             <Button
               type="button"
-              disabled={createMutation.isPending || !newTitle.trim() || !createIsValid}
+              disabled={createMutation.isPending || !!createdAuditId || !newTitle.trim() || !createIsValid}
               onClick={() => {
-                if (!newTitle.trim()) return;
+                if (!newTitle.trim() || createdAuditId) return;
+                const checklistItems = newChecklistItems.split("\n").map((item) => item.trim()).filter(Boolean);
                 createMutation.mutate({
-                  title: newTitle.trim(),
-                  audit_type: newAuditType,
-                  scope: newScope.trim() || undefined,
-                  auditor_id: newAuditorId.trim(),
-                  auditee_id: newAuditeeId.trim() || undefined,
-                  planned_date: newPlannedDate || undefined,
+                  audit: {
+                    title: newTitle.trim(),
+                    audit_type: newAuditType,
+                    scope: newScope.trim() || undefined,
+                    auditor_id: newAuditorId.trim(),
+                    auditee_id: newAuditeeId.trim() || undefined,
+                    planned_date: newPlannedDate || undefined,
+                  },
+                  checklistItems,
                 });
               }}
               variant="default"

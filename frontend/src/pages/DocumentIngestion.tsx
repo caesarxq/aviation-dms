@@ -49,7 +49,7 @@ const FIELD_CONFIGS: Record<string, ExtractedField[]> = {
   ],
   documents: [
     { label: "Title", key: "title", type: "text" },
-    { label: "Document Class", key: "doc_class", type: "select", options: ["operations_manual", "safety_manual", "maintenance_manual", "training_manual", "emergency_plan", "policy", "procedure"] },
+    { label: "Document Class", key: "doc_class", type: "select", options: ["operations_manual", "safety_manual", "maintenance_manual", "training_manual", "emergency_plan", "policy", "procedure", "import_permit", "temporary_import_permit"] },
     { label: "Description", key: "description", type: "text" },
     { label: "Issue Revision", key: "source_issue_revision", type: "text" },
     { label: "Issue Date", key: "source_issued_date", type: "date" },

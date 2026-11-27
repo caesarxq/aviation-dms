@@ -23,6 +23,21 @@ def _admin_headers():
     return {"X-Role": "system_admin", "X-Actor": "admin"}
 
 
+def _stub_feedback_upload_safeguards(monkeypatch):
+    from app import p0_routes
+
+    async def no_scan(content, policy):
+        return None
+
+    async def no_validation(content, suffix, max_bytes):
+        return None
+
+    monkeypatch.setattr(p0_routes, "load_upload_safety_policy", lambda: object())
+    monkeypatch.setattr(p0_routes, "ensure_upload_capacity", lambda *args, **kwargs: None)
+    monkeypatch.setattr(p0_routes, "scan_upload_bytes", no_scan)
+    monkeypatch.setattr(p0_routes, "validate_upload_content", no_validation)
+
+
 def test_bugtracker_configuration_reads_secret_files(monkeypatch, tmp_path):
     secret_file = tmp_path / "zoho_refresh_token"
     secret_file.write_text("file-refresh-token\n", encoding="utf-8")
@@ -219,8 +234,9 @@ def test_list_feedback_with_issue_type_filter():
     assert isinstance(data, list)
 
 
-def test_upload_feedback_media():
+def test_upload_feedback_media(monkeypatch):
     """Test uploading media to a feedback record."""
+    _stub_feedback_upload_safeguards(monkeypatch)
     payload = {
         "issue_type": "bug",
         "app_area": "media-test",
@@ -276,6 +292,50 @@ def test_upload_feedback_media_no_file():
         headers=_admin_headers(),
     )
     assert response.status_code == 400, response.text
+
+
+def test_feedback_media_download_is_limited_to_owner_or_system_admin(tmp_path, monkeypatch):
+    monkeypatch.setenv("FEEDBACK_MEDIA_DIR", str(tmp_path))
+    owner_headers = {"X-Role": "head_quality", "X-Actor": "u-quality"}
+    payload = {
+        "issue_type": "bug",
+        "app_area": "private-media-test",
+        "goal": f"private-media-{uuid.uuid4().hex}",
+        "impact": "workaround",
+        "observation_time": "2026-01-15T10:00:00Z",
+        "contact": "pilot1",
+    }
+    created = client.post("/api/p0/feedback", json=payload, headers=owner_headers)
+    assert created.status_code == 201, created.text
+    feedback_id = created.json()["feedback_id"]
+    media = tmp_path / f"{feedback_id}_capture.png"
+    media.write_bytes(b"private")
+
+    async def attach_media_path():
+        db = await get_db()
+        try:
+            await db.execute(
+                "UPDATE feedback SET media_path = ? WHERE feedback_id = ?",
+                (str(media), feedback_id),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(attach_media_path())
+
+    denied = client.get(
+        f"/api/p0/feedback/{feedback_id}/media/capture.png",
+        headers={"X-Role": "head_safety", "X-Actor": "u-safety"},
+    )
+    assert denied.status_code == 403
+
+    allowed = client.get(
+        f"/api/p0/feedback/{feedback_id}/media/capture.png",
+        headers=owner_headers,
+    )
+    assert allowed.status_code == 200
+    assert allowed.content == b"private"
 
 
 def test_get_feedback():

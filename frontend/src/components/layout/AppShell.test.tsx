@@ -7,6 +7,7 @@ import "@testing-library/jest-dom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { safetyApi } from "../../api/safety";
+import { ToastProvider } from "../ui/Toast";
 
 const recordsCustodianProfile = {
   user: {
@@ -50,22 +51,24 @@ function renderShell(
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={authValue}>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <CurrentPath />
-          <Routes>
-            <Route path="/login" element={<div data-testid="login-screen">Sign in</div>} />
-            <Route element={<AppShell />}>
-              <Route path="/documents" element={<div data-testid="documents-screen">Documents</div>} />
-              <Route path="/document-proposals" element={<div data-testid="document-proposals-screen">Document proposals</div>} />
-              <Route path="/notifications" element={<div data-testid="notifications-screen">Notifications</div>} />
-              <Route path="/organization-overview" element={<div data-testid="organization-overview-screen">Organization overview</div>} />
-              <Route path="/occurrences" element={<div data-testid="occurrences-screen">Occurrences</div>} />
-              <Route path="/admin/observability" element={<div data-testid="observability-screen">System observability</div>} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </AuthContext.Provider>
+      <ToastProvider>
+        <AuthContext.Provider value={authValue}>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <CurrentPath />
+            <Routes>
+              <Route path="/login" element={<div data-testid="login-screen">Sign in</div>} />
+              <Route element={<AppShell />}>
+                <Route path="/documents" element={<div data-testid="documents-screen">Documents</div>} />
+                <Route path="/document-proposals" element={<div data-testid="document-proposals-screen">Document proposals</div>} />
+                <Route path="/notifications" element={<div data-testid="notifications-screen">Notifications</div>} />
+                <Route path="/organization-overview" element={<div data-testid="organization-overview-screen">Organization overview</div>} />
+                <Route path="/occurrences" element={<div data-testid="occurrences-screen">Occurrences</div>} />
+                <Route path="/admin/observability" element={<div data-testid="observability-screen">System observability</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

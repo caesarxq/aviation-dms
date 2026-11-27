@@ -33,7 +33,10 @@ async def log_audit_event(
             await db.close()
 
 
-async def query_audit_events(entity_type=None, entity_id=None, actor_id=None, limit=100, offset=0):
+async def query_audit_events(
+    entity_type=None, entity_id=None, actor_id=None, limit=100, offset=0,
+    entity_types=None, exclude_entity_types=None,
+):
     db = await get_db()
     try:
         conditions = []
@@ -47,6 +50,16 @@ async def query_audit_events(entity_type=None, entity_id=None, actor_id=None, li
         if actor_id:
             conditions.append("actor_id = ?")
             params.append(actor_id)
+        if entity_types is not None:
+            types = tuple(sorted(entity_types))
+            if not types:
+                return []
+            conditions.append(f"entity_type IN ({','.join('?' for _ in types)})")
+            params.extend(types)
+        if exclude_entity_types:
+            types = tuple(sorted(exclude_entity_types))
+            conditions.append(f"entity_type NOT IN ({','.join('?' for _ in types)})")
+            params.extend(types)
         where = " AND ".join(conditions) if conditions else "1=1"
         cursor = await db.execute(
             f"SELECT * FROM audit_events WHERE {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",

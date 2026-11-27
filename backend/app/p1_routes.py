@@ -1296,19 +1296,27 @@ async def compute_operational_status(request: Request):
             if await m_cursor.fetchone():
                 new_status = "unserviceable"
             else:
-                # Check open safety findings for this aircraft's maintenance
-                s_cursor = await db.execute(
-                    """SELECT 1 FROM safety_actions sa
-                       JOIN occurrences o ON o.occurrence_id = sa.occurrence_id
-                       WHERE sa.status = 'open' AND o.location = ? LIMIT 1""",
-                    (reg,),
+                # Check overdue maintenance work orders raised by Head of Maintenance
+                wo_cursor = await db.execute(
+                    "SELECT 1 FROM maintenance_work_orders WHERE aircraft_registration = ? AND due_date IS NOT NULL AND due_date < ? AND status != 'completed' LIMIT 1",
+                    (reg, today),
                 )
-                if await s_cursor.fetchone():
-                    new_status = "grounded"
-                elif ac_id in deployed_ids:
-                    new_status = "deployed"
+                if await wo_cursor.fetchone():
+                    new_status = "unserviceable"
                 else:
-                    new_status = "serviceable"
+                    # Check open safety findings for this aircraft's maintenance
+                    s_cursor = await db.execute(
+                        """SELECT 1 FROM safety_actions sa
+                           JOIN occurrences o ON o.occurrence_id = sa.occurrence_id
+                           WHERE sa.status = 'open' AND o.location = ? LIMIT 1""",
+                        (reg,),
+                    )
+                    if await s_cursor.fetchone():
+                        new_status = "grounded"
+                    elif ac_id in deployed_ids:
+                        new_status = "deployed"
+                    else:
+                        new_status = "serviceable"
 
             current_cursor = await db.execute(
                 "SELECT operational_status FROM aircraft WHERE aircraft_id = ?", (ac_id,)
@@ -3151,6 +3159,103 @@ async def delete_maintenance_record(record_id: str, request: Request):
     return Response(status_code=204)
 
 
+# ==================== MAINTENANCE WORK ORDERS (P1-7) ====================
+@router.post("/maintenance/work-orders", response_model=MaintenanceWorkOrderResponse, status_code=201)
+async def create_maintenance_work_order(order: MaintenanceWorkOrderCreate, request: Request):
+    """Head of Maintenance raises a work order for an aircraft.
+
+    Open or overdue work orders feed the aircraft operational_status
+    computation (overdue -> unserviceable).
+    """
+    _check(request, "aircraft:manage")
+    actor = _actor(request)
+    work_order_id = _gen_id("WO")
+    now = now_iso()
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT 1 FROM aircraft WHERE registration = ?", (order.aircraft_registration,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Aircraft not found")
+        await db.execute(
+            "INSERT INTO maintenance_work_orders (work_order_id, aircraft_registration, title, description, priority, status, due_date, completed_at, performed_by, created_at, updated_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (work_order_id, order.aircraft_registration, order.title, order.description, order.priority, "open", order.due_date, None, None, now, now, actor, actor),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return MaintenanceWorkOrderResponse(
+        work_order_id=work_order_id, aircraft_registration=order.aircraft_registration, title=order.title,
+        description=order.description, priority=order.priority, status="open", due_date=order.due_date,
+        completed_at=None, performed_by=None, created_at=now, updated_at=now, created_by=actor, updated_by=actor,
+    )
+
+
+@router.get("/maintenance/work-orders", response_model=List[MaintenanceWorkOrderResponse])
+async def list_maintenance_work_orders(request: Request, aircraft_registration: Optional[str] = None, status: Optional[str] = None, limit: int = 50, offset: int = 0):
+    _check(request, "aircraft:read")
+    db = await get_db()
+    try:
+        conditions = []
+        params = []
+        if aircraft_registration:
+            conditions.append("aircraft_registration = ?")
+            params.append(aircraft_registration)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = " AND ".join(conditions) if conditions else "1=1"
+        cursor = await db.execute(
+            f"SELECT * FROM maintenance_work_orders WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        rows = await cursor.fetchall()
+        return [MaintenanceWorkOrderResponse(**dict(r)) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.get("/maintenance/work-orders/{work_order_id}", response_model=MaintenanceWorkOrderResponse)
+async def get_maintenance_work_order(work_order_id: str, request: Request):
+    _check(request, "aircraft:read")
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM maintenance_work_orders WHERE work_order_id = ?", (work_order_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Maintenance work order not found")
+        return MaintenanceWorkOrderResponse(**dict(row))
+    finally:
+        await db.close()
+
+
+@router.patch("/maintenance/work-orders/{work_order_id}", response_model=MaintenanceWorkOrderResponse)
+async def update_maintenance_work_order(work_order_id: str, payload: dict, request: Request):
+    _check(request, "aircraft:manage")
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        allowed = {"title", "description", "priority", "status", "due_date", "completed_at", "performed_by"}
+        updates = {k: payload[k] for k in payload if k in allowed}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No updatable fields provided")
+        if "status" in updates and updates["status"] == "completed" and "completed_at" not in updates:
+            updates["completed_at"] = now
+        updates["updated_at"] = now
+        updates["updated_by"] = actor
+        set_clause = ", ".join([f"{k} = ?" for k in updates])
+        params = list(updates.values()) + [work_order_id]
+        await db.execute(f"UPDATE maintenance_work_orders SET {set_clause} WHERE work_order_id = ?", params)
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM maintenance_work_orders WHERE work_order_id = ?", (work_order_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Maintenance work order not found")
+        return MaintenanceWorkOrderResponse(**dict(row))
+    finally:
+        await db.close()
+
+
 # ==================== APP SETTINGS ====================
 @router.get("/app-settings/{key}")
 async def get_app_setting(key: str, request: Request):
@@ -3764,8 +3869,8 @@ async def publish_change_request(cr_id: str, request: Request):
         if same_principal(request, cr["requester_id"]):
             raise HTTPException(status_code=403, detail="The requester cannot publish their own change request (separation of duties)")
         await db.execute(
-            "UPDATE change_requests SET status = 'published', updated_at = ?, updated_by = ? WHERE cr_id = ?",
-            (now, actor, cr_id),
+            "UPDATE change_requests SET status = 'published', published_at = ?, published_by = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (now, actor, now, actor, cr_id),
         )
         await db.commit()
     finally:
@@ -3789,8 +3894,8 @@ async def distribute_change_request(cr_id: str, request: Request):
         if cr["status"] != "published":
             raise HTTPException(status_code=400, detail="Only published change requests can be distributed")
         await db.execute(
-            "UPDATE change_requests SET status = 'distributed', updated_at = ?, updated_by = ? WHERE cr_id = ?",
-            (now, actor, cr_id),
+            "UPDATE change_requests SET status = 'distributed', distributed_at = ?, distributed_by = ?, updated_at = ?, updated_by = ? WHERE cr_id = ?",
+            (now, actor, now, actor, cr_id),
         )
         await db.commit()
     finally:

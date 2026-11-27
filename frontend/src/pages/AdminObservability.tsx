@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import api from "../api/client";
 import { auditApi } from "../api/audit";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -26,6 +27,8 @@ function StatusPill({ ok, children, size }: { ok?: boolean; children: ReactNode;
 
 export default function AdminObservability() {
   const queryClient = useQueryClient();
+  const [auditDays, setAuditDays] = useState(30);
+  const [trendExported, setTrendExported] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string[]>>({});
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [invitingUserId, setInvitingUserId] = useState<string | null>(null);
@@ -54,8 +57,8 @@ export default function AdminObservability() {
     refetch,
     isFetching,
   } = useQuery({
-    queryKey: ["admin-observability"],
-    queryFn: () => api.get("/p0/admin/observability").then((response: any) => response.data),
+    queryKey: ["admin-observability", auditDays],
+    queryFn: () => api.get("/p0/admin/observability", { params: { days: auditDays } }).then((response: any) => response.data),
     refetchInterval: 15000,
   });
 
@@ -86,16 +89,30 @@ export default function AdminObservability() {
 
   // Upgrade notification mutation
   const [sendingNotification, setSendingNotification] = useState<string | null>(null);
+  const [notificationResult, setNotificationResult] = useState<any>(null);
+  const [notificationError, setNotificationError] = useState("");
   const sendNotificationMutation = useMutation({
     mutationFn: (versionId: string) => auditApi.sendUpgradeNotification(versionId),
-    onSuccess: (_result, _versionId) => {
+    onSuccess: (result: any, _versionId) => {
       setSendingNotification(null);
+      setNotificationError("");
+      setNotificationResult(result);
       queryClient.invalidateQueries({ queryKey: ["app-versions"] });
     },
-    onError: (_cause, _versionId) => {
+    onError: (cause: any, _versionId) => {
       setSendingNotification(null);
+      setNotificationResult(null);
+      setNotificationError(cause?.response?.data?.detail || "Could not send upgrade notifications.");
     },
   });
+
+  function requestUpgradeNotification(version: any) {
+    if (!window.confirm(`Send release notes for version ${version.version_number} to all active users with email addresses?`)) return;
+    setNotificationError("");
+    setNotificationResult(null);
+    setSendingNotification(version.version_id);
+    sendNotificationMutation.mutate(version.version_id);
+  }
 
   // Backup history query
   const { data: backupHistoryRaw } = useQuery({
@@ -125,7 +142,7 @@ export default function AdminObservability() {
   // Audit events browser
   const { data: auditEventsRaw, isLoading: auditLoading } = useQuery({
     queryKey: ["audit-events-admin"],
-    queryFn: () => api.get("/p0/audit-events", { params: { limit: 50 } }).then((response: any) => response.data),
+    queryFn: () => api.get("/p0/audit-events", { params: { scope: "system", limit: 50 } }).then((response: any) => response.data),
     refetchInterval: 120000,
   });
 
@@ -239,6 +256,21 @@ export default function AdminObservability() {
   const health = data?.health || {};
   const backup = health.backup || {};
   const scanner = health.scanner || {};
+  const bugtrackerSync = health.bugtracker_sync || {};
+  const activityTrend = Array.isArray(data?.audit?.activity_trend) ? data.audit.activity_trend : [];
+  const trendMaximum = Math.max(1, ...activityTrend.map((point: any) => Number(point.count) || 0));
+
+  function exportActivityTrend() {
+    const csv = ["date,event_count", ...activityTrend.map((point: any) => `${point.date},${Number(point.count) || 0}`)].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `system-audit-trend-${auditDays}-days.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setTrendExported(true);
+    window.setTimeout(() => setTrendExported(false), 2500);
+  }
 
   return (
     <div className="app-page">
@@ -254,7 +286,7 @@ export default function AdminObservability() {
         </Button>
       </header>
 
-      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="app-surface p-5">
           <div className="flex items-center justify-between">
             <div className="app-label">API health</div>
@@ -336,6 +368,88 @@ export default function AdminObservability() {
             <p className="mt-1 text-xs">{scannerTestResult.reachable === true ? "✓ Reachable" : scannerTestResult.reachable === false ? "✗ Unreachable" : "—"} {scannerTestResult.detail}</p>
           )}
         </div>
+        <div className="app-surface p-5">
+          <div className="flex items-center justify-between">
+            <div className="app-label">BugTracker sync</div>
+            <Activity className={bugtrackerSync.healthy ? "text-emerald-600" : "text-amber-600"} size={20} />
+          </div>
+          <div className="mt-3">
+            <StatusPill ok={bugtrackerSync.healthy}>
+              {!bugtrackerSync.configured ? "Not configured" : bugtrackerSync.stale ? "Stale" : bugtrackerSync.healthy ? "Healthy" : bugtrackerSync.last_status || "Unknown"}
+            </StatusPill>
+          </div>
+          <p className="mt-2 text-xs text-kfl-muted">
+            {bugtrackerSync.last_finished_at ? `Last run ${new Date(bugtrackerSync.last_finished_at).toLocaleString()}` : "No completed sync run recorded"}
+          </p>
+          <p className="mt-1 text-xs text-kfl-muted">
+            {bugtrackerSync.last_created ?? 0} created · {bugtrackerSync.last_updated ?? 0} updated · {bugtrackerSync.last_failed ?? 0} failed · {bugtrackerSync.pending_feedback ?? 0} pending
+          </p>
+          {bugtrackerSync.last_error && <p className="mt-2 text-xs text-rose-700 break-words">{String(bugtrackerSync.last_error).slice(0, 180)}</p>}
+          <Link className="mt-3 inline-block text-xs font-semibold text-kfl-blue underline" to="/feedback">Review feedback queue</Link>
+        </div>
+      </section>
+
+      <section className="mb-6 app-surface overflow-hidden" aria-labelledby="audit-trend-heading">
+        <div className="flex flex-col gap-3 border-b border-kfl-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="audit-trend-heading" className="font-bold text-kfl-text">System audit activity</h2>
+            <p className="mt-1 text-xs text-kfl-muted">Daily event volume; use the range selector to investigate trends or export the underlying counts.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="audit-trend-range" className="text-xs font-medium text-kfl-muted">Range</label>
+            <select
+              id="audit-trend-range"
+              aria-label="Audit trend time range"
+              value={auditDays}
+              onChange={(event) => setAuditDays(Number(event.target.value))}
+              className="h-9 rounded-md border border-kfl-border bg-kfl-surface px-2 text-sm"
+            >
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={90}>90 days</option>
+            </select>
+            <Button variant="outline" size="sm" onClick={exportActivityTrend} disabled={activityTrend.length === 0}>
+              {trendExported ? "Exported" : "Export CSV"}
+            </Button>
+          </div>
+        </div>
+        {activityTrend.length === 0 ? (
+          <p className="p-5 text-sm text-kfl-muted">No audit events in this time range.</p>
+        ) : (
+          <div className="p-5">
+            <p className="mb-3 text-xs text-kfl-muted">{activityTrend.reduce((total: number, point: any) => total + (Number(point.count) || 0), 0)} events in {auditDays} days</p>
+            <svg viewBox="0 0 1000 240" className="h-56 w-full" role="img" aria-label={`Daily system audit events over ${auditDays} days`}>
+              <line x1="30" x2="990" y1="190" y2="190" stroke="currentColor" className="text-kfl-border" />
+              <line x1="30" x2="990" y1="110" y2="110" stroke="currentColor" className="text-kfl-border" strokeDasharray="4 5" />
+              <line x1="30" x2="990" y1="30" y2="30" stroke="currentColor" className="text-kfl-border" strokeDasharray="4 5" />
+              {activityTrend.map((point: any, index: number) => {
+                const step = 960 / activityTrend.length;
+                const width = Math.max(2, step * 0.62);
+                const value = Number(point.count) || 0;
+                const height = Math.max(value > 0 ? 2 : 0, (value / trendMaximum) * 160);
+                const x = 30 + index * step + (step - width) / 2;
+                return (
+                  <rect key={point.date} x={x} y={190 - height} width={width} height={height} rx="2" className="fill-kfl-blue">
+                    <title>{`${point.date}: ${value} events`}</title>
+                  </rect>
+                );
+              })}
+              <text x="30" y="220" className="fill-current text-[12px] text-kfl-muted">{activityTrend[0]?.date}</text>
+              <text x="990" y="220" textAnchor="end" className="fill-current text-[12px] text-kfl-muted">{activityTrend[activityTrend.length - 1]?.date}</text>
+            </svg>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-kfl-blue">View daily counts</summary>
+              <div className="mt-2 max-h-64 overflow-auto rounded border border-kfl-border">
+                <table className="min-w-full text-xs">
+                  <thead className="sticky top-0 bg-kfl-surface-subtle"><tr><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-right">Events</th></tr></thead>
+                  <tbody className="divide-y divide-kfl-border">
+                    {activityTrend.map((point: any) => <tr key={point.date}><td className="px-3 py-2">{point.date}</td><td className="px-3 py-2 text-right">{point.count}</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          </div>
+        )}
       </section>
 
       <section className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -685,9 +799,20 @@ export default function AdminObservability() {
       <section className="mb-6 app-surface overflow-hidden">
         <div className="border-b border-kfl-border px-5 py-4">
           <h2 className="font-bold text-kfl-text">Release history</h2>
-          <p className="mt-1 text-xs text-kfl-muted">Application versions released and upgrade notifications sent.</p>
+          <p className="mt-1 text-xs text-kfl-muted">Application versions and notification delivery status.</p>
         </div>
         <div className="p-5">
+          {notificationError && <p role="alert" className="mb-3 rounded border border-kfl-status-danger-bg bg-kfl-status-danger-bg/20 px-3 py-2 text-sm text-kfl-status-danger">{notificationError}</p>}
+          {notificationResult && (
+            <div role="status" aria-live="polite" className="mb-3 rounded border border-kfl-border px-3 py-2 text-sm text-kfl-text">
+              <p>{notificationResult.notifications_sent} sent, {notificationResult.notifications_failed} failed, {notificationResult.total_users} total recipients.</p>
+              {Array.isArray(notificationResult.recipient_results) && notificationResult.recipient_results.length > 0 && (
+                <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-kfl-muted">
+                  {notificationResult.recipient_results.map((recipient: any, index: number) => <li key={`${recipient.email}-${index}`}>{recipient.email} — {recipient.status}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
           {versionsLoading ? (
             <div className="text-center text-xs text-kfl-muted py-4">Loading release history…</div>
           ) : appVersions.length === 0 ? (
@@ -721,7 +846,7 @@ export default function AdminObservability() {
                             <button
                               type="button"
                               disabled={sendingNotification === v.version_id || sendNotificationMutation.isPending}
-                              onClick={() => void sendNotificationMutation.mutate(v.version_id)}
+                              onClick={() => requestUpgradeNotification(v)}
                               className="text-xs text-kfl-blue hover:underline"
                             >
                               {sendingNotification === v.version_id ? "Sending…" : "Send notification"}

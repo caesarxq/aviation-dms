@@ -36,7 +36,7 @@ export function BulkRoleInvite() {
 
   const inviteMutation = useMutation({
     mutationFn: async (data: { role: string; emails: string[] }) => {
-      const resp = await api.post("/api/p0/auth/invites/role", data);
+      const resp = await api.post("/p0/auth/invites/role", data);
       return resp.data;
     },
     onSuccess: (data) => {

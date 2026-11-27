@@ -505,6 +505,7 @@ async def record_sync_result(
     created: int,
     updated: int,
     status: str,
+    failed: int = 0,
     error: Optional[str] = None,
 ) -> None:
     """Persist the outcome of a sync run for the observability view.
@@ -516,15 +517,15 @@ async def record_sync_result(
 
     now = datetime.now(timezone.utc).isoformat()
     succeeded = status == "success"
-    failed = status == "failed"
+    had_failures = status in {"failed", "degraded"}
     db = await get_db()
     try:
         await db.execute(
             """INSERT INTO integration_sync_status
                (integration, last_started_at, last_finished_at, last_status,
                 last_success_at, last_failure_at, last_error, consecutive_failures,
-                last_created, last_updated, updated_at)
-               VALUES ('bugtracker', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_created, last_updated, last_failed, updated_at)
+               VALUES ('bugtracker', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(integration) DO UPDATE SET
                  last_started_at = excluded.last_started_at,
                  last_finished_at = excluded.last_finished_at,
@@ -539,16 +540,17 @@ async def record_sync_result(
                  END,
                  last_created = excluded.last_created,
                  last_updated = excluded.last_updated,
+                 last_failed = excluded.last_failed,
                  updated_at = excluded.updated_at""",
             (
                 started_at, finished_at, status,
                 finished_at if succeeded else None,
-                finished_at if failed else None,
-                (error or "")[:500] if failed else None,
-                1 if failed else 0,
-                created, updated, now,
+                finished_at if had_failures else None,
+                (error or "")[:500] if error else None,
+                1 if had_failures else 0,
+                created, updated, failed, now,
                 1 if succeeded else 0,
-                1 if failed else 0,
+                1 if had_failures else 0,
             ),
         )
         await db.commit()
@@ -574,6 +576,9 @@ async def get_sync_status() -> dict:
         "consecutive_failures": 0,
         "last_created": 0,
         "last_updated": 0,
+        "last_failed": 0,
+        "pending_feedback": 0,
+        "stale": False,
     }
     db = await get_db()
     try:
@@ -591,8 +596,41 @@ async def get_sync_status() -> dict:
         for key in status:
             if key in record and key not in ("integration", "configured"):
                 status[key] = record[key]
-    status["healthy"] = status["last_status"] in ("success", "skipped") and status["consecutive_failures"] == 0
+    status["pending_feedback"] = await _pending_feedback_count()
+    last_finished = status["last_finished_at"]
+    if status["configured"]:
+        if not last_finished:
+            status["stale"] = True
+        else:
+            try:
+                finished = datetime.fromisoformat(str(last_finished).replace("Z", "+00:00"))
+                if finished.tzinfo is None:
+                    finished = finished.replace(tzinfo=timezone.utc)
+                status["stale"] = (datetime.now(timezone.utc) - finished).total_seconds() > 45 * 60
+            except ValueError:
+                status["stale"] = True
+    status["healthy"] = bool(
+        status["configured"]
+        and status["last_status"] == "success"
+        and status["consecutive_failures"] == 0
+        and status["pending_feedback"] == 0
+        and not status["stale"]
+    )
     return status
+
+
+async def _pending_feedback_count() -> int:
+    """Count locally queued feedback that has not been linked to BugTracker."""
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT COUNT(*) AS count FROM feedback WHERE bugtracker_sync_state = 'pending' OR bugtracker_id IS NULL"
+        )).fetchone()
+        return int(row["count"] if row else 0)
+    finally:
+        await db.close()
 
 
 async def run_full_sync() -> dict:
@@ -600,6 +638,8 @@ async def run_full_sync() -> dict:
     started_at = datetime.now(timezone.utc).isoformat()
     created = 0
     updated = 0
+    failed = 0
+    pending_feedback = 0
     error = None
 
     if not _is_configured():
@@ -610,10 +650,26 @@ async def run_full_sync() -> dict:
         try:
             created = await sync_all_pending()
             updated = await sync_bugtracker_updates()
+            pending_feedback = await _pending_feedback_count()
+            if pending_feedback:
+                failed = pending_feedback
+                status = "degraded"
+                error = f"{pending_feedback} feedback issue(s) remain pending in BugTracker sync."
         except Exception as exc:
             status = "failed"
             error = f"{type(exc).__name__}: {exc}"
             logger.exception("BugTracker sync failed: %s", exc)
+            try:
+                pending_feedback = await _pending_feedback_count()
+                failed = pending_feedback
+            except Exception:
+                pass
+
+    if not pending_feedback:
+        try:
+            pending_feedback = await _pending_feedback_count()
+        except Exception:
+            logger.exception("Unable to count pending BugTracker feedback")
 
     finished_at = datetime.now(timezone.utc).isoformat()
     await record_sync_result(
@@ -621,6 +677,7 @@ async def run_full_sync() -> dict:
         finished_at=finished_at,
         created=created,
         updated=updated,
+        failed=failed,
         status=status,
         error=error,
     )
@@ -628,6 +685,8 @@ async def run_full_sync() -> dict:
         "status": status,
         "created": created,
         "updated": updated,
+        "failed": failed,
+        "pending_feedback": pending_feedback,
         "error": error,
         "started_at": started_at,
         "finished_at": finished_at,

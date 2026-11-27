@@ -15,6 +15,7 @@ const DOCUMENT_TYPES = [
   "pilot_license", "medical", "type_rating", "proficiency_check",
   "dg_training", "security_training", "sms_awareness", "crm",
   "indoctrination", "background_check", "english_proficiency", "avsec",
+  "import_permit", "temporary_import_permit",
 ];
 const UPLOAD_HISTORY_PAGE_SIZE = 50;
 const VERIFICATION_QUEUE_PAGE_SIZE = 50;

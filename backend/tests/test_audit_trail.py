@@ -44,6 +44,27 @@ class TestAuditTrail:
         resp = client.get("/api/p0/audit-events", headers={"X-Role": "unknown", "X-Actor": "nobody"})
         assert resp.status_code in (401, 403)
 
+    def test_system_events_are_separate_from_aviation_audit_stream(self, client, admin_headers):
+        entity_id = f"audit-stream-{__import__('uuid').uuid4().hex}"
+        asyncio.run(log_audit_event("auth_session", entity_id, "login", "u-quality"))
+
+        aviation = client.get(
+            "/api/p0/audit-events",
+            params={"entity_id": entity_id},
+            headers=admin_headers,
+        )
+        assert aviation.status_code == 200
+        assert aviation.json() == []
+
+        system = client.get(
+            "/api/p0/audit-events",
+            params={"scope": "system", "entity_id": entity_id},
+            headers=admin_headers,
+        )
+        assert system.status_code == 200
+        assert len(system.json()) == 1
+        assert system.json()[0]["entity_type"] == "auth_session"
+
     def test_event_can_share_domain_transaction_and_roll_back_atomically(self):
         entity_id = "atomic-audit-test"
 

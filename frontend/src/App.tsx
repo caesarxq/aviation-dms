@@ -19,6 +19,7 @@ const AuditPlanning = lazy(() => import("./pages/AuditPlanning").then((module) =
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
 const OrganizationOverview = lazy(() => import("./pages/OrganizationOverview").then((module) => ({ default: module.OrganizationOverview })));
 const DocumentCatalogue = lazy(() => import("./pages/DocumentCatalogue").then((module) => ({ default: module.DocumentCatalogue })));
+const BulkDocumentIngestion = lazy(() => import("./pages/BulkDocumentIngestion").then((module) => ({ default: module.BulkDocumentIngestion })));
 const Occurrences = lazy(() => import("./pages/Occurrences").then((module) => ({ default: module.Occurrences })));
 const OccurrenceDetail = lazy(() => import("./pages/OccurrenceDetail").then((module) => ({ default: module.OccurrenceDetail })));
 const ROCRegister = lazy(() => import("./pages/ROCRegister").then((module) => ({ default: module.ROCRegister })));
@@ -47,6 +48,7 @@ const AuditFindings = lazy(() => import("./pages/AuditFindings").then((module) =
 const AuditDashboard = lazy(() => import("./pages/AuditDashboard").then((module) => ({ default: module.AuditDashboard })));
 const DocumentEditor = lazy(() => import("./pages/DocumentEditor").then((module) => ({ default: module.DocumentEditor })));
 const DocumentViewer = lazy(() => import("./pages/DocumentViewer").then((module) => ({ default: module.DocumentViewer })));
+const DocumentAnnotations = lazy(() => import("./pages/DocumentAnnotations").then((module) => ({ default: module.DocumentAnnotations })));
 const Notifications = lazy(() => import("./pages/Notifications").then((module) => ({ default: module.Notifications })));
 const PersonnelLicenses = lazy(() => import("./pages/PersonnelLicenses").then((module) => ({ default: module.PersonnelLicenses })));
 const DocumentProposals = lazy(() => import("./pages/DocumentProposals").then((module) => ({ default: module.default })));
@@ -54,6 +56,7 @@ const RenewalProgress = lazy(() => import("./pages/RenewalProgress").then((modul
 const VersionDiff = lazy(() => import("./pages/VersionDiff").then((module) => ({ default: module.VersionDiff })));
 const SelfServiceUpload = lazy(() => import("./pages/SelfServiceUpload").then((module) => ({ default: module.SelfServiceUpload })));
 const AircraftInsurance = lazy(() => import("./pages/AircraftInsurance").then((module) => ({ default: module.AircraftInsurance })));
+const AircraftDocuments = lazy(() => import("./pages/AircraftDocuments").then((module) => ({ default: module.AircraftDocuments })));
 const AdminObservability = lazy(() => import("./pages/AdminObservability").then((module) => ({ default: module.default })));
 const DocumentControllerDashboard = lazy(() => import("./pages/DocumentControllerDashboard").then((module) => ({ default: module.DocumentControllerDashboard })));
 const Feedback = lazy(() => import("./pages/Feedback").then((module) => ({ default: module.FeedbackPage })));
@@ -101,6 +104,7 @@ export default function App() {
               <Route path="/" element={<RequireAccess permission="safety:read"><Dashboard /></RequireAccess>} />
               <Route path="/organization-overview" element={<RequireAccess permission="organization:overview"><OrganizationOverview /></RequireAccess>} />
               <Route path="/documents" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><DocumentCatalogue /></RequireAccess>} />
+              <Route path="/documents/bulk-ingest" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><BulkDocumentIngestion /></RequireAccess>} />
               <Route path="/occurrences" element={<RequireAccess permission="safety:read"><Occurrences /></RequireAccess>} />
               <Route path="/occurrences/:occurrenceId" element={<RequireAccess permission="safety:read"><OccurrenceDetail /></RequireAccess>} />
               <Route path="/roc" element={<RequireAccess permission="roc:read"><ROCRegister /></RequireAccess>} />
@@ -126,12 +130,14 @@ export default function App() {
               <Route path="/dg-responsibility-matrix" element={<RequireAccess permission="safety:read"><DGResponsibilityMatrix /></RequireAccess>} />
               <Route path="/documents/:docId/edit" element={<RequireAccess anyPermissions={["document:update", "document:propose"]}><DocumentEditor /></RequireAccess>} />
               <Route path="/documents/:docId/view" element={<RequireAccess anyPermissions={["document:read", "document:propose", "document:update"]}><DocumentViewer /></RequireAccess>} />
+              <Route path="/documents/:docId/annotations" element={<RequireAccess permission="document:annotate"><DocumentAnnotations /></RequireAccess>} />
               <Route path="/personnel-licenses" element={<RequireAccess permission="personnel:read"><PersonnelLicenses /></RequireAccess>} />
               <Route path="/self-service-upload" element={<RequireAccess permission="personnel:view"><SelfServiceUpload /></RequireAccess>} />
               <Route path="/document-proposals" element={<RequireAccess anyPermissions={["document:read", "document:propose"]}><DocumentProposals /></RequireAccess>} />
               <Route path="/renewal-progress" element={<RequireAccess permission="personnel:read"><RenewalProgress /></RequireAccess>} />
               <Route path="/version-diff" element={<RequireAccess permission="document:read"><VersionDiff /></RequireAccess>} />
               <Route path="/aircraft-insurance" element={<RequireAccess permission="aircraft:read"><AircraftInsurance /></RequireAccess>} />
+              <Route path="/aircraft/:aircraftId/documents" element={<RequireAccess permission="aircraft:read"><AircraftDocuments /></RequireAccess>} />
               <Route path="/admin/observability" element={<RequireAccess role="system_admin"><AdminObservability /></RequireAccess>} />
               <Route path="/admin/bulk-role-invite" element={<RequireAccess role="system_admin"><BulkRoleInvite /></RequireAccess>} />
               <Route path="/document-controller" element={<RequireAccess anyPermissions={["document:policy.manage", "document:read"]}><DocumentControllerDashboard /></RequireAccess>} />

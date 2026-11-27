@@ -118,11 +118,25 @@ CREATE TABLE IF NOT EXISTS documents (
     approval_evidence_status TEXT,
     parent_document_id TEXT,
     parent_section_ref TEXT,
+    folder_id TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     created_by TEXT NOT NULL,
     updated_by TEXT NOT NULL
 );
+
+-- Document folders (flat, non-nested; role-gated creation)
+CREATE TABLE IF NOT EXISTS document_folders (
+    folder_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    color TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_folders_created_by ON document_folders(created_by);
 
 -- Document files (binary attachments: PDF, HTML, JSON source files)
 CREATE TABLE IF NOT EXISTS document_files (
@@ -1055,6 +1069,27 @@ CREATE TABLE IF NOT EXISTS maintenance_records (
 CREATE INDEX IF NOT EXISTS idx_maintenance_aircraft ON maintenance_records(aircraft_registration);
 CREATE INDEX IF NOT EXISTS idx_maintenance_status ON maintenance_records(status);
 
+-- Maintenance work orders (P1-7): Head of Maintenance tracked work orders that
+-- feed the aircraft operational_status computation.
+CREATE TABLE IF NOT EXISTS maintenance_work_orders (
+    work_order_id TEXT PRIMARY KEY,
+    aircraft_registration TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'routine',
+    status TEXT NOT NULL DEFAULT 'open',
+    due_date TEXT,
+    completed_at TEXT,
+    performed_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    updated_by TEXT NOT NULL,
+    FOREIGN KEY (aircraft_registration) REFERENCES aircraft(registration)
+);
+CREATE INDEX IF NOT EXISTS idx_work_orders_aircraft ON maintenance_work_orders(aircraft_registration);
+CREATE INDEX IF NOT EXISTS idx_work_orders_status ON maintenance_work_orders(status);
+
 -- Safety KPIs / Objectives (P2 - SAF-08)
 CREATE TABLE IF NOT EXISTS safety_kpis (
     kpi_id TEXT PRIMARY KEY,
@@ -1293,6 +1328,35 @@ CREATE TABLE IF NOT EXISTS document_ingestion_log (
 
 CREATE INDEX IF NOT EXISTS idx_document_ingestion_log_file_hash ON document_ingestion_log(file_sha256);
 CREATE INDEX IF NOT EXISTS idx_document_ingestion_log_created ON document_ingestion_log(created_at DESC);
+
+-- Durable staging for bulk document intake. Items are staged here by the
+-- /documents/ingest/bulk endpoint and promoted to their business table by
+-- /documents/ingest/bulk/apply. Historical audits, CARs and findings reports
+-- are staged into audit_report_imports (quarantine) rather than written
+-- directly to audit_reports / audit_findings / corrective_actions.
+CREATE TABLE IF NOT EXISTS document_ingestion_staging (
+    staging_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    content_type TEXT,
+    document_type TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    extracted_fields TEXT NOT NULL,
+    target_table TEXT NOT NULL,
+    raw_text_preview TEXT,
+    status TEXT NOT NULL DEFAULT 'staged'
+        CHECK (status IN ('staged', 'applied', 'rejected', 'duplicate')),
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    applied_at TEXT,
+    applied_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_document_ingestion_staging_batch ON document_ingestion_staging(batch_id);
+CREATE INDEX IF NOT EXISTS idx_document_ingestion_staging_status ON document_ingestion_staging(status);
+CREATE INDEX IF NOT EXISTS idx_document_ingestion_staging_hash ON document_ingestion_staging(file_sha256);
 
 -- Aircraft insurance policies
 CREATE TABLE IF NOT EXISTS aircraft_insurance (
@@ -2362,6 +2426,7 @@ async def init_db():
         # New columns for Phase 1 manual ownership, document category, operational status
         await _add_column_if_missing(db, "documents", "manual_owner_role", "TEXT")
         await _add_column_if_missing(db, "documents", "document_category", "TEXT NOT NULL DEFAULT 'controlled_manual'")
+        await _add_column_if_missing(db, "documents", "folder_id", "TEXT")
         await _add_column_if_missing(db, "aircraft", "operational_status", "TEXT NOT NULL DEFAULT 'serviceable'")
         await _add_column_if_missing(db, "audit_findings", "department", "TEXT")
         await _add_column_if_missing(db, "corrective_actions", "audit_finding_id", "TEXT")
@@ -2429,9 +2494,11 @@ async def init_db():
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 last_created INTEGER NOT NULL DEFAULT 0,
                 last_updated INTEGER NOT NULL DEFAULT 0,
+                last_failed INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             )"""
         )
+        await _add_column_if_missing(db, "integration_sync_status", "last_failed", "INTEGER NOT NULL DEFAULT 0")
         # Migration: add missing columns to existing audit_findings table
         for column, column_type in (
             ("finding_number", "TEXT"),
@@ -2468,6 +2535,11 @@ async def init_db():
         await _add_column_if_missing(db, "auth_setup_tokens", "purpose", "TEXT NOT NULL DEFAULT 'setup'")
         await _add_column_if_missing(db, "auth_setup_tokens", "invite_code", "TEXT")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_auth_setup_invite ON auth_setup_tokens(invite_code)")
+        # change_requests: publish/distribute timestamps and actors (P1-1)
+        await _add_column_if_missing(db, "change_requests", "published_at", "TEXT")
+        await _add_column_if_missing(db, "change_requests", "distributed_at", "TEXT")
+        await _add_column_if_missing(db, "change_requests", "published_by", "TEXT")
+        await _add_column_if_missing(db, "change_requests", "distributed_by", "TEXT")
         await db.commit()
     except Exception:
         if db.in_transaction:
@@ -2585,6 +2657,8 @@ async def apply_catalogue_corrections():
             ("security_manual", "head_security", "u-safety/security", "head_quality"),
             ("training_manual", "head_training", "u-training", "head_quality"),
             ("maintenance_manual", "head_maintenance", "u-maintenance", "head_quality"),
+            ("import_permit", "head_operations", "u-ops", "head_quality"),
+            ("temporary_import_permit", "head_operations", "u-ops", "head_quality"),
         ]
         for doc_class, owner_role, head_user_id, approver_role in ownership_rows:
             await db.execute(

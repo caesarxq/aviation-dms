@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def build_upgrade_email_body(
     recipient_name: str,
     version_number: str,
-    improvements: list[dict[str, str]],
+    improvements: list[dict[str, str]] | str,
 ) -> str:
     """Build a plain-English upgrade notification email body.
 
@@ -24,9 +24,17 @@ def build_upgrade_email_body(
         improvements: List of dicts with "title" and "description" keys,
             written in plain non-technical language.
     """
-    items = "\n".join(
-        f"• {item['title']} — {item['description']}" for item in improvements
-    )
+    if isinstance(improvements, str):
+        lines = [
+            line.lstrip(" -*•\t").strip()
+            for line in improvements.splitlines()
+            if line.strip()
+        ]
+        items = "\n".join(f"• {line}" for line in lines)
+    else:
+        items = "\n".join(
+            f"• {item['title']} — {item['description']}" for item in improvements
+        )
 
     return f"""Hello {recipient_name},
 

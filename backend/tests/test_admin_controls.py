@@ -1,9 +1,12 @@
 import os
+import asyncio
 import pytest
 from jose import jwt
 
 from app.rbac import ROLE_PERMISSIONS, ROLE_DESCRIPTIONS, role_profile
 from app.p0_auth import DEV_IDENTITY_ROLES, validate_dev_identity
+from app.audit import log_audit_event
+import uuid
 
 
 class TestAdminObservability:
@@ -19,6 +22,17 @@ class TestAdminObservability:
         assert payload["version"]["release_tag"] != ""
         assert len(payload["role_matrix"]) == len(ROLE_PERMISSIONS)
         assert payload["role_matrix"][0]["role"] in ROLE_PERMISSIONS
+
+    def test_observability_returns_complete_daily_activity_series(self, client, admin_headers):
+        entity_id = f"observability-trend-{uuid.uuid4().hex}"
+        asyncio.run(log_audit_event("test_observability", entity_id, "created", "u-admin"))
+
+        response = client.get("/api/p0/admin/observability?days=7", headers=admin_headers)
+        assert response.status_code == 200
+        trend = response.json()["audit"]["activity_trend"]
+        assert len(trend) == 7
+        assert all("date" in row and "count" in row for row in trend)
+        assert sum(row["count"] for row in trend) >= 1
 
     def test_non_admin_cannot_read_system_observability(self, client, quality_headers):
         response = client.get("/api/p0/admin/observability", headers=quality_headers)

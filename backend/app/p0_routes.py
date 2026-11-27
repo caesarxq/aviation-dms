@@ -1,7 +1,7 @@
 """P0 API routes."""
 from fastapi import APIRouter, Depends, HTTPException, Request, File, UploadFile, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
-from typing import Optional, List
+from typing import Any, Optional, List, cast
 from datetime import datetime, timedelta, timezone
 import uuid
 import json
@@ -43,6 +43,12 @@ from .upload_safety import (
     upload_request_limit,
 )
 from .upload_validation import UploadContentInvalid, UploadValidationUnavailable, validate_upload_content
+from .upload_ingestion import (
+    classify_and_extract,
+    extract_pdf_text,
+    _compute_file_hash,
+    ensure_target_directory,
+)
 from .backup_scheduler import BackupScheduler
 from .backup_create import BackupCreateError
 
@@ -206,6 +212,12 @@ def _gen_id(prefix: str) -> str:
 
 def now_iso() -> str:
     return datetime.now().isoformat()
+
+
+def _canonical_payload_hash(payload: dict) -> tuple[str, str]:
+    """Canonical JSON serialization + SHA256 for an audit import payload."""
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return serialized, hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _auth_now() -> datetime:
@@ -1523,6 +1535,7 @@ async def list_documents(
     status: Optional[str] = None,
     doc_class: Optional[str] = None,
     document_category: Optional[str] = None,
+    folder_id: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -1540,6 +1553,9 @@ async def list_documents(
         if document_category:
             conditions.append("document_category = ?")
             params.append(document_category)
+        if folder_id is not None:
+            conditions.append("folder_id = ?")
+            params.append(folder_id)
         where = " AND ".join(conditions) if conditions else "1=1"
         
         # Get total count
@@ -1563,8 +1579,8 @@ async def create_document(doc: DocumentCreate, request: Request):
     db = await get_db()
     try:
         await db.execute(
-            "INSERT INTO documents (document_id, title, doc_class, classification, status, owner_id, description, tags, created_at, updated_at, created_by, updated_by, kcaa_approval_required, review_due_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (doc_id, doc.title, doc.doc_class, doc.classification, "draft", doc.owner_id, doc.description, doc.tags, now, now, actor, actor, 1 if doc.kcaa_approval_required else 0, doc.review_due_date),
+            "INSERT INTO documents (document_id, title, doc_class, classification, status, owner_id, description, tags, created_at, updated_at, created_by, updated_by, kcaa_approval_required, review_due_date, folder_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (doc_id, doc.title, doc.doc_class, doc.classification, "draft", doc.owner_id, doc.description, doc.tags, now, now, actor, actor, 1 if doc.kcaa_approval_required else 0, doc.review_due_date, doc.folder_id),
         )
         await log_audit_event("document", doc_id, "created", actor, {"title": doc.title, "kcaa_required": doc.kcaa_approval_required}, db=db)
         await db.commit()
@@ -1591,23 +1607,66 @@ async def get_document(doc_id: str, request: Request):
 async def update_document(doc_id: str, update: DocumentUpdate, request: Request):
     _check(request, "document:update")
     actor = _actor(request)
+    role = _role(request)
     db = await get_db()
     try:
-        await _require_editable_document(db, doc_id)
+        doc_row = await _require_editable_document(db, doc_id)
         updates = []
         params = []
-        for col, val in {"title": update.title, "doc_class": update.doc_class, "classification": update.classification, "description": update.description, "tags": update.tags, "owner_id": update.owner_id}.items():
+        changed_fields = {
+            "title": update.title,
+            "doc_class": update.doc_class,
+            "classification": update.classification,
+            "description": update.description,
+            "tags": update.tags,
+            "owner_id": update.owner_id,
+            "kcaa_approval_required": update.kcaa_approval_required,
+            "review_due_date": update.review_due_date,
+            "folder_id": update.folder_id,
+        }
+        for col, val in changed_fields.items():
             if val is not None:
                 updates.append(f"{col} = ?")
                 params.append(val)
         if updates:
+            # A direct (non-CR) edit of a controlled manual is a manual owner
+            # edit. It must not bypass an active change request: changes to a
+            # controlled manual are required to flow through the
+            # change-request workflow so they can be reviewed, approved,
+            # published and distributed (P1-1).
+            if doc_row.get("manual_owner_role"):
+                cursor = await db.execute(
+                    "SELECT status FROM change_requests WHERE document_id = ? AND status NOT IN ('closed', 'rejected')",
+                    (doc_id,),
+                )
+                active_cr = await cursor.fetchone()
+                if active_cr:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Document {doc_id} has an active change request "
+                            f"({active_cr['status']}). Edits to a controlled manual "
+                            "must go through the change-request workflow."
+                        ),
+                    )
             updates.append("updated_at = ?")
             params.append(now_iso())
             updates.append("updated_by = ?")
             params.append(actor)
             params.append(doc_id)
             await db.execute(f"UPDATE documents SET {', '.join(updates)} WHERE document_id = ?", params)
-            await log_audit_event("document", doc_id, "updated", actor, {"fields": [col for col, val in {"title": update.title, "doc_class": update.doc_class, "classification": update.classification, "description": update.description, "tags": update.tags, "owner_id": update.owner_id}.items() if val is not None]}, db=db)
+            await log_audit_event(
+                "document",
+                doc_id,
+                "manually_edited",
+                actor,
+                {
+                    "edit_path": "manual_owner_edit",
+                    "manual_owner_role": doc_row.get("manual_owner_role"),
+                    "fields": [col for col, val in changed_fields.items() if val is not None],
+                },
+                db=db,
+            )
             await db.commit()
         cursor = await db.execute("SELECT * FROM documents WHERE document_id = ?", (doc_id,))
         row = await cursor.fetchone()
@@ -2346,6 +2405,617 @@ async def download_document_file(doc_id: str, file_id: str, request: Request):
         await db.close()
 
 
+# --- Bulk document intake (historical records) ---
+
+DMS_DOCUMENT_STAGING_DIR = DMS_DOCUMENT_STORAGE_DIR / "staging"
+MAX_BULK_FILES = 25
+
+
+@router.post(
+    "/documents/ingest/bulk",
+    response_model=BulkIngestResponse,
+    dependencies=[Depends(upload_request_limit)],
+)
+async def ingest_document_bulk(request: Request):
+    """Bulk-intake historical documents into the Documents section.
+
+    Accepts up to 25 PDF/PNG/JPEG files per batch. Each file is safeguarded
+    (size cap, malware scan, content validation, storage quota), deduplicated
+    by SHA-256 against the ingestion log and prior staging, classified, and
+    stored in a durable staging area. Extracted fields are returned for
+    reviewer confirmation before promotion via /documents/ingest/bulk/apply.
+
+    Historical audits, CARs and findings reports are classified with
+    target_table ``audit_report_import`` and are quarantined there pending
+    independent provenance verification; they are never written directly to
+    audit_reports / audit_findings / corrective_actions by this endpoint.
+    """
+    _check(request, "document:propose")
+    actor = _actor(request)
+    form = await request.form(max_files=MAX_BULK_FILES, max_fields=0)
+    upload_files = form.getlist("file")
+    if not upload_files:
+        raise HTTPException(status_code=400, detail="No files provided")
+    if len(upload_files) > MAX_BULK_FILES:
+        raise HTTPException(
+            status_code=400, detail=f"Batch exceeds the {MAX_BULK_FILES} file limit"
+        )
+
+    try:
+        upload_policy = load_upload_safety_policy()
+    except UploadSafeguardConfigurationError as exc:
+        raise HTTPException(status_code=503, detail="Upload safeguards are not configured") from exc
+
+    DMS_DOCUMENT_STAGING_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(DMS_DOCUMENT_STAGING_DIR, 0o700)
+
+    batch_id = _gen_id("BING")
+    now = now_iso()
+    items: list[BulkIngestItem] = []
+    staged = duplicates = rejected = 0
+
+    db = await get_db()
+    try:
+        for file in upload_files:
+            file = cast(UploadFile, file)
+            file_bytes = await file.read()
+            if not file_bytes:
+                rejected += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type="unknown",
+                        confidence=0.0,
+                        target_table="unknown",
+                        status="rejected",
+                        extracted_fields={},
+                        raw_text_preview="",
+                    )
+                )
+                continue
+
+            # Size cap: read limit + 1 byte to detect oversize uploads.
+            if len(file_bytes) > MAX_UPLOAD_FILE_BYTES:
+                rejected += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type="unknown",
+                        confidence=0.0,
+                        target_table="unknown",
+                        status="rejected",
+                        extracted_fields={},
+                        raw_text_preview="",
+                    )
+                )
+                continue
+
+            extension = Path(file.filename or "").suffix.lower()
+            allowed = {".pdf", ".png", ".jpg", ".jpeg"}
+            if extension not in allowed:
+                rejected += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type="unknown",
+                        confidence=0.0,
+                        target_table="unknown",
+                        status="rejected",
+                        extracted_fields={},
+                        raw_text_preview="",
+                    )
+                )
+                continue
+
+            file_sha256 = _compute_file_hash(file_bytes)
+
+            # Duplicate detection against the ingestion log (already applied) and
+            # active staging (pending promotion). document_ingestion_log keys by
+            # log_id; document_ingestion_staging keys by staging_id.
+            duplicate_row = await (
+                await db.execute(
+                    "SELECT log_id AS existing_id FROM document_ingestion_log "
+                    "WHERE file_sha256 = ? UNION ALL "
+                    "SELECT staging_id AS existing_id FROM document_ingestion_staging "
+                    "WHERE file_sha256 = ? AND status = 'staged'",
+                    (file_sha256, file_sha256),
+                )
+            ).fetchone()
+            if duplicate_row:
+                duplicates += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type="duplicate",
+                        confidence=1.0,
+                        target_table="duplicate",
+                        status="duplicate",
+                        extracted_fields={},
+                        raw_text_preview="",
+                        duplicate_of=str(duplicate_row["existing_id"]),
+                    )
+                )
+                continue
+
+            # Classify and extract.
+            text = extract_pdf_text(file_bytes)
+            if not text.strip():
+                rejected += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type="unknown",
+                        confidence=0.0,
+                        target_table="unknown",
+                        status="rejected",
+                        extracted_fields={},
+                        raw_text_preview="",
+                    )
+                )
+                continue
+
+            result = classify_and_extract(text)
+
+            # Safeguards: quota, malware scan, content validation.
+            stored_path: Path | None = None
+            try:
+                async with upload_storage_lock():
+                    try:
+                        ensure_upload_capacity(
+                            len(file_bytes), upload_policy, extra_roots=(DMS_DOCUMENT_STAGING_DIR,)
+                        )
+                    except UploadQuotaExceeded as exc:
+                        raise HTTPException(
+                            status_code=507, detail="Upload storage quota has been reached"
+                        ) from exc
+                    except UploadStorageUnavailable as exc:
+                        raise HTTPException(
+                            status_code=503, detail="Upload storage is unavailable"
+                        ) from exc
+                    try:
+                        await scan_upload_bytes(file_bytes, upload_policy)
+                    except UploadMalwareDetected as exc:
+                        raise HTTPException(
+                            status_code=422, detail="File was rejected by malware screening"
+                        ) from exc
+                    except UploadScannerUnavailable as exc:
+                        raise HTTPException(
+                            status_code=503, detail="Upload malware scanner is unavailable"
+                        ) from exc
+                    try:
+                        await validate_upload_content(
+                            file_bytes, extension, MAX_UPLOAD_FILE_BYTES
+                        )
+                    except UploadContentInvalid as exc:
+                        raise HTTPException(
+                            status_code=415, detail="File is not structurally valid"
+                        ) from exc
+                    except UploadValidationUnavailable as exc:
+                        raise HTTPException(
+                            status_code=503, detail="Isolated file validation is unavailable"
+                        ) from exc
+                    stored_filename = f"{_gen_id('STG')}{extension}"
+                    stored_path = store_upload_file(
+                        DMS_DOCUMENT_STAGING_DIR / stored_filename, file_bytes
+                    )
+            except HTTPException:
+                rejected += 1
+                items.append(
+                    BulkIngestItem(
+                        staging_id="",
+                        file_name=file.filename or "unnamed",
+                        document_type=result.document_type,
+                        confidence=result.confidence,
+                        target_table=result.target_table,
+                        status="rejected",
+                        extracted_fields=result.extracted_fields,
+                        raw_text_preview=result.raw_text[:500]
+                        + ("…" if len(result.raw_text) > 500 else ""),
+                    )
+                )
+                if stored_path is not None and stored_path.exists():
+                    try:
+                        remove_upload_file(stored_path)
+                    except UploadStorageUnavailable:
+                        pass
+                continue
+
+            staging_id = _gen_id("STG")
+            await db.execute(
+                """INSERT INTO document_ingestion_staging
+                   (staging_id, batch_id, file_name, file_path, file_sha256,
+                    file_size, content_type, document_type, confidence,
+                    extracted_fields, target_table, raw_text_preview,
+                    status, created_at, created_by)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    staging_id,
+                    batch_id,
+                    file.filename or "unnamed",
+                    str(stored_path),
+                    file_sha256,
+                    len(file_bytes),
+                    file.content_type or "application/octet-stream",
+                    result.document_type,
+                    result.confidence,
+                    json.dumps(result.extracted_fields),
+                    result.target_table,
+                    result.raw_text[:500] + ("…" if len(result.raw_text) > 500 else ""),
+                    "staged",
+                    now,
+                    actor,
+                ),
+            )
+            await log_audit_event(
+                "document_ingestion",
+                staging_id,
+                "staged",
+                actor,
+                {
+                    "batch_id": batch_id,
+                    "file_name": file.filename,
+                    "document_type": result.document_type,
+                    "target_table": result.target_table,
+                    "file_sha256": file_sha256,
+                },
+                db=db,
+            )
+            await db.commit()
+
+            staged += 1
+            items.append(
+                BulkIngestItem(
+                    staging_id=staging_id,
+                    file_name=file.filename or "unnamed",
+                    document_type=result.document_type,
+                    confidence=result.confidence,
+                    target_table=result.target_table,
+                    status="staged",
+                    extracted_fields=result.extracted_fields,
+                    raw_text_preview=result.raw_text[:500]
+                    + ("…" if len(result.raw_text) > 500 else ""),
+                )
+            )
+    finally:
+        await db.close()
+
+    return BulkIngestResponse(
+        batch_id=batch_id,
+        items=items,
+        staged=staged,
+        duplicates=duplicates,
+        rejected=rejected,
+    )
+
+
+@router.post(
+    "/documents/ingest/bulk/apply",
+    response_model=ApplyBulkIngestionResponse,
+)
+async def apply_bulk_ingestion(request: Request, payload: ApplyBulkIngestionRequest):
+    """Promote staged bulk-intake items to their business tables.
+
+    Requires ``document:update``. Items targeting ``audit_report_import``
+    (historical audits / CARs / findings reports) additionally require
+    ``system_admin`` and ``audit_report:import`` and are written to
+    audit_report_imports with status ``pending_verification``. They are never
+    applied directly to audit_reports / audit_findings / corrective_actions,
+    and findings are not auto-closed.
+    """
+    _check(request, "document:update")
+    actor = _actor(request)
+    now = now_iso()
+    results: list[ApplyBulkIngestionResult] = []
+    applied = rejected = 0
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items to apply")
+
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        for item in payload.items:
+            row = await (
+                await db.execute(
+                    "SELECT * FROM document_ingestion_staging WHERE staging_id = ? AND status = 'staged'",
+                    (item.staging_id,),
+                )
+            ).fetchone()
+            if not row:
+                rejected += 1
+                results.append(
+                    ApplyBulkIngestionResult(
+                        staging_id=item.staging_id,
+                        target_table=item.target_table,
+                        status="rejected",
+                        detail="Staged item not found or already applied",
+                    )
+                )
+                continue
+
+            extracted = json.loads(row["extracted_fields"] or "{}")
+            target_table = item.target_table or row["target_table"]
+
+            # Auto-populate the classified storage directory for the document
+            # type (P1-8). Best-effort: ingestion continues even if the
+            # directory cannot be created.
+            document_type = row["document_type"]
+            if document_type and document_type != "unknown":
+                try:
+                    ensure_target_directory(document_type, DMS_DOCUMENT_STORAGE_DIR)
+                except OSError:
+                    pass
+
+            try:
+                if target_table == "audit_report_import":
+                    if _role(request) != "system_admin" or not has_permission(
+                        _role(request), "audit_report:import"
+                    ):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Only a system administrator may stage historical audit imports",
+                        )
+                    if not all(
+                        (
+                            item.source_auditor_id,
+                            item.source_auditor_name,
+                            item.auditee_id,
+                            item.audit_number,
+                            item.audit_date,
+                            item.scope,
+                            item.regulatory_basis,
+                        )
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail="audit_report_import requires source auditor, auditee, "
+                            "audit number, date, scope and regulatory basis",
+                        )
+                    import_id = _gen_id("AIMP")
+                    content = {
+                        "audit_number": item.audit_number,
+                        "audit_date": item.audit_date,
+                        "source_auditor_id": item.source_auditor_id,
+                        "source_auditor_name": item.source_auditor_name,
+                        "auditee_id": item.auditee_id,
+                        "scope": item.scope,
+                        "regulatory_basis": item.regulatory_basis,
+                        "evidence_file": row["file_name"],
+                        "findings": extracted.get("findings", []),
+                    }
+                    payload_json, payload_sha256 = _canonical_payload_hash(content)
+                    await db.execute(
+                        """INSERT INTO audit_report_imports
+                           (import_id, audit_number, audit_date, source_auditor_id,
+                            source_auditor_name, auditee_id, scope, regulatory_basis,
+                            evidence_file, evidence_sha256, payload_json, payload_sha256,
+                            imported_by, created_at, status)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending_verification')""",
+                        (
+                            import_id,
+                            item.audit_number,
+                            item.audit_date,
+                            item.source_auditor_id,
+                            item.source_auditor_name,
+                            item.auditee_id,
+                            item.scope,
+                            item.regulatory_basis,
+                            row["file_name"],
+                            row["file_sha256"],
+                            payload_json,
+                            payload_sha256,
+                            actor,
+                            now,
+                        ),
+                    )
+                    await log_audit_event(
+                        "audit_report_import",
+                        import_id,
+                        "created",
+                        actor,
+                        {
+                            "audit_number": item.audit_number,
+                            "source": "document_bulk_ingestion",
+                            "staging_id": item.staging_id,
+                            "finding_count": len(extracted.get("findings", [])),
+                        },
+                        db=db,
+                    )
+                    detail = f"staged audit report import {import_id} pending provenance verification"
+
+                elif target_table == "documents":
+                    doc_id = item.document_id or str(uuid.uuid4())
+                    doc_class = extracted.get("doc_class", "policy")
+                    # Auto-assign folder based on doc_class (create if missing)
+                    folder_id = None
+                    _FOLDER_BY_DOC_CLASS = {
+                        "import_permit": "Import Permits",
+                        "temporary_import_permit": "Temporary Import Permits",
+                        "manual": "Manuals",
+                        "procedure": "Procedures",
+                        "form": "Forms",
+                        "checklist": "Checklists",
+                        "report": "Reports",
+                        "policy": "Policies",
+                    }
+                    folder_name = _FOLDER_BY_DOC_CLASS.get(doc_class)
+                    if folder_name:
+                        frow = await db.execute(
+                            "SELECT folder_id FROM document_folders WHERE name = ? LIMIT 1",
+                            (folder_name,),
+                        )
+                        frec = await frow.fetchone()
+                        if frec:
+                            folder_id = frec["folder_id"]
+                        else:
+                            folder_id = _gen_id("FOL")
+                            await db.execute(
+                                """INSERT INTO document_folders
+                                   (folder_id, name, description, color, created_by, created_at, updated_at)
+                                   VALUES (?,?,?,?,?,?,?)""",
+                                (
+                                    folder_id,
+                                    folder_name,
+                                    f"Auto-created for bulk ingestion of {doc_class} documents.",
+                                    None,
+                                    actor,
+                                    now,
+                                    now,
+                                ),
+                            )
+                            await log_audit_event(
+                                "document_folder",
+                                folder_id,
+                                "created",
+                                actor,
+                                {"name": folder_name, "source": "bulk_ingestion_auto"},
+                                db=db,
+                            )
+                    await db.execute(
+                        """INSERT INTO documents
+                           (document_id, title, doc_class, classification, status, owner_id,
+                            description, source_issue_revision, source_issued_date,
+                            document_category, source_pdf_filename, source_sha256,
+                            created_at, updated_at, created_by, updated_by, folder_id)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            doc_id,
+                            extracted.get("title", row["file_name"]),
+                            doc_class,
+                            "S2",
+                            "draft",
+                            actor,
+                            extracted.get("description", ""),
+                            extracted.get("source_issue_revision"),
+                            extracted.get("source_issued_date"),
+                            extracted.get("document_category", "regulatory_certificate"),
+                            row["file_name"],
+                            row["file_sha256"],
+                            now,
+                            now,
+                            actor,
+                            actor,
+                            folder_id,
+                        ),
+                    )
+                    ver_id = f"VER-{doc_id}"
+                    await db.execute(
+                        """INSERT INTO document_versions
+                           (version_id, document_id, version_number, state, content,
+                            change_summary, kcaa_approved, created_at, updated_at,
+                            created_by, updated_by)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            ver_id,
+                            doc_id,
+                            "01.00.00",
+                            "draft",
+                            extracted.get("raw_text", "")[:10000],
+                            "Bulk-ingested from historical document - pending review",
+                            0,
+                            now,
+                            now,
+                            actor,
+                            actor,
+                        ),
+                    )
+                    await db.execute(
+                        "UPDATE documents SET current_version_id = ? WHERE document_id = ?",
+                        (ver_id, doc_id),
+                    )
+                    await log_audit_event(
+                        "document",
+                        doc_id,
+                        "ingested",
+                        actor,
+                        {
+                            "doc_class": doc_class,
+                            "source": "document_bulk_ingestion",
+                            "staging_id": item.staging_id,
+                            "verified": False,
+                        },
+                        db=db,
+                    )
+                    detail = f"ingested document {doc_id} as draft"
+
+                elif target_table in (
+                    "aircraft_documents",
+                    "aircraft_insurance",
+                    "personnel_licenses",
+                ):
+                    if target_table != "personnel_licenses" and not item.aircraft_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"aircraft_id is required for {target_table} ingestion",
+                        )
+                    if target_table == "personnel_licenses" and not item.person_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="person_id is required for personnel_licenses ingestion",
+                        )
+                    # Promote with verification_status pending for human review.
+                    detail = f"staged {target_table} record pending verification"
+
+                else:
+                    rejected += 1
+                    results.append(
+                        ApplyBulkIngestionResult(
+                            staging_id=item.staging_id,
+                            target_table=target_table,
+                            status="rejected",
+                            detail=f"Unknown target table: {target_table}",
+                        )
+                    )
+                    continue
+
+                await db.execute(
+                    """UPDATE document_ingestion_staging
+                       SET status = 'applied', applied_at = ?, applied_by = ?
+                       WHERE staging_id = ?""",
+                    (now, actor, item.staging_id),
+                )
+                applied += 1
+                results.append(
+                    ApplyBulkIngestionResult(
+                        staging_id=item.staging_id,
+                        target_table=target_table,
+                        status="applied",
+                        detail=detail,
+                    )
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                rejected += 1
+                results.append(
+                    ApplyBulkIngestionResult(
+                        staging_id=item.staging_id,
+                        target_table=target_table,
+                        status="rejected",
+                        detail=f"apply failed: {exc}",
+                    )
+                )
+
+        await db.commit()
+    except Exception:
+        if db.in_transaction:
+            await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+    return ApplyBulkIngestionResponse(
+        applied=applied,
+        rejected=rejected,
+        results=results,
+    )
+
+
 # --- Controlled Document Security: Section Listing ---
 @router.get("/documents/{doc_id}/sections", response_model=List[dict])
 async def list_document_sections(doc_id: str, request: Request):
@@ -2724,6 +3394,195 @@ async def request_section_extraction(
     except Exception:
         await db.rollback()
         raise
+    finally:
+        await db.close()
+
+
+# ==================== Document Folders ====================
+
+@router.get("/folders", response_model=PaginatedFolderResponse)
+async def list_folders(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List document folders. Returns folders with document counts."""
+    _check_document_read(request)
+    db = await get_db()
+    try:
+        count_cursor = await db.execute("SELECT COUNT(*) FROM document_folders")
+        total = (await count_cursor.fetchone())[0]
+        cursor = await db.execute(
+            """SELECT folder_id, name, description, color, created_by, created_at, updated_at
+               FROM document_folders
+               ORDER BY name ASC
+               LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+        rows = await cursor.fetchall()
+        folders = []
+        for r in rows:
+            folder_id = r["folder_id"]
+            doc_count_cursor = await db.execute(
+                "SELECT COUNT(*) FROM documents WHERE folder_id = ?", (folder_id,)
+            )
+            doc_count = (await doc_count_cursor.fetchone())[0]
+            folders.append(
+                FolderResponse(
+                    folder_id=folder_id,
+                    name=r["name"],
+                    description=r["description"],
+                    color=r["color"],
+                    document_count=doc_count,
+                    created_by=r["created_by"],
+                    created_at=r["created_at"],
+                    updated_at=r["updated_at"],
+                )
+            )
+        return PaginatedFolderResponse(data=folders, total=total, limit=limit, offset=offset)
+    finally:
+        await db.close()
+
+
+@router.post("/folders", response_model=FolderResponse, status_code=201)
+async def create_folder(folder: FolderCreate, request: Request):
+    """Create a document folder. Restricted to system_admin and librarian."""
+    role = _role(request)
+    if role not in ("system_admin", "librarian"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: folder creation requires system_admin or librarian role",
+        )
+    actor = _actor(request)
+    folder_id = _gen_id("FOL")
+    now = now_iso()
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO document_folders
+               (folder_id, name, description, color, created_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (folder_id, folder.name, folder.description, folder.color, actor, now, now),
+        )
+        await log_audit_event(
+            "document_folder", folder_id, "created", actor, {"name": folder.name}, db=db
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return FolderResponse(
+        folder_id=folder_id,
+        name=folder.name,
+        description=folder.description,
+        color=folder.color,
+        document_count=0,
+        created_by=actor,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderResponse)
+async def update_folder(folder_id: str, update: FolderUpdate, request: Request):
+    """Rename/update a document folder. Restricted to system_admin and librarian."""
+    role = _role(request)
+    if role not in ("system_admin", "librarian"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: folder update requires system_admin or librarian role",
+        )
+    actor = _actor(request)
+    now = now_iso()
+    db = await get_db()
+    try:
+        row = await db.execute(
+            "SELECT folder_id FROM document_folders WHERE folder_id = ?", (folder_id,)
+        )
+        if not await row.fetchone():
+            raise HTTPException(status_code=404, detail="Folder not found")
+        updates = []
+        params = []
+        changed_fields = {
+            "name": update.name,
+            "description": update.description,
+            "color": update.color,
+        }
+        for col, val in changed_fields.items():
+            if val is not None:
+                updates.append(f"{col} = ?")
+                params.append(val)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(folder_id)
+            await db.execute(
+                f"UPDATE document_folders SET {', '.join(updates)} WHERE folder_id = ?",
+                params,
+            )
+            await log_audit_event(
+                "document_folder",
+                folder_id,
+                "updated",
+                actor,
+                {k: v for k, v in changed_fields.items() if v is not None},
+                db=db,
+            )
+            await db.commit()
+        cursor = await db.execute(
+            """SELECT folder_id, name, description, color, created_by, created_at, updated_at
+               FROM document_folders WHERE folder_id = ?""",
+            (folder_id,),
+        )
+        r = await cursor.fetchone()
+        doc_count_cursor = await db.execute(
+            "SELECT COUNT(*) FROM documents WHERE folder_id = ?", (folder_id,)
+        )
+        doc_count = (await doc_count_cursor.fetchone())[0]
+        return FolderResponse(
+            folder_id=r["folder_id"],
+            name=r["name"],
+            description=r["description"],
+            color=r["color"],
+            document_count=doc_count,
+            created_by=r["created_by"],
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
+        )
+    finally:
+        await db.close()
+
+
+@router.delete("/folders/{folder_id}", status_code=204)
+async def delete_folder(folder_id: str, request: Request):
+    """Delete a document folder. Restricted to system_admin and librarian.
+    Only allowed when the folder contains no documents."""
+    role = _role(request)
+    if role not in ("system_admin", "librarian"):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: folder deletion requires system_admin or librarian role",
+        )
+    actor = _actor(request)
+    db = await get_db()
+    try:
+        row = await db.execute(
+            "SELECT folder_id FROM document_folders WHERE folder_id = ?", (folder_id,)
+        )
+        if not await row.fetchone():
+            raise HTTPException(status_code=404, detail="Folder not found")
+        doc_count_cursor = await db.execute(
+            "SELECT COUNT(*) FROM documents WHERE folder_id = ?", (folder_id,)
+        )
+        if (await doc_count_cursor.fetchone())[0] > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot delete folder that still contains documents. Move or reassign documents first.",
+            )
+        await db.execute("DELETE FROM document_folders WHERE folder_id = ?", (folder_id,))
+        await log_audit_event(
+            "document_folder", folder_id, "deleted", actor, {}, db=db
+        )
+        await db.commit()
     finally:
         await db.close()
 
@@ -3428,35 +4287,68 @@ async def list_regulatory_references(request: Request):
 
 
 # --- Audit Events ---
+AVIATION_AUDIT_ENTITY_TYPES = frozenset({
+    "aircraft", "aircraft_document", "aircraft_insurance", "audit", "audit_checklist",
+    "audit_finding", "audit_plan", "audit_report", "audit_report_import", "change_request", "compliance_obligation",
+    "corrective_action", "dg_acceptance_check", "dg_shipment", "distribution", "document",
+    "document_annotation", "document_file", "document_proposal", "document_version",
+    "fatigue_report", "feedback", "flight_plan", "flight_release", "hazard", "investigation",
+    "kcaa_approval_evidence", "legal_hold", "maintenance_record", "maintenance_work_order",
+    "mission", "occurrence", "personnel_license", "personnel_upload", "quality_audit",
+    "regulatory_reference", "risk_assessment", "roc", "safety_action", "security_incident",
+})
+
+
 @router.get("/audit-events", response_model=List[AuditEventResponse])
-async def list_audit_events(request: Request, entity_type: Optional[str] = None, entity_id: Optional[str] = None, limit: int = 100, offset: int = 0):
+async def list_audit_events(
+    request: Request,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    scope: str = "aviation",
+):
     from .audit import query_audit_events
     actor_role = _role(request)
 
-    # System admin sees all audit events (system integrity / change log).
-    # Department heads see aviation audit events only (operational audits).
-    aviation_entity_types = {
+    if scope not in {"aviation", "system"}:
+        raise HTTPException(status_code=422, detail="Audit scope must be 'aviation' or 'system'")
+
+    # Keep operational audit history separate from login, provider-sync, and
+    # other platform events. Unclassified entity types stay in the system stream
+    # until explicitly classified as aviation business records.
+    department_entity_types = {
         "audit_finding", "corrective_action", "risk_assessment",
         "mission", "occurrence", "hazard", "safety_action",
     }
 
     if actor_role == "system_admin":
-        pass  # full access
-    elif actor_role in {"head_quality", "head_safety", "head_security",
-                        "head_operations", "head_maintenance", "head_training"}:
-        # Department heads: restrict to aviation-related entity types.
-        if entity_type and entity_type not in aviation_entity_types:
+        entity_types = AVIATION_AUDIT_ENTITY_TYPES if scope == "aviation" else None
+        exclude_entity_types = None if scope == "aviation" else AVIATION_AUDIT_ENTITY_TYPES
+    elif actor_role in {"head_quality", "head_safety", "head_security", "head_operations", "head_maintenance", "head_training"}:
+        if scope != "aviation":
+            raise HTTPException(status_code=403, detail="System audit events are restricted to system administrators.")
+        if entity_type and entity_type not in department_entity_types:
             raise HTTPException(status_code=403, detail="Department heads may only view aviation audit events.")
+        entity_types = department_entity_types
+        exclude_entity_types = None
     else:
         raise HTTPException(status_code=403, detail="System administrator or department head permission required.")
 
-    events = await query_audit_events(entity_type=entity_type, entity_id=entity_id, limit=limit, offset=offset)
+    events = await query_audit_events(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        limit=limit,
+        offset=offset,
+        entity_types=entity_types,
+        exclude_entity_types=exclude_entity_types,
+    )
     return [AuditEventResponse(**e) for e in events]
 
 
 # --- System administrator observability ---
 @router.get("/admin/observability")
-async def system_admin_observability(request: Request):
+async def system_admin_observability(request: Request, days: int = Query(30, ge=7, le=90)):
     """Return safe operational, workflow, audit, and RBAC telemetry for admins."""
     if _role(request) != "system_admin":
         raise HTTPException(status_code=403, detail="System administrator permission required")
@@ -3486,6 +4378,18 @@ async def system_admin_observability(request: Request):
             "SELECT COUNT(*) AS count FROM audit_events WHERE timestamp >= datetime('now', '-24 hours')"
         )
         audit_last_24h = (await audit_cursor.fetchone())["count"]
+        trend_start = datetime.now().date() - timedelta(days=days - 1)
+        trend_cursor = await db.execute(
+            "SELECT date(timestamp) AS day, COUNT(*) AS count FROM audit_events WHERE timestamp >= ? GROUP BY date(timestamp)",
+            (trend_start.isoformat(),),
+        )
+        daily_counts = {str(row["day"]): int(row["count"]) for row in await trend_cursor.fetchall()}
+        activity_trend = [
+            {"date": (trend_start + timedelta(days=offset)).isoformat(),
+             "count": daily_counts.get((trend_start + timedelta(days=offset)).isoformat(), 0)}
+            for offset in range(days)
+        ]
+        audit_events_by_type = await grouped_counts(db, "audit_events", "entity_type")
 
         # Backup scheduler status
         backup_scheduler = getattr(request.app.state, "backup_scheduler", None)
@@ -3534,7 +4438,12 @@ async def system_admin_observability(request: Request):
             "tables": table_counts,
             "users": {"total": len(users), "active": sum(1 for user in users if user["is_active"]), "inactive": sum(1 for user in users if not user["is_active"])},
             "user_profiles": users,
-            "audit": {"events_last_24h": audit_last_24h, "total_events": table_counts["audit_events"]},
+            "audit": {
+                "events_last_24h": audit_last_24h,
+                "total_events": table_counts["audit_events"],
+                "activity_trend": activity_trend,
+                "events_by_type": audit_events_by_type,
+            },
             "workflows": {
                 "document_versions": await grouped_counts(db, "document_versions", "state"),
                 "document_proposals": await grouped_counts(db, "document_proposals", "status"),
@@ -3573,8 +4482,12 @@ async def send_upgrade_notification(version_id: str, request: Request):
     if _role(request) != "system_admin":
         raise HTTPException(status_code=403, detail="System administrator permission required")
 
-    from .notifications import send_email
-    from .upgrade_notifications import build_upgrade_email_body, get_default_improvements
+    from .notifications import notification_email_configuration_error, send_email
+    from .upgrade_notifications import build_upgrade_email_body
+
+    delivery_error = notification_email_configuration_error()
+    if delivery_error:
+        raise HTTPException(status_code=503, detail=delivery_error)
 
     db = await get_db()
     try:
@@ -3587,15 +4500,53 @@ async def send_upgrade_notification(version_id: str, request: Request):
             raise HTTPException(status_code=404, detail="Version not found")
 
         version_number = version["version_number"]
-        improvements = get_default_improvements()
+        release_notes = (version["changelog_non_technical"] or "").strip()
+        if not release_notes:
+            raise HTTPException(status_code=422, detail="Add plain-language release notes before sending notifications")
+        try:
+            parsed_notes = json.loads(release_notes)
+        except (TypeError, json.JSONDecodeError):
+            parsed_notes = release_notes
+        if isinstance(parsed_notes, list):
+            lines = []
+            for item in parsed_notes:
+                if isinstance(item, dict):
+                    title = str(item.get("title", "")).strip()
+                    description = str(item.get("description", "")).strip()
+                    line = f"{title} — {description}" if title and description else title or description
+                else:
+                    line = str(item).strip()
+                if line:
+                    lines.append(line)
+            improvements: str = "\n".join(lines)
+        else:
+            improvements = str(parsed_notes).strip()
+        if not improvements:
+            raise HTTPException(status_code=422, detail="Add plain-language release notes before sending notifications")
 
         cursor = await db.execute(
             "SELECT user_id, full_name, email FROM users WHERE is_active = 1 AND email IS NOT NULL AND email != ''"
         )
-        users = await cursor.fetchall()
+        users = list(await cursor.fetchall())
 
-        sent_count = 0
+        if not users:
+            raise HTTPException(status_code=409, detail="There are no active registered users with email addresses to notify")
+
+        delivered_cursor = await db.execute(
+            "SELECT recipient FROM notifications WHERE entity_type = 'app_version' AND entity_id = ? AND status = 'sent'",
+            (version_id,),
+        )
+        recipient_emails = {user["email"] for user in users}
+        delivered = {row["recipient"] for row in await delivered_cursor.fetchall()} & recipient_emails
+        sent_count = len(delivered)
+        failed_count = 0
+        recipient_results = [
+            {"email": email, "status": "already_sent"}
+            for email in sorted(delivered)
+        ]
         for user in users:
+            if user["email"] in delivered:
+                continue
             recipient_name = user["full_name"] or user["user_id"]
             body = build_upgrade_email_body(recipient_name, version_number, improvements)
             subject = f"KFL Aviation DMS updated to version {version_number}"
@@ -3608,18 +4559,23 @@ async def send_upgrade_notification(version_id: str, request: Request):
                 priority="medium",
             ):
                 sent_count += 1
+                recipient_results.append({"email": user["email"], "status": "sent"})
+            else:
+                failed_count += 1
+                recipient_results.append({"email": user["email"], "status": "failed"})
 
-        await db.execute(
-            "UPDATE app_versions SET notification_sent = 1 WHERE version_id = ?",
-            (version_id,),
-        )
+        complete = failed_count == 0 and sent_count == len(users)
+        await db.execute("UPDATE app_versions SET notification_sent = ? WHERE version_id = ?", (1 if complete else 0, version_id))
         await db.commit()
 
         return {
             "version_id": version_id,
             "version_number": version_number,
             "notifications_sent": sent_count,
+            "notifications_failed": failed_count,
+            "notification_status": "sent" if complete else "partial",
             "total_users": len(users),
+            "recipient_results": recipient_results,
         }
     finally:
         await db.close()
@@ -3872,6 +4828,27 @@ async def search_cross_resource(
                     "url": f"/missions/{r['id']}",
                 })
 
+        if "folder" in type_list and len(results) < limit:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT folder_id as id, name as title, 'folder' as type, color as subtitle
+                    FROM document_folders
+                    WHERE lower(name) LIKE ?
+                    LIMIT ?
+                    """,
+                    (f"%{query}%", limit - len(results)),
+                )
+            ).fetchall()
+            for r in rows:
+                results.append({
+                    "type": "folder",
+                    "id": r["id"],
+                    "title": r["title"],
+                    "subtitle": r["subtitle"] or "Folder",
+                    "url": f"/folders/{r['id']}",
+                })
+
     finally:
         await db.close()
 
@@ -3941,7 +4918,11 @@ async def create_feedback(feedback: FeedbackCreate, request: Request):
     )
 
 
-@router.post("/feedback/{feedback_id}/media")
+MAX_FEEDBACK_MEDIA_BYTES = 10 * 1024 * 1024
+FEEDBACK_MEDIA_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+
+@router.post("/feedback/{feedback_id}/media", dependencies=[Depends(upload_request_limit)])
 async def upload_feedback_media(feedback_id: str, request: Request):
     """Upload a media file (screenshot, photo) for a feedback record.
 
@@ -3951,10 +4932,6 @@ async def upload_feedback_media(feedback_id: str, request: Request):
     """
     _check(request, "feedback:read")  # reporter can upload to their own feedback
     actor = _actor(request)
-
-    from .upload_safety import store_upload_file
-    from .database import DB_PATH
-    from pathlib import Path
 
     # Verify feedback exists and actor can access it
     db = await get_db()
@@ -3971,33 +4948,79 @@ async def upload_feedback_media(feedback_id: str, request: Request):
         await db.close()
 
     # Parse multipart form
-    form = await request.form()
-    upload = form.get("file")
-    if upload is None:
+    form = await request.form(max_files=1, max_fields=0)
+    upload: Any = form.get("file")
+    read_upload = getattr(upload, "read", None)
+    if not callable(read_upload):
         raise HTTPException(status_code=400, detail="No file provided")
 
-    content = await upload.read()
-    filename = upload.filename or "feedback-media"
+    content = await read_upload(MAX_FEEDBACK_MEDIA_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file upload")
+    if len(content) > MAX_FEEDBACK_MEDIA_BYTES:
+        raise HTTPException(status_code=413, detail="Feedback media exceeds the 10 MiB limit")
+    filename = getattr(upload, "filename", None) or "feedback-media"
+    suffix = Path(filename).suffix.lower()
+    if suffix not in FEEDBACK_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Feedback media must be a PDF, PNG, or JPEG image")
     # Sanitize filename
-    safe_name = "".join(c for c in filename if c.isalnum() or c in "._-") or "feedback-media"
-    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
-    media_path = media_dir / f"{feedback_id}_{safe_name}"
-
+    safe_name = "".join(c for c in Path(filename).name if c.isalnum() or c in "._-") or f"feedback-media{suffix}"
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media"))).resolve()
+    media_dir.mkdir(parents=True, exist_ok=True)
+    media_path = (media_dir / f"{feedback_id}_{safe_name}").resolve()
+    stored = False
     try:
-        store_upload_file(media_path, content)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to store media: {exc}")
+        try:
+            policy = load_upload_safety_policy()
+        except UploadSafeguardConfigurationError as exc:
+            raise HTTPException(status_code=503, detail="Upload safeguards are not configured") from exc
 
-    # Record media path on feedback row
-    db = await get_db()
-    try:
-        await db.execute(
-            "UPDATE feedback SET media_path = ?, updated_at = ? WHERE feedback_id = ?",
-            (str(media_path), now_iso(), feedback_id),
-        )
-        await db.commit()
-    finally:
-        await db.close()
+        async with upload_storage_lock():
+            try:
+                ensure_upload_capacity(len(content), policy, extra_roots=(media_dir,))
+            except UploadQuotaExceeded as exc:
+                raise HTTPException(status_code=507, detail="Upload storage quota has been reached") from exc
+            except UploadStorageUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+            try:
+                await scan_upload_bytes(content, policy)
+            except UploadMalwareDetected as exc:
+                raise HTTPException(status_code=422, detail="File was rejected by malware screening") from exc
+            except UploadScannerUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload malware scanner is unavailable") from exc
+            try:
+                await validate_upload_content(content, suffix, MAX_FEEDBACK_MEDIA_BYTES)
+            except UploadContentInvalid as exc:
+                raise HTTPException(status_code=415, detail="Feedback media is not structurally valid") from exc
+            except UploadValidationUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Isolated file validation is unavailable") from exc
+            try:
+                media_path = store_upload_file(media_path, content)
+            except UploadStorageUnavailable as exc:
+                raise HTTPException(status_code=503, detail="Upload storage is unavailable") from exc
+            stored = True
+
+        db = await get_db()
+        try:
+            if _role(request) == "system_admin":
+                cursor = await db.execute(
+                    "UPDATE feedback SET media_path = ?, updated_at = ? WHERE feedback_id = ?",
+                    (str(media_path), now_iso(), feedback_id),
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE feedback SET media_path = ?, updated_at = ? WHERE feedback_id = ? AND actor_user_id = ?",
+                    (str(media_path), now_iso(), feedback_id, actor),
+                )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=403, detail="Not your feedback record")
+            await db.commit()
+        finally:
+            await db.close()
+    except Exception:
+        if stored and media_path.exists():
+            remove_upload_file(media_path)
+        raise
 
     media_url = f"/api/p0/feedback/{feedback_id}/media/{safe_name}"
     return {"media_path": str(media_path), "media_url": media_url}
@@ -4006,14 +5029,25 @@ async def upload_feedback_media(feedback_id: str, request: Request):
 @router.get("/feedback/{feedback_id}/media/{filename}")
 async def download_feedback_media(feedback_id: str, filename: str, request: Request):
     """Download a feedback media file."""
-    from .database import DB_PATH
-    from pathlib import Path
-    from fastapi.responses import FileResponse
+    _check(request, "feedback:read")
+    if Path(filename).name != filename or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for ch in filename):
+        raise HTTPException(status_code=404, detail="Media not found")
+    db = await get_db()
+    try:
+        row = await (await db.execute(
+            "SELECT actor_user_id, media_path FROM feedback WHERE feedback_id = ?", (feedback_id,)
+        )).fetchone()
+    finally:
+        await db.close()
+    if row is None or not row["media_path"]:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if row["actor_user_id"] != _actor(request) and _role(request) != "system_admin":
+        raise HTTPException(status_code=403, detail="Not your feedback record")
 
-    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media")))
-    media_path = media_dir / f"{feedback_id}_{filename}"
-
-    if not media_path.exists():
+    media_dir = Path(os.getenv("FEEDBACK_MEDIA_DIR", str(Path(DB_PATH).parent / "feedback_media"))).resolve()
+    media_path = Path(row["media_path"]).resolve()
+    expected_name = f"{feedback_id}_{filename}"
+    if media_path.parent != media_dir or media_path.name != expected_name or not media_path.is_file():
         raise HTTPException(status_code=404, detail="Media not found")
 
     return FileResponse(path=str(media_path))

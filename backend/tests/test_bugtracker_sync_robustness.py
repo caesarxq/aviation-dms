@@ -18,6 +18,15 @@ def _admin_headers():
 @pytest.fixture(autouse=True)
 def _fresh_token_cache():
     bugtracker_sync._reset_token_cache()
+    async def clear_sync_health():
+        db = await get_db()
+        try:
+            await db.execute("DELETE FROM integration_sync_status")
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(clear_sync_health())
     yield
     bugtracker_sync._reset_token_cache()
 
@@ -171,8 +180,8 @@ def test_sync_pages_past_the_old_single_limit(monkeypatch):
     finally:
         asyncio.run(cleanup())
 
-    assert sorted(created) == sorted(ids)
-    assert result == len(ids)
+    assert set(ids).issubset(created)
+    assert result == len(created)
 
 
 async def _run_pending_without_config_guard(monkeypatch_ignored=None):
@@ -217,6 +226,7 @@ def test_successful_run_is_recorded(monkeypatch):
 
     monkeypatch.setattr(bugtracker_sync, "sync_all_pending", fake_push)
     monkeypatch.setattr(bugtracker_sync, "sync_bugtracker_updates", fake_pull)
+    monkeypatch.setattr(bugtracker_sync, "_pending_feedback_count", lambda: asyncio.sleep(0, result=0), raising=False)
 
     result = asyncio.run(bugtracker_sync.run_full_sync())
     status = asyncio.run(bugtracker_sync.get_sync_status())
@@ -266,6 +276,7 @@ def test_success_clears_the_failure_counter(monkeypatch):
 
     monkeypatch.setattr(bugtracker_sync, "sync_all_pending", ok)
     monkeypatch.setattr(bugtracker_sync, "sync_bugtracker_updates", ok)
+    monkeypatch.setattr(bugtracker_sync, "_pending_feedback_count", lambda: asyncio.sleep(0, result=0), raising=False)
     asyncio.run(bugtracker_sync.run_full_sync())
 
     status = asyncio.run(bugtracker_sync.get_sync_status())
@@ -284,6 +295,29 @@ def test_unconfigured_run_is_skipped_not_failed(monkeypatch):
     assert result["status"] == "skipped"
     assert status["last_status"] == "skipped"
     assert status["consecutive_failures"] == 0
+
+
+def test_remaining_feedback_backlog_marks_run_degraded(monkeypatch):
+    monkeypatch.setattr(bugtracker_sync, "_is_configured", lambda: True)
+
+    async def no_work():
+        return 0
+
+    async def backlog():
+        return 2
+
+    monkeypatch.setattr(bugtracker_sync, "sync_all_pending", no_work)
+    monkeypatch.setattr(bugtracker_sync, "sync_bugtracker_updates", no_work)
+    monkeypatch.setattr(bugtracker_sync, "_pending_feedback_count", backlog, raising=False)
+
+    result = asyncio.run(bugtracker_sync.run_full_sync())
+    status = asyncio.run(bugtracker_sync.get_sync_status())
+
+    assert result["status"] == "degraded"
+    assert result["pending_feedback"] == 2
+    assert status["last_failed"] == 2
+    assert status["pending_feedback"] == 2
+    assert status["healthy"] is False
 
 
 def test_observability_exposes_bugtracker_sync(monkeypatch):

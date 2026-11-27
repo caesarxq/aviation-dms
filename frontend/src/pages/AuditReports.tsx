@@ -66,6 +66,18 @@ export function AuditReports() {
     onError: () => setMutationError("Unable to create audit report. Please check the details and try again."),
   });
 
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      audit_number: auditNumber,
+      audit_date: auditDate,
+      auditor_id: auditorId.trim(),
+      auditee_id: auditeeId.trim(),
+      scope: scope || undefined,
+      regulatory_basis: regulatoryBasis || undefined,
+    });
+  };
+
   return (
     <div className="app-page">
       <header className="app-page-header">
@@ -166,25 +178,17 @@ export function AuditReports() {
               />
             </FormField>
           </div>
-          <Button
-            type="button"
-            disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
-            onClick={() =>
-              createMutation.mutate({
-                audit_number: auditNumber,
-                audit_date: auditDate,
-                auditor_id: auditorId.trim(),
-                auditee_id: auditeeId.trim(),
-                scope: scope || undefined,
-                regulatory_basis: regulatoryBasis || undefined,
-              })
-            }
-            variant="default"
-            size="sm"
-            className="w-full disabled:opacity-60"
-          >
-            {createMutation.isPending ? "Creating…" : "Create Audit"}
-          </Button>
+          <form onSubmit={handleCreate} className="space-y-2">
+            <Button
+              type="submit"
+              disabled={createMutation.isPending || !auditNumber.trim() || !auditDate || auditDate < todayUtc || !auditorId.trim() || !auditeeId.trim() || auditorId.trim() === auditeeId.trim()}
+              variant="default"
+              size="sm"
+              className="w-full disabled:opacity-60"
+            >
+              {createMutation.isPending ? "Creating…" : "Create Audit"}
+            </Button>
+          </form>
         </div>
       )}
 
